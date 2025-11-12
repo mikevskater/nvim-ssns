@@ -46,6 +46,11 @@ function Ssns.setup(user_config)
     )
   end
 
+  -- Setup UI highlights
+  local Highlights = require('ssns.ui.highlights')
+  Highlights.setup()
+  Highlights.setup_filetype()
+
   -- Register commands
   Ssns._register_commands()
 end
@@ -121,20 +126,30 @@ end
 
 ---Toggle the tree UI
 function Ssns.toggle()
-  -- TODO: Implement in Phase 4 (UI Tree Renderer)
-  vim.notify("SSNS: UI not yet implemented (Phase 4)", vim.log.levels.INFO)
+  local Buffer = require('ssns.ui.buffer')
+  local Tree = require('ssns.ui.tree')
+
+  Buffer.toggle()
+
+  -- If window was opened, render the tree
+  if Buffer.is_open() then
+    Tree.render()
+  end
 end
 
 ---Open the tree UI
 function Ssns.open()
-  -- TODO: Implement in Phase 4 (UI Tree Renderer)
-  vim.notify("SSNS: UI not yet implemented (Phase 4)", vim.log.levels.INFO)
+  local Buffer = require('ssns.ui.buffer')
+  local Tree = require('ssns.ui.tree')
+
+  Buffer.open()
+  Tree.render()
 end
 
 ---Close the tree UI
 function Ssns.close()
-  -- TODO: Implement in Phase 4 (UI Tree Renderer)
-  vim.notify("SSNS: UI not yet implemented (Phase 4)", vim.log.levels.INFO)
+  local Buffer = require('ssns.ui.buffer')
+  Buffer.close()
 end
 
 ---Refresh all servers
