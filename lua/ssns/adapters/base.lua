@@ -42,12 +42,24 @@ function BaseAdapter.new(db_type, connection_string)
   return self
 end
 
----Execute a query against the database
+---Execute a query against the database (synchronous)
 ---@param connection any The database connection object
 ---@param query string The SQL query to execute
 ---@return table results Array of result rows
 function BaseAdapter:execute(connection, query)
   error("BaseAdapter:execute() must be implemented by subclass")
+end
+
+---Execute a query against the database (asynchronous)
+---@param connection any The database connection object
+---@param query string The SQL query to execute
+---@param callback function Callback function(results, error)
+function BaseAdapter:execute_async(connection, query, callback)
+  -- Default implementation: delegate to sync version via schedule
+  vim.schedule(function()
+    local results = self:execute(connection, query)
+    callback(results, nil)
+  end)
 end
 
 ---Parse connection string and extract components

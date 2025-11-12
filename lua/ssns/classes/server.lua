@@ -93,11 +93,22 @@ function ServerClass:connect()
   self.connection_state = ConnectionState.CONNECTING
   self.error_message = nil
 
-  -- TODO: Implement actual connection via vim-dadbod
-  -- For now, simulate successful connection
-  -- This will be implemented in Phase 3 (Connection Management)
+  -- Use connection module to establish connection
+  local ConnectionModule = require('ssns.connection')
 
-  -- Placeholder: Mark as connected
+  -- Test the connection
+  local success, err = ConnectionModule.test(self.connection_string)
+
+  if not success then
+    self.connection_state = ConnectionState.ERROR
+    self.error_message = err or "Connection test failed"
+    return false, self.error_message
+  end
+
+  -- Create or get connection from pool
+  self.connection = ConnectionModule.get_or_create(self.connection_string)
+
+  -- Mark as connected
   self.connection_state = ConnectionState.CONNECTED
   self.last_connected_at = os.time()
 
@@ -110,8 +121,9 @@ function ServerClass:disconnect()
     return
   end
 
-  -- TODO: Close actual connection
-  -- For now, just reset state
+  -- Close connection in pool
+  local ConnectionModule = require('ssns.connection')
+  ConnectionModule.close(self.connection_string)
 
   self.connection = nil
   self.connection_state = ConnectionState.DISCONNECTED
@@ -141,9 +153,8 @@ function ServerClass:test_connection()
     return false, self.error_message or "No adapter available"
   end
 
-  -- TODO: Implement actual connection test
-  -- For now, assume success
-  return true, nil
+  local ConnectionModule = require('ssns.connection')
+  return ConnectionModule.test(self.connection_string)
 end
 
 ---Load databases from the server (lazy loading)
