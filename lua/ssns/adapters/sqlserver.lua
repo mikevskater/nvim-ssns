@@ -27,14 +27,55 @@ function SqlServerAdapter.new(connection_string)
 end
 
 ---Execute a query against SQL Server using vim-dadbod
----@param connection any The database connection object
+---@param connection any The database connection object or connection string
 ---@param query string The SQL query to execute
 ---@return table results Array of result rows
 function SqlServerAdapter:execute(connection, query)
-  -- TODO: Integrate with vim-dadbod for actual execution
-  -- For now, return empty results
-  -- This will be implemented when we integrate with db#query()
-  return {}
+  local ConnectionModule = require('ssns.connection')
+
+  -- Handle both connection object and connection string
+  local conn_str
+  if type(connection) == "string" then
+    conn_str = connection
+  elseif type(connection) == "table" and connection.connection_string then
+    conn_str = connection.connection_string
+  else
+    -- Fallback to adapter's connection string
+    conn_str = self.connection_string
+  end
+
+  -- Execute query
+  local results, err = ConnectionModule.execute_sync(conn_str, query)
+
+  if err then
+    -- Log error but return empty results for now
+    -- UI layer can check for errors separately
+    vim.notify(string.format("SSNS SQL Error: %s", err), vim.log.levels.WARN)
+    return {}
+  end
+
+  return results
+end
+
+---Execute a query against SQL Server asynchronously
+---@param connection any The database connection object or connection string
+---@param query string The SQL query to execute
+---@param callback function Callback function(results, error)
+function SqlServerAdapter:execute_async(connection, query, callback)
+  local ConnectionModule = require('ssns.connection')
+
+  -- Handle both connection object and connection string
+  local conn_str
+  if type(connection) == "string" then
+    conn_str = connection
+  elseif type(connection) == "table" and connection.connection_string then
+    conn_str = connection.connection_string
+  else
+    conn_str = self.connection_string
+  end
+
+  -- Execute async
+  ConnectionModule.execute_async(conn_str, query, callback)
 end
 
 ---Parse SQL Server connection string
@@ -82,9 +123,19 @@ end
 ---@return boolean success
 ---@return string? error_message
 function SqlServerAdapter:test_connection(connection)
-  -- TODO: Implement actual connection test
-  -- For now, assume success
-  return true, nil
+  local ConnectionModule = require('ssns.connection')
+
+  -- Handle both connection object and connection string
+  local conn_str
+  if type(connection) == "string" then
+    conn_str = connection
+  elseif type(connection) == "table" and connection.connection_string then
+    conn_str = connection.connection_string
+  else
+    conn_str = self.connection_string
+  end
+
+  return ConnectionModule.test(conn_str)
 end
 
 -- ============================================================================
