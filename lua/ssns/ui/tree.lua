@@ -410,6 +410,9 @@ function UiTree.toggle_node()
     return
   end
 
+  -- Check if we're expanding or collapsing
+  local was_expanded = obj.ui_state.expanded
+
   -- Toggle expansion
   obj:toggle_expand()
 
@@ -419,8 +422,52 @@ function UiTree.toggle_node()
   else
     -- Re-render tree immediately
     UiTree.render()
-    -- Restore cursor position
-    Buffer.set_cursor(line_number)
+
+    -- Check if smart cursor positioning is enabled
+    local Config = require('ssns.config')
+    local smart_positioning = Config.get_ui().smart_cursor_positioning
+
+    -- Position cursor appropriately
+    if obj.ui_state.expanded and not was_expanded then
+      -- Just expanded - move to first child if exists
+      if obj:has_children() or obj.ui_state.loading or obj.ui_state.error then
+        local child_line = line_number + 1
+        local col = smart_positioning and Buffer.get_name_column(child_line) or 0
+        Buffer.set_cursor(child_line, col)
+        -- Update indent tracking
+        if smart_positioning then
+          Buffer.last_indent_info = {
+            line = child_line,
+            indent_level = Buffer.get_indent_level(child_line),
+            column = col,
+          }
+        end
+      else
+        -- No children, stay on current line
+        local col = smart_positioning and Buffer.get_name_column(line_number) or 0
+        Buffer.set_cursor(line_number, col)
+        -- Update indent tracking
+        if smart_positioning then
+          Buffer.last_indent_info = {
+            line = line_number,
+            indent_level = Buffer.get_indent_level(line_number),
+            column = col,
+          }
+        end
+      end
+    else
+      -- Collapsed or stayed same - restore cursor position
+      local col = smart_positioning and Buffer.get_name_column(line_number) or 0
+      Buffer.set_cursor(line_number, col)
+      -- Update indent tracking
+      if smart_positioning then
+        Buffer.last_indent_info = {
+          line = line_number,
+          indent_level = Buffer.get_indent_level(line_number),
+          column = col,
+        }
+      end
+    end
   end
 end
 
@@ -429,6 +476,8 @@ end
 ---@param line_number number
 function UiTree.load_node_async(obj, line_number)
   local Buffer = require('ssns.ui.buffer')
+  local Config = require('ssns.config')
+  local smart_positioning = Config.get_ui().smart_cursor_positioning
 
   -- Set loading state
   obj.ui_state.loading = true
@@ -436,7 +485,8 @@ function UiTree.load_node_async(obj, line_number)
 
   -- Render with loading indicator
   UiTree.render()
-  Buffer.set_cursor(line_number)
+  local col = smart_positioning and Buffer.get_name_column(line_number) or 0
+  Buffer.set_cursor(line_number, col)
 
   -- Load asynchronously using vim.schedule
   vim.schedule(function()
@@ -455,7 +505,33 @@ function UiTree.load_node_async(obj, line_number)
 
     -- Re-render tree with results or error
     UiTree.render()
-    Buffer.set_cursor(line_number)
+
+    -- Position cursor at first child if loaded successfully
+    if success and obj:has_children() then
+      local child_line = line_number + 1
+      local child_col = smart_positioning and Buffer.get_name_column(child_line) or 0
+      Buffer.set_cursor(child_line, child_col)
+      -- Update indent tracking
+      if smart_positioning then
+        Buffer.last_indent_info = {
+          line = child_line,
+          indent_level = Buffer.get_indent_level(child_line),
+          column = child_col,
+        }
+      end
+    else
+      -- Error or no children, stay on current line
+      local col = smart_positioning and Buffer.get_name_column(line_number) or 0
+      Buffer.set_cursor(line_number, col)
+      -- Update indent tracking
+      if smart_positioning then
+        Buffer.last_indent_info = {
+          line = line_number,
+          indent_level = Buffer.get_indent_level(line_number),
+          column = col,
+        }
+      end
+    end
   end)
 end
 
@@ -668,6 +744,8 @@ end
 ---Refresh node at current cursor
 function UiTree.refresh_node()
   local Buffer = require('ssns.ui.buffer')
+  local Config = require('ssns.config')
+  local smart_positioning = Config.get_ui().smart_cursor_positioning
   local line_number = Buffer.get_current_line()
 
   -- Get object at current line
@@ -684,7 +762,8 @@ function UiTree.refresh_node()
 
     -- Render with loading indicator
     UiTree.render()
-    Buffer.set_cursor(line_number)
+    local col = smart_positioning and Buffer.get_name_column(line_number) or 0
+    Buffer.set_cursor(line_number, col)
 
     -- Reload asynchronously
     vim.schedule(function()
@@ -705,7 +784,16 @@ function UiTree.refresh_node()
 
       -- Re-render tree with results or error
       UiTree.render()
-      Buffer.set_cursor(line_number)
+      local col = smart_positioning and Buffer.get_name_column(line_number) or 0
+      Buffer.set_cursor(line_number, col)
+      -- Update indent tracking
+      if smart_positioning then
+        Buffer.last_indent_info = {
+          line = line_number,
+          indent_level = Buffer.get_indent_level(line_number),
+          column = col,
+        }
+      end
     end)
   end
 end
@@ -723,6 +811,8 @@ end
 ---Toggle connection for server/database at current cursor
 function UiTree.toggle_connection()
   local Buffer = require('ssns.ui.buffer')
+  local Config = require('ssns.config')
+  local smart_positioning = Config.get_ui().smart_cursor_positioning
   local line_number = Buffer.get_current_line()
 
   -- Get object at current line
@@ -738,8 +828,17 @@ function UiTree.toggle_connection()
     -- Re-render tree
     UiTree.render()
 
-    -- Restore cursor position
-    Buffer.set_cursor(line_number)
+    -- Restore cursor position with smart column
+    local col = smart_positioning and Buffer.get_name_column(line_number) or 0
+    Buffer.set_cursor(line_number, col)
+    -- Update indent tracking
+    if smart_positioning then
+      Buffer.last_indent_info = {
+        line = line_number,
+        indent_level = Buffer.get_indent_level(line_number),
+        column = col,
+      }
+    end
   else
     vim.notify("Can only toggle connection on servers/databases", vim.log.levels.WARN)
   end

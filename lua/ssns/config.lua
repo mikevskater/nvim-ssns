@@ -10,6 +10,7 @@
 ---@field ssms_style boolean Use SSMS-style UI
 ---@field show_schema_prefix boolean Show schema prefix in object names
 ---@field auto_expand_depth number? Auto-expand tree to this depth on load
+---@field smart_cursor_positioning boolean Enable smart cursor positioning on j/k movement (default: true)
 ---@field icons IconsConfig Icon configuration
 
 ---@class IconsConfig
@@ -44,6 +45,7 @@ local default_config = {
     ssms_style = true,
     show_schema_prefix = true,
     auto_expand_depth = nil,  -- nil = don't auto-expand
+    smart_cursor_positioning = true,  -- Enable smart cursor positioning on j/k
 
     icons = {
       server = "",
