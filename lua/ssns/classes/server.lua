@@ -200,7 +200,7 @@ function ServerClass:load()
       name = db_data.name,
       parent = databases_group,
     })
-    table.insert(databases_group.children, db)
+    -- Note: db is automatically added to databases_group.children by BaseDbObject.new()
   end
 
   -- Update the group name with count
