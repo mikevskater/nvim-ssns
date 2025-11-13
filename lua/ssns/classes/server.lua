@@ -173,27 +173,39 @@ function ServerClass:load()
     end
   end
 
-  -- Get databases query from adapter
+  -- Create UI structure similar to vim-dadbod-ui
+  self:clear_children()
+
+  -- TODO: Add "New Query" action node (Phase 6)
+
+  -- TODO: Add "Saved Queries (0)" group (Phase 6)
+
+  -- Create "Databases (N)" group
+  local databases_group = BaseDbObject.new({
+    name = "Databases",
+    parent = self,
+  })
+  databases_group.object_type = "databases_group"
+  databases_group.ui_state.icon = ""
+
+  -- Load databases
   local query = self.adapter:get_databases_query()
-
-  -- Execute query
-  -- TODO: Implement actual execution via vim-dadbod
-  -- For now, return empty results
   local results = self.adapter:execute(self.connection, query)
-
-  -- Parse results
   local databases = self.adapter:parse_databases(results)
 
-  -- Create database objects
-  self:clear_children()
+  -- Create database objects as children of the databases group
   for _, db_data in ipairs(databases) do
     local DbClass = require('ssns.classes.database')
     local db = DbClass.new({
       name = db_data.name,
-      parent = self,
+      parent = databases_group,
     })
-    -- add_child is called automatically in DbClass.new via parent parameter
+    table.insert(databases_group.children, db)
   end
+
+  -- Update the group name with count
+  databases_group.name = string.format("Databases (%d)", #databases_group.children)
+  databases_group.is_loaded = true
 
   self.is_loaded = true
   return true
