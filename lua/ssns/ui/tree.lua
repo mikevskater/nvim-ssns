@@ -63,12 +63,18 @@ function UiTree.render_server(server, lines, line_number, indent_level)
   UiTree.line_map[#lines] = server
   UiTree.object_map[server] = #lines
 
-  -- If expanded, render children
+  -- If expanded, render children (Databases group, etc.)
   if server.ui_state.expanded then
-    -- Render databases
     if server.is_loaded and server:has_children() then
-      for _, db in ipairs(server:get_databases()) do
-        UiTree.render_database(db, lines, indent_level + 1)
+      -- Render server children (Databases group, New Query, Saved Queries)
+      for _, child in ipairs(server.children) do
+        if child.object_type == "databases_group" then
+          -- Render databases group
+          UiTree.render_object(child, lines, indent_level + 1)
+        else
+          -- Render other server-level items (New Query, Saved Queries - Phase 6)
+          UiTree.render_object(child, lines, indent_level + 1)
+        end
       end
     elseif server:is_connected() and not server.is_loaded then
       -- Show loading indicator
@@ -94,11 +100,12 @@ function UiTree.render_database(db, lines, indent_level)
   UiTree.line_map[#lines] = db
   UiTree.object_map[db] = #lines
 
-  -- If expanded, render children
+  -- If expanded, render object type groups (TABLES, VIEWS, etc.)
   if db.ui_state.expanded then
     if db.is_loaded and db:has_children() then
-      for _, schema in ipairs(db:get_schemas()) do
-        UiTree.render_schema(schema, lines, indent_level + 1)
+      -- Render each object type group
+      for _, group in ipairs(db.children) do
+        UiTree.render_object(group, lines, indent_level + 1)
       end
     else
       table.insert(lines, indent .. "    Loading...")
@@ -184,6 +191,11 @@ function UiTree.render_object(obj, lines, indent_level)
     or obj.object_type == "view"
     or obj.object_type == "procedure"
     or obj.object_type == "function"
+    or obj.object_type == "databases_group"
+    or obj.object_type == "tables_group"
+    or obj.object_type == "views_group"
+    or obj.object_type == "procedures_group"
+    or obj.object_type == "functions_group"
     or obj.object_type == "column_group"
     or obj.object_type == "index_group"
     or obj.object_type == "key_group"
