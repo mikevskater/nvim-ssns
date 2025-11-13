@@ -5,7 +5,9 @@ local Connection = {}
 ---Check if vim-dadbod is available
 ---@return boolean available
 function Connection.is_dadbod_available()
-  return vim.fn.exists("*db#query") == 1
+  -- Check if we can find the autoload file
+  local db_path = vim.fn.globpath(vim.o.runtimepath, "autoload/db.vim")
+  return db_path ~= ""
 end
 
 ---Parse connection string into components
@@ -45,17 +47,10 @@ function Connection.test(connection_string)
   -- Try a simple query to test connection
   local test_query = "SELECT 1"
 
-  local success, result = pcall(function()
-    return vim.fn["db#query"](connection_string, test_query)
-  end)
+  local results, err = Connection.execute_sync(connection_string, test_query)
 
-  if not success then
-    return false, tostring(result)
-  end
-
-  -- Check if result indicates an error
-  if type(result) == "string" and result:match("Error") then
-    return false, result
+  if err then
+    return false, err
   end
 
   return true, nil
@@ -71,99 +66,115 @@ function Connection.execute_sync(connection_string, query)
     return {}, "vim-dadbod not available"
   end
 
-  -- Execute query using vim-dadbod
-  local success, result = pcall(function()
-    return vim.fn["db#query"](connection_string, query)
+  -- Get the connection URL
+  local conn_str = type(connection_string) == "string" and connection_string or connection_string.connection_string
+
+  -- Get the command array using db#adapter#dispatch
+  local success, cmd = pcall(function()
+    return vim.fn["db#adapter#dispatch"](conn_str, "interactive")
   end)
 
   if not success then
-    return {}, tostring(result)
+    return {}, "Failed to get database adapter: " .. tostring(cmd)
   end
 
-  -- Check if result is an error string
-  if type(result) == "string" then
-    -- Check if it's an error message
-    if result:match("Error") or result:match("error") then
-      return {}, result
+  -- Add sqlcmd flags for cleaner output
+  -- -h-1: Remove headers
+  -- -W: Remove trailing spaces
+  -- -s",": Use comma as column separator (easier to parse)
+  table.insert(cmd, "-h-1")
+  table.insert(cmd, "-W")
+  table.insert(cmd, "-s,")
+
+  -- Prepend SET NOCOUNT ON to prevent row count messages
+  local clean_query = "SET NOCOUNT ON;\n" .. query
+
+  -- Execute query using db#systemlist
+  local results_raw
+  success, results_raw = pcall(function()
+    return vim.fn["db#systemlist"](cmd, clean_query)
+  end)
+
+  if not success then
+    return {}, "Query execution failed: " .. tostring(results_raw)
+  end
+
+  -- Check if results indicate an error
+  if type(results_raw) == "table" and #results_raw > 0 then
+    local first_line = results_raw[1] or ""
+    if first_line:match("^Msg %d+") or first_line:match("^Error") then
+      return {}, table.concat(results_raw, "\n")
     end
-
-    -- Empty result or success message
-    return {}, nil
   end
 
-  -- Parse result based on format
-  local parsed_results = Connection.parse_result(result)
+  -- Parse the results
+  local parsed_results = Connection.parse_result(results_raw)
   return parsed_results, nil
 end
 
 ---Parse vim-dadbod result into table format
----@param result any Raw result from vim-dadbod
+---@param result any Raw result from vim-dadbod (array of lines or string)
 ---@return table parsed Array of row tables
 function Connection.parse_result(result)
-  -- If result is already a table, return it
+  local lines = {}
+
+  -- Convert result to lines array
   if type(result) == "table" then
-    return result
+    -- Already an array of lines from db#systemlist
+    lines = result
+  elseif type(result) == "string" then
+    -- Split string into lines
+    lines = vim.split(result, "\n", { plain = true })
+  else
+    return {}
   end
 
-  -- If result is a string, try to parse it
-  if type(result) == "string" then
-    -- Split by lines
-    local lines = vim.split(result, "\n", { plain = true })
+  if #lines == 0 then
+    return {}
+  end
 
-    if #lines == 0 then
-      return {}
-    end
+  -- With -h-1 and -s"," flags, sqlcmd output is:
+  -- - No headers (we use column names from query)
+  -- - Comma-separated values
+  -- - One row per line
+  -- - SET NOCOUNT ON prevents row count messages
 
-    -- Try to parse as table format
-    -- First line is often headers
-    local headers = {}
-    local data_start = 1
+  local rows = {}
+  for _, line in ipairs(lines) do
+    -- Skip empty lines and any remaining noise
+    if line and line ~= "" and not line:match("^%s*$") then
+      -- Skip lines that look like messages or errors
+      if not line:match("^Changed database context") and
+         not line:match("^Msg %d+") and
+         not line:match("^%(") and  -- Skip "(X rows affected)" if any slip through
+         not line:match("^Changed language setting") then
 
-    -- Look for header line (usually has | separators)
-    if lines[1]:match("|") then
-      -- Parse headers
-      for header in lines[1]:gmatch("([^|]+)") do
-        local trimmed = vim.trim(header)
-        if trimmed ~= "" then
-          table.insert(headers, trimmed)
-        end
-      end
-      data_start = 2
-
-      -- Skip separator line if present (usually all dashes)
-      if lines[2] and lines[2]:match("^[+-|]+$") then
-        data_start = 3
-      end
-    end
-
-    -- Parse data rows
-    local rows = {}
-    for i = data_start, #lines do
-      local line = lines[i]
-      if line and line ~= "" and line:match("|") then
-        local row = {}
-        local col_idx = 1
-
-        for value in line:gmatch("([^|]+)") do
+        -- Parse comma-separated values
+        local values = {}
+        for value in line:gmatch("([^,]+)") do
           local trimmed = vim.trim(value)
-          if trimmed ~= "" then
-            local key = headers[col_idx] or col_idx
-            row[key] = trimmed
-            col_idx = col_idx + 1
-          end
+          table.insert(values, trimmed)
         end
 
-        if vim.tbl_count(row) > 0 then
+        -- Create row object
+        -- Since we use -h-1, we don't have headers from sqlcmd
+        -- We rely on the adapter's parse methods to handle this
+        if #values > 0 then
+          local row = {}
+          for idx, value in ipairs(values) do
+            row[idx] = value  -- Store by numeric index
+            -- For single-column results, also store as 'name' for compatibility
+            if #values == 1 then
+              row.name = value
+            end
+          end
           table.insert(rows, row)
         end
       end
     end
-
-    return rows
   end
 
-  -- Unknown format, return empty
-  return {}
+  return rows
 end
 
 ---Execute an asynchronous query using vim-dadbod
