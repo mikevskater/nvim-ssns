@@ -93,7 +93,7 @@ function TableClass:create_action_nodes()
     self:load_columns()
     group:clear_children()
     for _, col in ipairs(self.columns) do
-      col.parent = group
+      -- Don't set parent - just add to children manually to avoid auto-add
       table.insert(group.children, col)
     end
     group.is_loaded = true
@@ -116,7 +116,7 @@ function TableClass:create_action_nodes()
     self:load_indexes()
     group:clear_children()
     for _, idx in ipairs(self.indexes) do
-      idx.parent = group
+      -- Don't set parent - just add to children manually to avoid auto-add
       table.insert(group.children, idx)
     end
     group.is_loaded = true
@@ -139,12 +139,22 @@ function TableClass:create_action_nodes()
     self:load_constraints()
     group:clear_children()
     for _, constraint in ipairs(self.constraints) do
-      constraint.parent = group
+      -- Don't set parent - just add to children manually to avoid auto-add
       table.insert(group.children, constraint)
     end
     group.is_loaded = true
     return true
   end
+
+  -- Add ALTER action
+  local alter_action = BaseDbObject.new({
+    name = "ALTER",
+    parent = self,
+  })
+  alter_action.ui_state.icon = ""
+  alter_action.object_type = "action"
+  alter_action.action_type = "alter"
+  alter_action.is_loaded = true
 
   -- Add DROP action
   local drop_action = BaseDbObject.new({
@@ -155,6 +165,16 @@ function TableClass:create_action_nodes()
   drop_action.object_type = "action"
   drop_action.action_type = "drop"
   drop_action.is_loaded = true
+
+  -- Add DEPENDENCIES action
+  local dependencies_action = BaseDbObject.new({
+    name = "DEPENDENCIES",
+    parent = self,
+  })
+  dependencies_action.ui_state.icon = ""
+  dependencies_action.object_type = "action"
+  dependencies_action.action_type = "dependencies"
+  dependencies_action.is_loaded = true
 end
 
 ---Load columns for this table (lazy loading)

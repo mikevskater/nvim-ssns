@@ -87,21 +87,21 @@ function ProcedureClass:create_action_nodes()
     self:load_parameters()
     group:clear_children()
     for _, param in ipairs(self.parameters) do
-      param.parent = group
+      -- Don't set parent - just add to children manually to avoid auto-add
       table.insert(group.children, param)
     end
     group.is_loaded = true
     return true
   end
 
-  -- Add Procedure Definition action
+  -- Add Procedure Definition action (ALTER shows definition)
   local definition_action = BaseDbObject.new({
-    name = "Procedure Definition",
+    name = "ALTER",
     parent = self,
   })
   definition_action.ui_state.icon = ""
   definition_action.object_type = "action"
-  definition_action.action_type = "definition"
+  definition_action.action_type = "alter"
   definition_action.is_loaded = true
 
   -- Add DROP action
@@ -113,6 +113,16 @@ function ProcedureClass:create_action_nodes()
   drop_action.object_type = "action"
   drop_action.action_type = "drop"
   drop_action.is_loaded = true
+
+  -- Add DEPENDENCIES action
+  local dependencies_action = BaseDbObject.new({
+    name = "DEPENDENCIES",
+    parent = self,
+  })
+  dependencies_action.ui_state.icon = ""
+  dependencies_action.object_type = "action"
+  dependencies_action.action_type = "dependencies"
+  dependencies_action.is_loaded = true
 end
 
 ---Load parameters for this procedure (lazy loading)
