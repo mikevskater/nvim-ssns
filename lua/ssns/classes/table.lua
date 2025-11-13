@@ -175,6 +175,61 @@ function TableClass:create_action_nodes()
   dependencies_action.object_type = "action"
   dependencies_action.action_type = "dependencies"
   dependencies_action.is_loaded = true
+
+  -- Add Actions group (table helpers)
+  local actions_group = BaseDbObject.new({
+    name = "Actions",
+    parent = self,
+  })
+  actions_group.ui_state.icon = ""
+  actions_group.object_type = "actions_group"
+  actions_group.is_loaded = true
+
+  -- Add helper actions to the group
+  local count_action = BaseDbObject.new({
+    name = "COUNT",
+    parent = actions_group,
+  })
+  count_action.ui_state.icon = ""
+  count_action.object_type = "action"
+  count_action.action_type = "count"
+  count_action.is_loaded = true
+
+  local describe_action = BaseDbObject.new({
+    name = "DESCRIBE",
+    parent = actions_group,
+  })
+  describe_action.ui_state.icon = ""
+  describe_action.object_type = "action"
+  describe_action.action_type = "describe"
+  describe_action.is_loaded = true
+
+  local insert_action = BaseDbObject.new({
+    name = "INSERT",
+    parent = actions_group,
+  })
+  insert_action.ui_state.icon = ""
+  insert_action.object_type = "action"
+  insert_action.action_type = "insert"
+  insert_action.is_loaded = true
+
+  local update_action = BaseDbObject.new({
+    name = "UPDATE",
+    parent = actions_group,
+  })
+  update_action.ui_state.icon = ""
+  update_action.object_type = "action"
+  update_action.action_type = "update"
+  update_action.is_loaded = true
+
+  local delete_action = BaseDbObject.new({
+    name = "DELETE",
+    parent = actions_group,
+  })
+  delete_action.ui_state.icon = ""
+  delete_action.object_type = "action"
+  delete_action.action_type = "delete"
+  delete_action.is_loaded = true
 end
 
 ---Load columns for this table (lazy loading)
@@ -452,6 +507,82 @@ function TableClass:generate_drop()
   )
 
   return string.format("DROP TABLE %s;", qualified_name)
+end
+
+---Generate a COUNT query for this table
+---@return string sql
+function TableClass:generate_count()
+  local adapter = self:get_adapter()
+  local qualified_name = adapter:get_qualified_name(
+    self.parent.parent.db_name,
+    self.schema_name,
+    self.table_name
+  )
+
+  return string.format("SELECT COUNT(*) AS row_count FROM %s;", qualified_name)
+end
+
+---Generate a DESCRIBE query for this table (sp_help for SQL Server)
+---@return string sql
+function TableClass:generate_describe()
+  local adapter = self:get_adapter()
+  local qualified_name = adapter:get_qualified_name(
+    self.parent.parent.db_name,
+    self.schema_name,
+    self.table_name
+  )
+
+  if adapter.db_type == "sqlserver" then
+    return string.format("EXEC sp_help '%s.%s';", self.schema_name, self.table_name)
+  else
+    -- For other databases, just show columns
+    return string.format("DESCRIBE %s;", qualified_name)
+  end
+end
+
+---Generate an UPDATE statement template for this table
+---@return string sql
+function TableClass:generate_update()
+  local adapter = self:get_adapter()
+  local qualified_name = adapter:get_qualified_name(
+    self.parent.parent.db_name,
+    self.schema_name,
+    self.table_name
+  )
+
+  local columns = self:get_columns()
+
+  if #columns == 0 then
+    return string.format("-- No columns found for %s", qualified_name)
+  end
+
+  -- Build SET clause (skip identity columns)
+  local set_parts = {}
+  for _, col in ipairs(columns) do
+    if not col.is_identity then
+      table.insert(set_parts, string.format("  %s = ?", col.column_name or col.name))
+    end
+  end
+
+  local sql = string.format("UPDATE %s\nSET\n%s\nWHERE -- Add your WHERE clause here\n  ?;",
+    qualified_name,
+    table.concat(set_parts, ",\n")
+  )
+
+  return sql
+end
+
+---Generate a DELETE statement template for this table
+---@return string sql
+function TableClass:generate_delete()
+  local adapter = self:get_adapter()
+  local qualified_name = adapter:get_qualified_name(
+    self.parent.parent.db_name,
+    self.schema_name,
+    self.table_name
+  )
+
+  return string.format("DELETE FROM %s\nWHERE -- Add your WHERE clause here\n  ?;", qualified_name)
 end
 
 ---Get the full qualified name for this table

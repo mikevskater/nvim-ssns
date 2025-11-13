@@ -201,6 +201,7 @@ function UiTree.render_object(obj, lines, indent_level)
     or obj.object_type == "index_group"
     or obj.object_type == "key_group"
     or obj.object_type == "parameter_group"
+    or obj.object_type == "actions_group"
 
   local icon = ""
   if has_children then
@@ -457,6 +458,36 @@ function UiTree.execute_action(action)
   elseif action.action_type == "dependencies" then
     -- Show dependencies
     UiTree.show_dependencies(parent)
+  elseif action.action_type == "count" then
+    -- Generate COUNT query
+    if parent.generate_count then
+      local sql = parent:generate_count()
+      Query.create_query_buffer(server, database, sql)
+    end
+  elseif action.action_type == "describe" then
+    -- Generate DESCRIBE query (sp_help for SQL Server)
+    if parent.generate_describe then
+      local sql = parent:generate_describe()
+      Query.create_query_buffer(server, database, sql)
+    end
+  elseif action.action_type == "insert" then
+    -- Generate INSERT template
+    if parent.generate_insert then
+      local sql = parent:generate_insert()
+      Query.create_query_buffer(server, database, sql)
+    end
+  elseif action.action_type == "update" then
+    -- Generate UPDATE template
+    if parent.generate_update then
+      local sql = parent:generate_update()
+      Query.create_query_buffer(server, database, sql)
+    end
+  elseif action.action_type == "delete" then
+    -- Generate DELETE template
+    if parent.generate_delete then
+      local sql = parent:generate_delete()
+      Query.create_query_buffer(server, database, sql)
+    end
   end
 end
 
