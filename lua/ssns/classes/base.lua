@@ -12,6 +12,8 @@ BaseDbObject.__index = BaseDbObject
 ---@field visible boolean Whether the node is visible in the tree UI
 ---@field icon string? Icon to display in the tree
 ---@field highlight string? Highlight group for the node
+---@field loading boolean Whether the node is currently loading data
+---@field error string? Error message if loading failed
 
 ---Create a new BaseDbObject instance
 ---@param opts {name: string, parent: BaseDbObject?}
@@ -30,6 +32,8 @@ function BaseDbObject.new(opts)
     visible = true,
     icon = nil,
     highlight = nil,
+    loading = false,
+    error = nil,
   }
 
   -- If parent is provided, add this as a child
