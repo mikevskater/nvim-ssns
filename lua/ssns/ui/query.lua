@@ -334,20 +334,7 @@ end
 ---@param sql string The SQL that was executed
 ---@return string[] lines
 function UiQuery.format_results(results, sql)
-  local lines = {
-    "=== SSNS Query Results ===",
-    "",
-    "SQL:",
-  }
-
-  -- Split SQL into separate lines if it contains newlines
-  for _, line in ipairs(vim.split(sql, "\n", { plain = true })) do
-    table.insert(lines, line)
-  end
-
-  table.insert(lines, "")
-  table.insert(lines, "Results:")
-  table.insert(lines, "")
+  local lines = {}
 
   -- Check if results is a table
   if type(results) ~= "table" then
@@ -357,7 +344,7 @@ function UiQuery.format_results(results, sql)
 
   -- Check if empty
   if #results == 0 then
-    table.insert(lines, "(No rows returned)")
+    -- Return empty for no rows (silent like SSMS)
     return lines
   end
 
@@ -414,10 +401,6 @@ function UiQuery.format_results(results, sql)
     end
     table.insert(lines, table.concat(row_parts, " | "))
   end
-
-  -- Add row count
-  table.insert(lines, "")
-  table.insert(lines, string.format("(%d row%s)", #results, #results == 1 and "" or "s"))
 
   return lines
 end

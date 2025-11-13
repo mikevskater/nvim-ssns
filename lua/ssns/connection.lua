@@ -191,6 +191,8 @@ function Connection.parse_result(result, delimiter, expected_columns, has_header
   -- Mimic vim-dadbod-ui's s:results_parser logic
   local parsed_rows = {}
   for _, line in ipairs(clean_lines) do
+    -- Skip separator lines (lines that only contain dashes, spaces, and delimiters)
+    if not line:match("^[%-%s" .. vim.pesc(delimiter) .. "]+$") then
     local columns = {}
     for col in line:gmatch("[^" .. vim.pesc(delimiter) .. "]+") do
       local trimmed = vim.trim(col)
@@ -201,6 +203,7 @@ function Connection.parse_result(result, delimiter, expected_columns, has_header
 
     if #columns > 0 then
       table.insert(parsed_rows, columns)
+      end
     end
   end
 
