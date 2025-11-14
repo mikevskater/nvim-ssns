@@ -52,12 +52,11 @@ local default_config = {
     -- Format: supports repeat patterns (N<char>), raw strings, variables, and auto-width
     -- Repeat: "20#" = 20 hashes, "10-" = 10 dashes
     -- Auto-width: "%fit%" = matches longest line width
-    -- Multi-line: use \n (e.g., "20#\n20#\n20#")
+    -- Multi-line: use \n (newline character, e.g., "20#\n20#\n20#")
     -- Variables: %row_count%, %col_count%, %run_time%, %result_set_num%, %total_result_sets%, %date%, %time%, %fit%
     -- Examples:
     --   "5-(%row_count% rows)5-" → "-----(11 rows)-----"
     --   "%fit%=\n---- Result Set %result_set_num% (%row_count% rows, %run_time%) ----\n%fit%="
-    --     → "==================================================\n---- Result Set 2/3 | 11 rows | 4 cols | 15ms ----\n=================================================="
     result_set_divider = "",
     show_result_set_info = false,  -- Show divider/info before first result set and single result sets
 

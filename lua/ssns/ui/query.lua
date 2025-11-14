@@ -349,7 +349,8 @@ function UiQuery.parse_divider_format(format, metadata)
   end
 
   -- Split by \n for multiple lines
-  local parts = vim.split(processed, "\\n", { plain = true })
+  -- Handle both actual newlines and escaped \n
+  local parts = vim.split(processed, "\n", { plain = true })
 
   -- PASS 1: Generate lines with %fit% placeholder, track max width
   local lines = {}
