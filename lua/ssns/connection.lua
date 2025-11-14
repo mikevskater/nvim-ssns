@@ -128,7 +128,7 @@ end
 ---@param delimiter string? Column delimiter (default "|")
 ---@param expected_columns number? Expected number of columns (0 = auto-detect)
 ---@param has_headers boolean? Whether first row contains column names (default false)
----@return table parsed Array of row tables
+---@return table parsed Array of result sets (each result set is an array of row tables)
 function Connection.parse_result(result, delimiter, expected_columns, has_headers)
   delimiter = delimiter or "|"
   expected_columns = expected_columns or 0
@@ -193,16 +193,16 @@ function Connection.parse_result(result, delimiter, expected_columns, has_header
   for _, line in ipairs(clean_lines) do
     -- Skip separator lines (lines that only contain dashes, spaces, and delimiters)
     if not line:match("^[%-%s" .. vim.pesc(delimiter) .. "]+$") then
-    local columns = {}
-    for col in line:gmatch("[^" .. vim.pesc(delimiter) .. "]+") do
-      local trimmed = vim.trim(col)
-      if trimmed ~= "" then
-        table.insert(columns, trimmed)
+      local columns = {}
+      for col in line:gmatch("[^" .. vim.pesc(delimiter) .. "]+") do
+        local trimmed = vim.trim(col)
+        if trimmed ~= "" then
+          table.insert(columns, trimmed)
+        end
       end
-    end
 
-    if #columns > 0 then
-      table.insert(parsed_rows, columns)
+      if #columns > 0 then
+        table.insert(parsed_rows, columns)
       end
     end
   end
@@ -233,30 +233,109 @@ function Connection.parse_result(result, delimiter, expected_columns, has_header
     return {}
   end
 
-  -- If has_headers is true, first row contains column names
-  local header = nil
-  local data_rows = filtered_rows
+  -- If has_headers is true, split into multiple result sets
+  if has_headers then
+    local result_sets = {}
+    local current_header = nil
+    local current_rows = {}
 
-  if has_headers and #filtered_rows > 0 then
-    header = filtered_rows[1]
-    data_rows = vim.list_slice(filtered_rows, 2, #filtered_rows)
-  end
+    for i, row in ipairs(filtered_rows) do
+      -- Detect if this row is a header (check if next row after this would make sense as data)
+      -- A header row is followed by data rows with same column count
+      -- For simplicity, we detect headers by checking if we've seen this column structure before
+      -- OR if it's the first row
+      local is_header = false
 
-  -- Convert arrays to objects
-  local result_objects = {}
-  for _, row in ipairs(data_rows) do
-    local obj = {}
-    for idx, value in ipairs(row) do
-      if header then
-        -- Use column name from header as key
-        local col_name = header[idx] or tostring(idx)
-        obj[col_name] = value
+      if i == 1 then
+        -- First row is always a header
+        is_header = true
       else
-        -- Use numeric key
-        obj[idx] = value
+        -- Check if this looks like a header (different from current header)
+        -- If we encounter a row that matches the current header structure but has different values
+        -- it's likely a new result set header
+        if current_header and #row == #current_header then
+          -- Check if all values are non-numeric or look like column names
+          local looks_like_header = true
+          for _, val in ipairs(row) do
+            -- If it looks like data (numeric or typical data patterns), it's not a header
+            if val:match("^%-?%d+%.?%d*$") or val == "NULL" then
+              looks_like_header = false
+              break
+            end
+          end
+
+          if looks_like_header then
+            -- Check if it's identical to current header (same result set repeated)
+            local identical = true
+            for j = 1, #row do
+              if row[j] ~= current_header[j] then
+                identical = false
+                break
+              end
+            end
+
+            if identical or looks_like_header then
+              is_header = true
+            end
+          end
+        end
+      end
+
+      if is_header then
+        -- Save previous result set if exists
+        if current_header and #current_rows > 0 then
+          local result_objects = {}
+          for _, data_row in ipairs(current_rows) do
+            local obj = {}
+            for idx, value in ipairs(data_row) do
+              local col_name = current_header[idx] or tostring(idx)
+              obj[col_name] = value
+            end
+            if #data_row == 1 then
+              obj.name = data_row[1]
+            end
+            table.insert(result_objects, obj)
+          end
+          table.insert(result_sets, result_objects)
+        end
+
+        -- Start new result set
+        current_header = row
+        current_rows = {}
+      else
+        -- Data row
+        table.insert(current_rows, row)
       end
     end
-    -- Add common field names if single column
+
+    -- Add final result set
+    if current_header and #current_rows > 0 then
+      local result_objects = {}
+      for _, data_row in ipairs(current_rows) do
+        local obj = {}
+        for idx, value in ipairs(data_row) do
+          local col_name = current_header[idx] or tostring(idx)
+          obj[col_name] = value
+        end
+        if #data_row == 1 then
+          obj.name = data_row[1]
+        end
+        table.insert(result_objects, obj)
+      end
+      table.insert(result_sets, result_objects)
+    end
+
+    -- Return array of result sets
+    return result_sets
+  end
+
+  -- If has_headers is false, return single result set with numeric keys
+  local result_objects = {}
+  for _, row in ipairs(filtered_rows) do
+    local obj = {}
+    for idx, value in ipairs(row) do
+      obj[idx] = value
+    end
     if #row == 1 then
       obj.name = row[1]
     end

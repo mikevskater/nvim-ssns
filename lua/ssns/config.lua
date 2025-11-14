@@ -11,6 +11,8 @@
 ---@field show_schema_prefix boolean Show schema prefix in object names
 ---@field auto_expand_depth number? Auto-expand tree to this depth on load
 ---@field smart_cursor_positioning boolean Enable smart cursor positioning on j/k movement (default: true)
+---@field result_set_divider string? Format for divider between multiple result sets (default: "")
+---@field show_result_set_info boolean Show divider/info before first result set and single result sets (default: false)
 ---@field icons IconsConfig Icon configuration
 
 ---@class IconsConfig
@@ -46,6 +48,18 @@ local default_config = {
     show_schema_prefix = true,
     auto_expand_depth = nil,  -- nil = don't auto-expand
     smart_cursor_positioning = true,  -- Enable smart cursor positioning on j/k
+    -- Divider between multiple result sets
+    -- Format: supports repeat patterns (N<char>), raw strings, variables, and auto-width
+    -- Repeat: "20#" = 20 hashes, "10-" = 10 dashes
+    -- Auto-width: "%fit%" = matches longest line width
+    -- Multi-line: use \n (e.g., "20#\n20#\n20#")
+    -- Variables: %row_count%, %col_count%, %run_time%, %result_set_num%, %total_result_sets%, %date%, %time%, %fit%
+    -- Examples:
+    --   "5-(%row_count% rows)5-" → "-----(11 rows)-----"
+    --   "%fit%=\n---- Result Set %result_set_num% (%row_count% rows, %run_time%) ----\n%fit%="
+    --     → "==================================================\n---- Result Set 2/3 | 11 rows | 4 cols | 15ms ----\n=================================================="
+    result_set_divider = "",
+    show_result_set_info = false,  -- Show divider/info before first result set and single result sets
 
     icons = {
       server = "",
