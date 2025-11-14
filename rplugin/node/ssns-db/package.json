@@ -1,0 +1,15 @@
+{
+  "name": "ssns-database-plugin",
+  "version": "1.0.0",
+  "description": "SSNS Node.js database backend for reliable query execution and metadata retrieval",
+  "main": "index.js",
+  "author": "SSNS Contributors",
+  "license": "MIT",
+  "dependencies": {
+    "neovim": "^5.1.0",
+    "mssql": "^10.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
