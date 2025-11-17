@@ -219,22 +219,20 @@ function UiQuery.execute_query(bufnr, visual)
   vim.notify("SSNS: Executing query...", vim.log.levels.INFO)
 
   local adapter = server:get_adapter()
-  -- User queries should include headers so we can parse column names
   local start_time = vim.loop.hrtime()
-  local success, results = pcall(adapter.execute, adapter, server.connection, sql, {
-    use_delimiter = true,
-    include_headers = true
-  })
+  local result = adapter:execute(server.connection, sql)
   local end_time = vim.loop.hrtime()
   local execution_time_ms = (end_time - start_time) / 1000000  -- Convert nanoseconds to milliseconds
 
-  if not success then
-    vim.notify(string.format("SSNS: Query failed: %s", results), vim.log.levels.ERROR)
+  -- Check if query succeeded
+  if not result.success then
+    -- Display detailed error with structured information
+    UiQuery.display_error(result.error, sql, bufnr)
     return
   end
 
   -- Display results with execution metadata
-  UiQuery.display_results(results, sql, execution_time_ms)
+  UiQuery.display_results(result, sql, execution_time_ms)
 end
 
 ---Execute statement under cursor
@@ -268,21 +266,21 @@ function UiQuery.execute_statement_under_cursor(bufnr)
 
   local server = buffer_info.server
   local adapter = server:get_adapter()
-  local success, results = pcall(adapter.execute, adapter, server.connection, sql)
+  local result = adapter:execute(server.connection, sql)
 
-  if not success then
-    vim.notify(string.format("SSNS: Query failed: %s", results), vim.log.levels.ERROR)
+  if not result.success then
+    UiQuery.display_error(result.error, sql, bufnr)
     return
   end
 
-  UiQuery.display_results(results, sql)
+  UiQuery.display_results(result, sql)
 end
 
 ---Display query results
----@param results any The query results
+---@param result table Node.js result object { success, resultSets, metadata, error }
 ---@param sql string The SQL that was executed
 ---@param execution_time_ms number? Execution time in milliseconds
-function UiQuery.display_results(results, sql, execution_time_ms)
+function UiQuery.display_results(result, sql, execution_time_ms)
   -- Try to find existing results buffer
   local result_buf = nil
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
@@ -302,8 +300,8 @@ function UiQuery.display_results(results, sql, execution_time_ms)
     vim.api.nvim_buf_set_option(result_buf, 'buftype', 'nofile')
   end
 
-  -- Format results
-  local lines = UiQuery.format_results(results, sql, execution_time_ms)
+  -- Format results from Node.js format
+  local lines = UiQuery.format_results(result.resultSets, sql, execution_time_ms)
 
   -- Set lines in buffer
   vim.api.nvim_buf_set_option(result_buf, 'modifiable', true)

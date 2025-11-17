@@ -424,119 +424,75 @@ local function handle_use_statement(connection_string, query)
   return connection_string, query
 end
 
----Execute a query using Node.js backend (Phase 7)
+---Execute a query using Node.js backend
 ---@param connection_string string The connection string
 ---@param query string The SQL query to execute
----@param opts table? Options { parse_as_dadbod: boolean } - If true, convert to dadbod-compatible format
----@return table results Array of result rows (or raw Node.js result if parse_as_dadbod=false)
----@return string? error_message Error message if query failed
-function Connection.execute_nodejs(connection_string, query, opts)
-  local Debug = require('ssns.debug')
-  Debug.log("execute_nodejs called")
-
+---@param opts table? Options (reserved for future use)
+---@return table result Node.js result object { success, resultSets, metadata, error }
+function Connection.execute(connection_string, query, opts)
   opts = opts or {}
-  local parse_as_dadbod = opts.parse_as_dadbod == nil and true or opts.parse_as_dadbod
 
-  Debug.log("About to call handle_use_statement")
-  -- Handle USE statement (simple version - only at beginning of query)
+  -- Handle USE statement - modify connection string if needed
   local final_conn_string, final_query = handle_use_statement(connection_string, query)
-  Debug.log("handle_use_statement returned")
-
-  -- DEBUG: Log if USE was found
-  if final_conn_string ~= connection_string then
-    Debug.log("USE statement modified connection string")
-  end
-
-  Debug.log("About to call vim.fn.SSNSExecuteQuery")
-  Debug.log("Connection: " .. final_conn_string:sub(1, 50))
-  Debug.log("Query (first 100 chars): " .. final_query:sub(1, 100))
 
   -- Call Node.js RPC function SSNSExecuteQuery
-  local success, result = pcall(function()
+  local success, raw_result = pcall(function()
     return vim.fn.SSNSExecuteQuery({final_conn_string, final_query})
   end)
 
-  Debug.log("vim.fn.SSNSExecuteQuery returned, success=" .. tostring(success))
-
   if not success then
-    Debug.log("RPC call failed: " .. tostring(result))
-    return {}, "Node.js RPC call failed: " .. tostring(result)
+    -- RPC call itself failed (Node.js not available, etc.)
+    return {
+      success = false,
+      resultSets = {},
+      metadata = {},
+      error = {
+        message = "Node.js RPC call failed: " .. tostring(raw_result),
+        code = nil,
+        lineNumber = nil,
+        procName = nil
+      }
+    }
   end
 
-  -- Convert userdata/vim dict to Lua table if needed
-  if type(result) ~= "table" then
-    return {}, "Unexpected result type from Node.js: " .. type(result)
+  -- Validate result type
+  if type(raw_result) ~= "table" then
+    return {
+      success = false,
+      resultSets = {},
+      metadata = {},
+      error = {
+        message = "Unexpected result type from Node.js: " .. type(raw_result),
+        code = nil,
+        lineNumber = nil,
+        procName = nil
+      }
+    }
   end
 
-  -- Check if there was an error in the result
-  local error_obj = result.error
+  -- Check if there was a SQL error
+  local error_obj = raw_result.error
   if type(error_obj) == "table" and error_obj.message then
-    return {}, tostring(error_obj.message)
+    return {
+      success = false,
+      resultSets = {},
+      metadata = raw_result.metadata or {},
+      error = {
+        message = tostring(error_obj.message),
+        code = error_obj.code,
+        lineNumber = error_obj.lineNumber,
+        procName = error_obj.procName
+      }
+    }
   end
 
-  -- Get result sets
-  local resultSets = result.resultSets or result["resultSets"] or {}
-
-  -- If not parsing as dadbod format, return raw result
-  if not parse_as_dadbod then
-    return result, nil
-  end
-
-  -- Convert Node.js result format to dadbod-compatible format
-  -- Handle vim.NIL or empty result sets
-  if resultSets == vim.NIL or (type(resultSets) == "table" and #resultSets == 0) then
-    return {}, nil
-  end
-
-  -- For single result set, return rows array
-  if #resultSets == 1 then
-    local resultSet = resultSets[1]
-    local rows = resultSet.rows or resultSet["rows"] or {}
-
-    -- Handle vim.NIL
-    if rows == vim.NIL then
-      return {}, nil
-    end
-
-    -- Add 'name' property if single column (for compatibility with existing code)
-    local columns = resultSet.columns or resultSet["columns"]
-    if columns and type(columns) == "table" and vim.tbl_count(columns) == 1 then
-      local column_name = next(columns)
-      for _, row in ipairs(rows) do
-        local col_val = row[column_name]
-        if col_val and col_val ~= vim.NIL then
-          row.name = col_val
-        end
-      end
-    end
-
-    return rows, nil
-  end
-
-  -- For multiple result sets, return array of result sets
-  local all_results = {}
-  for _, resultSet in ipairs(resultSets) do
-    local rows = resultSet.rows or resultSet["rows"] or {}
-
-    -- Handle vim.NIL
-    if rows ~= vim.NIL then
-      -- Add 'name' property if single column
-      local columns = resultSet.columns or resultSet["columns"]
-      if columns and type(columns) == "table" and vim.tbl_count(columns) == 1 then
-        local column_name = next(columns)
-        for _, row in ipairs(rows) do
-          local col_val = row[column_name]
-          if col_val and col_val ~= vim.NIL then
-            row.name = col_val
-          end
-        end
-      end
-
-      table.insert(all_results, rows)
-    end
-  end
-
-  return all_results, nil
+  -- Success - return the full Node.js result object
+  return {
+    success = true,
+    resultSets = raw_result.resultSets or raw_result["resultSets"] or {},
+    metadata = raw_result.metadata or {},
+    error = nil
+  }
 end
 
 ---Execute an asynchronous query using vim-dadbod

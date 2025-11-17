@@ -26,20 +26,15 @@ function SqlServerAdapter.new(connection_string)
   return self
 end
 
----Execute a query against SQL Server using vim-dadbod or Node.js backend
+---Execute a query against SQL Server using Node.js backend
 ---@param connection any The database connection object or connection string
 ---@param query string The SQL query to execute
----@param opts table? Options { use_delimiter: boolean, include_headers: boolean }
----@return table results Array of result rows
+---@param opts table? Options (reserved for future use)
+---@return table result Node.js result object { success, resultSets, metadata, error }
 function SqlServerAdapter:execute(connection, query, opts)
-  local Debug = require('ssns.debug')
-  Debug.log("SqlServerAdapter:execute called")
-
-  opts = opts or { use_delimiter = true }
+  opts = opts or {}
   local ConnectionModule = require('ssns.connection')
-  local Config = require('ssns.config')
 
-  Debug.log("Determining connection string")
   -- Handle both connection object and connection string
   local conn_str
   if type(connection) == "string" then
@@ -51,50 +46,21 @@ function SqlServerAdapter:execute(connection, query, opts)
     conn_str = self.connection_string
   end
 
-  Debug.log("Checking which backend to use")
-  -- Check if Node.js backend should be used
-  local results, err
-  if Config.use_nodejs() then
-    Debug.log("Using Node.js backend")
-    -- Use Node.js backend (Phase 7)
-    results, err = ConnectionModule.execute_nodejs(conn_str, query)
-    Debug.log("Node.js backend returned")
-  else
-    Debug.log("Using vim-dadbod backend")
-    -- Use vim-dadbod
-    results, err = ConnectionModule.execute_sync(conn_str, query, opts)
-    Debug.log("vim-dadbod backend returned")
-  end
-
-  if err then
-    -- Log error but return empty results for now
-    -- UI layer can check for errors separately
-    vim.notify(string.format("SSNS SQL Error: %s", err), vim.log.levels.WARN)
-    return {}
-  end
-
-  return results
+  -- Execute via Node.js backend
+  return ConnectionModule.execute(conn_str, query, opts)
 end
 
 ---Execute a query against SQL Server asynchronously
+---@deprecated Use execute() instead - Node.js backend is already async
 ---@param connection any The database connection object or connection string
 ---@param query string The SQL query to execute
----@param callback function Callback function(results, error)
+---@param callback function Callback function(result)
 function SqlServerAdapter:execute_async(connection, query, callback)
-  local ConnectionModule = require('ssns.connection')
-
-  -- Handle both connection object and connection string
-  local conn_str
-  if type(connection) == "string" then
-    conn_str = connection
-  elseif type(connection) == "table" and connection.connection_string then
-    conn_str = connection.connection_string
-  else
-    conn_str = self.connection_string
-  end
-
-  -- Execute async
-  ConnectionModule.execute_async(conn_str, query, callback)
+  -- Node.js backend is already async, so just wrap execute() with vim.schedule
+  vim.schedule(function()
+    local result = self:execute(connection, query)
+    callback(result)
+  end)
 end
 
 ---Parse SQL Server connection string
@@ -596,157 +562,199 @@ end
 -- ============================================================================
 
 ---Parse database list results
----@param results table
----@return table databases
-function SqlServerAdapter:parse_databases(results)
+---@param result table Node.js result object { success, resultSets, metadata, error }
+---@return table databases Array of { name } objects
+function SqlServerAdapter:parse_databases(result)
   local databases = {}
-  for _, row in ipairs(results) do
-    table.insert(databases, { name = row.name or row[1] })
+
+  -- Extract rows from first result set
+  if result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      -- Extract 'name' column value
+      if row.name then
+        table.insert(databases, { name = row.name })
+      end
+    end
   end
+
   return databases
 end
 
 ---Parse schema list results
----@param results table
----@return table schemas
-function SqlServerAdapter:parse_schemas(results)
+---@param result table Node.js result object { success, resultSets, metadata, error }
+---@return table schemas Array of { name } objects
+function SqlServerAdapter:parse_schemas(result)
   local schemas = {}
-  for _, row in ipairs(results) do
-    table.insert(schemas, { name = row.name or row[1] })
+
+  -- Extract rows from first result set
+  if result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      -- Extract 'name' column value
+      if row.name then
+        table.insert(schemas, { name = row.name })
+      end
+    end
   end
+
   return schemas
 end
 
 ---Parse table list results
----@param results table
+---@param result table Node.js result object { success, resultSets, metadata, error }
 ---@return table tables
-function SqlServerAdapter:parse_tables(results)
+function SqlServerAdapter:parse_tables(result)
   local tables = {}
-  for _, row in ipairs(results) do
-    table.insert(tables, {
-      schema = row.schema_name or row[1],
-      name = row.table_name or row[2],
-      type = row.table_type or row[3],
-    })
+  if result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      table.insert(tables, {
+        schema = row.schema_name,
+        name = row.table_name,
+        type = row.table_type,
+      })
+    end
   end
   return tables
 end
 
 ---Parse view list results
----@param results table
+---@param result table Node.js result object { success, resultSets, metadata, error }
 ---@return table views
-function SqlServerAdapter:parse_views(results)
+function SqlServerAdapter:parse_views(result)
   local views = {}
-  for _, row in ipairs(results) do
-    table.insert(views, {
-      schema = row.schema_name or row[1],
-      name = row.view_name or row[2],
-    })
+  if result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      table.insert(views, {
+        schema = row.schema_name,
+        name = row.view_name,
+      })
+    end
   end
   return views
 end
 
 ---Parse procedure list results
----@param results table
+---@param result table Node.js result object { success, resultSets, metadata, error }
 ---@return table procedures
-function SqlServerAdapter:parse_procedures(results)
+function SqlServerAdapter:parse_procedures(result)
   local procedures = {}
-  for _, row in ipairs(results) do
-    table.insert(procedures, {
-      schema = row.schema_name or row[1],
-      name = row.procedure_name or row[2],
-    })
+  if result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      table.insert(procedures, {
+        schema = row.schema_name,
+        name = row.procedure_name,
+      })
+    end
   end
   return procedures
 end
 
 ---Parse function list results
----@param results table
+---@param result table Node.js result object { success, resultSets, metadata, error }
 ---@return table functions
-function SqlServerAdapter:parse_functions(results)
+function SqlServerAdapter:parse_functions(result)
   local funcs = {}
-  for _, row in ipairs(results) do
-    table.insert(funcs, {
-      schema = row.schema_name or row[1],
-      name = row.function_name or row[2],
-      type = row.function_type or row[3],
-    })
+  if result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      table.insert(funcs, {
+        schema = row.schema_name,
+        name = row.function_name,
+        type = row.function_type,
+      })
+    end
   end
   return funcs
 end
 
 ---Parse column list results
----@param results table
+---@param result table Node.js result object { success, resultSets, metadata, error }
 ---@return table columns
-function SqlServerAdapter:parse_columns(results)
+function SqlServerAdapter:parse_columns(result)
   local columns = {}
-  for _, row in ipairs(results) do
-    table.insert(columns, {
-      name = row.column_name or row[1],
-      data_type = row.data_type or row[2],
-      max_length = row.max_length,
-      precision = row.precision,
-      scale = row.scale,
-      nullable = row.is_nullable == 1 or row.is_nullable == true,
-      is_identity = row.is_identity == 1 or row.is_identity == true,
-      default = row.default_value,
-      ordinal_position = row.ordinal_position,
-    })
+  if result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      table.insert(columns, {
+        name = row.column_name,
+        data_type = row.data_type,
+        max_length = row.max_length,
+        precision = row.precision,
+        scale = row.scale,
+        nullable = row.is_nullable == 1 or row.is_nullable == true,
+        is_identity = row.is_identity == 1 or row.is_identity == true,
+        default = row.default_value,
+        ordinal_position = row.ordinal_position,
+      })
+    end
   end
   return columns
 end
 
 ---Parse index list results
----@param results table
+---@param result table Node.js result object { success, resultSets, metadata, error }
 ---@return table indexes
-function SqlServerAdapter:parse_indexes(results)
+function SqlServerAdapter:parse_indexes(result)
   local indexes = {}
-  for _, row in ipairs(results) do
-    table.insert(indexes, {
-      name = row.index_name or row[1],
-      type = row.index_type or row[2],
-      is_unique = row.is_unique == 1 or row.is_unique == true,
-      is_primary = row.is_primary_key == 1 or row.is_primary_key == true,
-      columns = vim.split(row.column_names or "", ", ", { plain = true }),
-    })
+  if result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      table.insert(indexes, {
+        name = row.index_name,
+        type = row.index_type,
+        is_unique = row.is_unique == 1 or row.is_unique == true,
+        is_primary = row.is_primary_key == 1 or row.is_primary_key == true,
+        columns = vim.split(row.column_names or "", ", ", { plain = true }),
+      })
+    end
   end
   return indexes
 end
 
 ---Parse constraint list results
----@param results table
+---@param result table Node.js result object { success, resultSets, metadata, error }
 ---@return table constraints
-function SqlServerAdapter:parse_constraints(results)
+function SqlServerAdapter:parse_constraints(result)
   local constraints = {}
-  for _, row in ipairs(results) do
-    table.insert(constraints, {
-      name = row.constraint_name or row[1],
-      type = row.constraint_type or row[2],
-      columns = vim.split(row.column_names or "", ", ", { plain = true }),
-      referenced_table = row.referenced_table,
-      referenced_schema = row.referenced_schema,
-      referenced_columns = row.referenced_columns and vim.split(row.referenced_columns, ", ", { plain = true }) or nil,
-    })
+  if result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      table.insert(constraints, {
+        name = row.constraint_name,
+        type = row.constraint_type,
+        columns = vim.split(row.column_names or "", ", ", { plain = true }),
+        referenced_table = row.referenced_table,
+        referenced_schema = row.referenced_schema,
+        referenced_columns = row.referenced_columns and vim.split(row.referenced_columns, ", ", { plain = true }) or nil,
+      })
+    end
   end
   return constraints
 end
 
 ---Parse parameter list results
----@param results table
+---@param result table Node.js result object { success, resultSets, metadata, error }
 ---@return table parameters
-function SqlServerAdapter:parse_parameters(results)
+function SqlServerAdapter:parse_parameters(result)
   local parameters = {}
-  for _, row in ipairs(results) do
-    table.insert(parameters, {
-      name = row.parameter_name or row[1],
-      data_type = row.data_type or row[2],
-      max_length = row.max_length,
-      precision = row.precision,
-      scale = row.scale,
-      mode = (row.is_output == 1 or row.is_output == true) and "OUT" or "IN",
-      has_default = row.has_default_value == 1 or row.has_default_value == true,
-      ordinal_position = row.ordinal_position,
-    })
+  if result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      table.insert(parameters, {
+        name = row.parameter_name,
+        data_type = row.data_type,
+        max_length = row.max_length,
+        precision = row.precision,
+        scale = row.scale,
+        mode = (row.is_output == 1 or row.is_output == true) and "OUT" or "IN",
+        has_default = row.has_default_value == 1 or row.has_default_value == true,
+        ordinal_position = row.ordinal_position,
+      })
+    end
   end
   return parameters
 end
@@ -863,18 +871,21 @@ ORDER BY dependency_type, schema_name, object_name;
 end
 
 ---Parse dependencies query results
----@param results table
+---@param result table Node.js result object { success, resultSets, metadata, error }
 ---@return table dependencies Array of dependency objects
-function SqlServerAdapter:parse_dependencies(results)
+function SqlServerAdapter:parse_dependencies(result)
   local dependencies = {}
 
-  for _, row in ipairs(results) do
-    table.insert(dependencies, {
-      dependency_type = row[1] or row.dependency_type,
-      schema_name = row[2] or row.schema_name,
-      object_name = row[3] or row.object_name,
-      object_type = row[4] or row.object_type,
-    })
+  if result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      table.insert(dependencies, {
+        dependency_type = row.dependency_type,
+        schema_name = row.schema_name,
+        object_name = row.object_name,
+        object_type = row.object_type,
+      })
+    end
   end
 
   return dependencies
