@@ -304,70 +304,62 @@ end
 ---@param procedures table[]
 ---@param functions table[]
 function DbClass:create_object_type_groups(tables, views, procedures, functions)
-  -- Create TABLES group
-  if #tables > 0 then
-    local tables_group = BaseDbObject.new({
-      name = string.format("TABLES (%d)", #tables),
-      parent = self,
-    })
-    tables_group.object_type = "tables_group"
-    tables_group.ui_state.icon = ""
+  -- Always create TABLES group (even if empty)
+  local tables_group = BaseDbObject.new({
+    name = string.format("TABLES (%d)", #tables),
+    parent = self,
+  })
+  tables_group.object_type = "tables_group"
+  tables_group.ui_state.icon = ""
 
-    -- Add tables to group (but keep their parent as database for hierarchy)
-    for _, table_obj in ipairs(tables) do
-      table.insert(tables_group.children, table_obj)
-    end
-
-    tables_group.is_loaded = true
+  -- Add tables to group (but keep their parent as database for hierarchy)
+  for _, table_obj in ipairs(tables) do
+    table.insert(tables_group.children, table_obj)
   end
 
-  -- Create VIEWS group
-  if #views > 0 then
-    local views_group = BaseDbObject.new({
-      name = string.format("VIEWS (%d)", #views),
-      parent = self,
-    })
-    views_group.object_type = "views_group"
-    views_group.ui_state.icon = ""
+  tables_group.is_loaded = true
 
-    for _, view_obj in ipairs(views) do
-      table.insert(views_group.children, view_obj)
-    end
+  -- Always create VIEWS group (even if empty)
+  local views_group = BaseDbObject.new({
+    name = string.format("VIEWS (%d)", #views),
+    parent = self,
+  })
+  views_group.object_type = "views_group"
+  views_group.ui_state.icon = ""
 
-    views_group.is_loaded = true
+  for _, view_obj in ipairs(views) do
+    table.insert(views_group.children, view_obj)
   end
 
-  -- Create PROCEDURES group
-  if #procedures > 0 then
-    local procs_group = BaseDbObject.new({
-      name = string.format("PROCEDURES (%d)", #procedures),
-      parent = self,
-    })
-    procs_group.object_type = "procedures_group"
-    procs_group.ui_state.icon = ""
+  views_group.is_loaded = true
 
-    for _, proc_obj in ipairs(procedures) do
-      table.insert(procs_group.children, proc_obj)
-    end
+  -- Always create PROCEDURES group (even if empty)
+  local procs_group = BaseDbObject.new({
+    name = string.format("PROCEDURES (%d)", #procedures),
+    parent = self,
+  })
+  procs_group.object_type = "procedures_group"
+  procs_group.ui_state.icon = ""
 
-    procs_group.is_loaded = true
+  for _, proc_obj in ipairs(procedures) do
+    table.insert(procs_group.children, proc_obj)
   end
 
-  -- Create FUNCTIONS group
-  if #functions > 0 then
-    local funcs_group = BaseDbObject.new({
-      name = string.format("FUNCTIONS (%d)", #functions),
-      parent = self,
-    })
-    funcs_group.object_type = "functions_group"
-    funcs_group.ui_state.icon = ""
+  procs_group.is_loaded = true
 
-    for _, func_obj in ipairs(functions) do
-      table.insert(funcs_group.children, func_obj)
-    end
+  -- Always create FUNCTIONS group (even if empty)
+  local funcs_group = BaseDbObject.new({
+    name = string.format("FUNCTIONS (%d)", #functions),
+    parent = self,
+  })
+  funcs_group.object_type = "functions_group"
+  funcs_group.ui_state.icon = ""
 
-    funcs_group.is_loaded = true
+  for _, func_obj in ipairs(functions) do
+    table.insert(funcs_group.children, func_obj)
   end
+
+  funcs_group.is_loaded = true
 end
 
 return DbClass

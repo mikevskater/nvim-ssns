@@ -215,6 +215,10 @@ function UiQuery.execute_query(bufnr, visual)
     return
   end
 
+  -- Clear any previous error highlights in this buffer
+  local ns_id = vim.api.nvim_create_namespace('ssns_sql_error')
+  vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
+
   -- Execute query
   vim.notify("SSNS: Executing query...", vim.log.levels.INFO)
 
@@ -274,6 +278,119 @@ function UiQuery.execute_statement_under_cursor(bufnr)
   end
 
   UiQuery.display_results(result, sql)
+end
+
+---Display query error with structured information
+---@param error table Error object { message, code, lineNumber, procName }
+---@param sql string The SQL that was executed
+---@param query_bufnr number The query buffer number
+function UiQuery.display_error(error, sql, query_bufnr)
+  -- Clean up error message - remove ODBC driver prefix
+  local clean_message = error.message or "Unknown error"
+  -- Pattern: "[Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Actual message"
+  local sql_msg = clean_message:match("%[SQL Server%](.+)$")
+  if sql_msg then
+    clean_message = sql_msg
+  end
+
+  -- Show error notification
+  local error_msg = clean_message
+  if error.code and error.code ~= vim.NIL then
+    error_msg = string.format("[SQL Error %s] %s", error.code, clean_message)
+  end
+
+  vim.notify(error_msg, vim.log.levels.ERROR)
+
+  -- Highlight error line in query buffer if lineNumber is available
+  if error.lineNumber and error.lineNumber ~= vim.NIL and query_bufnr and vim.api.nvim_buf_is_valid(query_bufnr) then
+    local line_num = error.lineNumber - 1  -- Convert to 0-based
+
+    -- Create namespace for error highlighting
+    local ns_id = vim.api.nvim_create_namespace('ssns_sql_error')
+
+    -- Clear previous error highlights
+    vim.api.nvim_buf_clear_namespace(query_bufnr, ns_id, 0, -1)
+
+    -- Highlight the error line
+    vim.api.nvim_buf_add_highlight(query_bufnr, ns_id, 'ErrorMsg', line_num, 0, -1)
+
+    -- Add virtual text with error message (just the clean message, not the full notification)
+    vim.api.nvim_buf_set_extmark(query_bufnr, ns_id, line_num, 0, {
+      virt_text = {{" ← " .. clean_message, "ErrorMsg"}},
+      virt_text_pos = "eol",
+    })
+
+    -- Move cursor to error line
+    local win = vim.fn.bufwinid(query_bufnr)
+    if win ~= -1 then
+      vim.api.nvim_win_set_cursor(win, {error.lineNumber, 0})
+    end
+  end
+
+  -- Display detailed error in results window
+  local result_buf = nil
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(buf) then
+      local buf_name = vim.api.nvim_buf_get_name(buf)
+      if buf_name:match("SSNS Results") then
+        result_buf = buf
+        break
+      end
+    end
+  end
+
+  -- Create new buffer if not found
+  if not result_buf then
+    result_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(result_buf, "SSNS Results")
+    vim.api.nvim_buf_set_option(result_buf, 'buftype', 'nofile')
+  end
+
+  -- Format error message for results window
+  local lines = {
+    "=== SQL ERROR ===",
+    "",
+    "Message: " .. clean_message,
+  }
+
+  if error.code and error.code ~= vim.NIL then
+    table.insert(lines, "Error Code: " .. tostring(error.code))
+  end
+
+  if error.lineNumber and error.lineNumber ~= vim.NIL then
+    table.insert(lines, "Line Number: " .. tostring(error.lineNumber))
+  end
+
+  if error.procName and error.procName ~= vim.NIL then
+    table.insert(lines, "Procedure: " .. tostring(error.procName))
+  end
+
+  table.insert(lines, "")
+  table.insert(lines, "=================")
+
+  -- Set lines in buffer
+  vim.api.nvim_buf_set_option(result_buf, 'modifiable', true)
+  vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_option(result_buf, 'modifiable', false)
+
+  -- Show results window
+  local result_win = nil
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(win) == result_buf then
+      result_win = win
+      break
+    end
+  end
+
+  if not result_win then
+    vim.cmd('botright split')
+    result_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(result_win, result_buf)
+    vim.api.nvim_win_set_height(result_win, 10)
+  end
+
+  -- Set keymap to close
+  vim.api.nvim_buf_set_keymap(result_buf, 'n', 'q', ':close<CR>', { noremap = true, silent = true })
 end
 
 ---Display query results
@@ -409,52 +526,27 @@ function UiQuery.parse_divider_format(format, metadata)
 end
 
 ---Format query results for display
----@param results any The query results (can be array of result sets or single result set)
+---@param resultSets table[] Array of Node.js result sets { rows, columns }
 ---@param sql string The SQL that was executed
 ---@param execution_time_ms number? Execution time in milliseconds
 ---@return string[] lines
-function UiQuery.format_results(results, sql, execution_time_ms)
+function UiQuery.format_results(resultSets, sql, execution_time_ms)
   local lines = {}
 
   -- Get current date/time
   local date_str = os.date("%Y-%m-%d")
   local time_str = os.date("%H:%M:%S")
 
-  -- Check if results is a table
-  if type(results) ~= "table" then
-    table.insert(lines, tostring(results))
+  -- Validate input
+  if type(resultSets) ~= "table" then
+    table.insert(lines, tostring(resultSets))
     return lines
   end
 
-  -- Check if empty
-  if #results == 0 then
+  -- Check if empty (no result sets)
+  if #resultSets == 0 then
     -- Return empty for no rows (silent like SSMS)
     return lines
-  end
-
-  -- Check if this is multiple result sets (array of arrays)
-  -- If first element is an array of objects with string keys, it's a result set
-  local is_multiple_sets = false
-  if #results > 0 and type(results[1]) == "table" then
-    -- Check if first element is an array (result set) or a row object
-    local first_elem = results[1]
-    if #first_elem > 0 and type(first_elem[1]) == "table" then
-      -- It's an array of result sets
-      is_multiple_sets = true
-    elseif first_elem[1] == nil then
-      -- Check if it has string keys (it's a row object)
-      local has_string_keys = false
-      for key, _ in pairs(first_elem) do
-        if type(key) == "string" and key ~= "name" then
-          has_string_keys = true
-          break
-        end
-      end
-      if not has_string_keys then
-        -- Could be multiple result sets
-        is_multiple_sets = true
-      end
-    end
   end
 
   -- Get config
@@ -463,40 +555,42 @@ function UiQuery.format_results(results, sql, execution_time_ms)
   local divider_format = ui_config.result_set_divider or ""
   local show_result_set_info = ui_config.show_result_set_info or false
 
-  -- Handle multiple result sets
-  if is_multiple_sets then
-    for i, result_set in ipairs(results) do
+  -- Format execution time once
+  local run_time = ""
+  if execution_time_ms then
+    if execution_time_ms < 1000 then
+      run_time = string.format("%.0fms", execution_time_ms)
+    else
+      run_time = string.format("%.2fs", execution_time_ms / 1000)
+    end
+  end
+
+  -- Process each result set
+  for i, resultSet in ipairs(resultSets) do
+    local rows = resultSet.rows or {}
+    local row_count = #rows
+    local col_count = 0
+
+    -- Count columns from metadata
+    if resultSet.columns and type(resultSet.columns) == "table" then
+      for _, _ in pairs(resultSet.columns) do
+        col_count = col_count + 1
+      end
+    elseif row_count > 0 then
+      -- Fallback: count from first row
+      for _, _ in pairs(rows[1]) do
+        col_count = col_count + 1
+      end
+    end
+
+    -- Show divider if multiple result sets or configured to show for single
+    if #resultSets > 1 or show_result_set_info then
       if i > 1 or show_result_set_info then
-        -- Build metadata for divider
-        -- For first result set (i==1), use current result set metadata
-        -- For subsequent sets, use previous result set metadata
-        local target_result_set = (i == 1) and result_set or results[i - 1]
-        local row_count = #target_result_set
-        local col_count = 0
-        if row_count > 0 then
-          -- Count columns from first row (excluding 'name' helper field)
-          for key, _ in pairs(target_result_set[1]) do
-            if key ~= "name" or #target_result_set[1] == 1 then
-              col_count = col_count + 1
-            end
-          end
-        end
-
-        -- Format execution time
-        local run_time = ""
-        if execution_time_ms then
-          if execution_time_ms < 1000 then
-            run_time = string.format("%.0fms", execution_time_ms)
-          else
-            run_time = string.format("%.2fs", execution_time_ms / 1000)
-          end
-        end
-
         local metadata = {
           row_count = row_count,
           col_count = col_count,
           result_set_num = i,
-          total_result_sets = #results,
+          total_result_sets = #resultSets,
           run_time = run_time,
           date = date_str,
           time = time_str,
@@ -508,59 +602,13 @@ function UiQuery.format_results(results, sql, execution_time_ms)
           table.insert(lines, divider_line)
         end
       end
-
-      -- Format this result set
-      local set_lines = UiQuery.format_single_result_set(result_set)
-      for _, line in ipairs(set_lines) do
-        table.insert(lines, line)
-      end
-    end
-    return lines
-  end
-
-  -- Single result set - show info if configured
-  if show_result_set_info then
-    local row_count = #results
-    local col_count = 0
-    if row_count > 0 then
-      for key, _ in pairs(results[1]) do
-        if key ~= "name" or #results[1] == 1 then
-          col_count = col_count + 1
-        end
-      end
     end
 
-    -- Format execution time
-    local run_time = ""
-    if execution_time_ms then
-      if execution_time_ms < 1000 then
-        run_time = string.format("%.0fms", execution_time_ms)
-      else
-        run_time = string.format("%.2fs", execution_time_ms / 1000)
-      end
+    -- Format this result set (rows array + column metadata)
+    local set_lines = UiQuery.format_single_result_set(rows, resultSet.columns)
+    for _, line in ipairs(set_lines) do
+      table.insert(lines, line)
     end
-
-    local metadata = {
-      row_count = row_count,
-      col_count = col_count,
-      result_set_num = 1,
-      total_result_sets = 1,
-      run_time = run_time,
-      date = date_str,
-      time = time_str,
-    }
-
-    -- Add divider before single result set
-    local divider_lines = UiQuery.parse_divider_format(divider_format, metadata)
-    for _, divider_line in ipairs(divider_lines) do
-      table.insert(lines, divider_line)
-    end
-  end
-
-  -- Format single result set
-  local set_lines = UiQuery.format_single_result_set(results)
-  for _, line in ipairs(set_lines) do
-    table.insert(lines, line)
   end
 
   return lines
@@ -568,23 +616,52 @@ end
 
 ---Format a single result set for display
 ---@param result_set table Array of row objects
+---@param columns_metadata table? Column metadata from Node.js { colName: { index: 0, ... }, ... }
 ---@return string[] lines
-function UiQuery.format_single_result_set(result_set)
+function UiQuery.format_single_result_set(result_set, columns_metadata)
   local lines = {}
 
-  if #result_set == 0 then
-    return lines
-  end
-
-  -- Get column names from first row
-  local first_row = result_set[1]
+  -- Get column names from metadata or first row
   local columns = {}
-  for key, _ in pairs(first_row) do
-    if key ~= "name" or #result_set[1] == 1 then
-      table.insert(columns, key)
+  local has_columns = false
+
+  if columns_metadata and type(columns_metadata) == "table" then
+    -- Try to get columns from metadata
+    for col_name, col_info in pairs(columns_metadata) do
+      if col_name ~= vim.NIL then  -- Skip vim.NIL keys
+        table.insert(columns, { name = col_name, index = col_info.index or 0 })
+        has_columns = true
+      end
+    end
+
+    if has_columns then
+      -- Sort by index to maintain column order
+      table.sort(columns, function(a, b) return a.index < b.index end)
+
+      -- Extract just the names
+      local col_names = {}
+      for _, col in ipairs(columns) do
+        table.insert(col_names, col.name)
+      end
+      columns = col_names
     end
   end
-  table.sort(columns)
+
+  if not has_columns and #result_set > 0 then
+    -- Fallback: get column names from first row
+    local first_row = result_set[1]
+    for key, _ in pairs(first_row) do
+      table.insert(columns, key)
+    end
+    table.sort(columns)
+    has_columns = true
+  end
+
+  if not has_columns then
+    -- No rows and no column metadata - driver limitation with 0-row results
+    table.insert(lines, "(Query returned 0 rows - column information not available from driver)")
+    return lines
+  end
 
   -- Calculate column widths
   local widths = {}
@@ -619,16 +696,22 @@ function UiQuery.format_single_result_set(result_set)
   table.insert(lines, table.concat(sep_parts, "-+-"))
 
   -- Build rows
-  for _, row in ipairs(result_set) do
-    local row_parts = {}
-    for _, col in ipairs(columns) do
-      local value = tostring(row[col] or "")
-      -- Replace newlines with space for display
-      value = value:gsub("\n", " ")
-      local padded = value .. string.rep(" ", widths[col] - #value)
-      table.insert(row_parts, padded)
+  if #result_set > 0 then
+    for _, row in ipairs(result_set) do
+      local row_parts = {}
+      for _, col in ipairs(columns) do
+        local value = tostring(row[col] or "")
+        -- Replace newlines with space for display
+        value = value:gsub("\n", " ")
+        local padded = value .. string.rep(" ", widths[col] - #value)
+        table.insert(row_parts, padded)
+      end
+      table.insert(lines, table.concat(row_parts, " | "))
     end
-    table.insert(lines, table.concat(row_parts, " | "))
+  else
+    -- No rows returned - show message
+    table.insert(lines, "")
+    table.insert(lines, "(0 rows)")
   end
 
   return lines

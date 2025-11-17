@@ -550,7 +550,7 @@ function UiTree.execute_action(action)
   local parent = action.parent
 
   -- Navigate up past groups to find actual parent object
-  while parent and (parent.object_type == "column_group" or parent.object_type == "index_group" or parent.object_type == "key_group") do
+  while parent and (parent.object_type == "column_group" or parent.object_type == "index_group" or parent.object_type == "key_group" or parent.object_type == "actions_group") do
     parent = parent.parent
   end
 

@@ -703,12 +703,18 @@ function SqlServerAdapter:parse_indexes(result)
   if result.success and result.resultSets and #result.resultSets > 0 then
     local rows = result.resultSets[1].rows or {}
     for _, row in ipairs(rows) do
+      -- Handle vim.NIL for column_names
+      local col_names = row.column_names
+      if col_names == vim.NIL or col_names == nil then
+        col_names = ""
+      end
+
       table.insert(indexes, {
         name = row.index_name,
         type = row.index_type,
         is_unique = row.is_unique == 1 or row.is_unique == true,
         is_primary = row.is_primary_key == 1 or row.is_primary_key == true,
-        columns = vim.split(row.column_names or "", ", ", { plain = true }),
+        columns = vim.split(col_names, ", ", { plain = true }),
       })
     end
   end
@@ -723,13 +729,25 @@ function SqlServerAdapter:parse_constraints(result)
   if result.success and result.resultSets and #result.resultSets > 0 then
     local rows = result.resultSets[1].rows or {}
     for _, row in ipairs(rows) do
+      -- Handle vim.NIL for column_names
+      local col_names = row.column_names
+      if col_names == vim.NIL or col_names == nil then
+        col_names = ""
+      end
+
+      -- Handle vim.NIL for referenced_columns
+      local ref_columns = nil
+      if row.referenced_columns and row.referenced_columns ~= vim.NIL then
+        ref_columns = vim.split(row.referenced_columns, ", ", { plain = true })
+      end
+
       table.insert(constraints, {
         name = row.constraint_name,
         type = row.constraint_type,
-        columns = vim.split(row.column_names or "", ", ", { plain = true }),
+        columns = vim.split(col_names, ", ", { plain = true }),
         referenced_table = row.referenced_table,
         referenced_schema = row.referenced_schema,
-        referenced_columns = row.referenced_columns and vim.split(row.referenced_columns, ", ", { plain = true }) or nil,
+        referenced_columns = ref_columns,
       })
     end
   end
