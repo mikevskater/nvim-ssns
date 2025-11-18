@@ -217,8 +217,10 @@ end
 ---@return string sql
 function ProcedureClass:generate_exec()
   local adapter = self:get_adapter()
+  local db = self:get_database()
+  local db_name = db and db.db_name or nil
   local qualified_name = adapter:get_qualified_name(
-    self.parent.parent.db_name,
+    db_name,
     self.schema_name,
     self.procedure_name
   )
@@ -245,8 +247,10 @@ end
 ---@return string sql
 function ProcedureClass:generate_drop()
   local adapter = self:get_adapter()
+  local db = self:get_database()
+  local db_name = db and db.db_name or nil
   local qualified_name = adapter:get_qualified_name(
-    self.parent.parent.db_name,
+    db_name,
     self.schema_name,
     self.procedure_name
   )

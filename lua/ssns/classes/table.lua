@@ -241,12 +241,12 @@ function TableClass:load_columns()
 
   local adapter = self:get_adapter()
 
-  -- Navigate up: Table -> Database (no schemas in new structure)
-  local db = self.parent
+  -- Get database using get_database() method (handles both schema and non-schema databases)
+  local db = self:get_database()
 
   -- Validate we have a database
   if not db then
-    vim.notify(string.format("SSNS: Table %s has no parent (database)", self.table_name), vim.log.levels.ERROR)
+    vim.notify(string.format("SSNS: Table %s has no parent database", self.table_name), vim.log.levels.ERROR)
     self.columns = {}
     self.columns_loaded = true
     return self.columns
@@ -266,8 +266,12 @@ function TableClass:load_columns()
   local query = adapter:get_columns_query(db.db_name, self.schema_name, self.table_name)
 
   -- Execute query
-  -- TODO: Implement actual execution via vim-dadbod
   local results = adapter:execute(self:get_server().connection, query)
+
+  -- Check for errors
+  if results.error then
+    vim.notify(string.format("SSNS: Error loading columns: %s", results.error.message or vim.inspect(results.error)), vim.log.levels.ERROR)
+  end
 
   -- Parse results
   local columns = adapter:parse_columns(results)
@@ -292,12 +296,12 @@ function TableClass:load_indexes()
 
   local adapter = self:get_adapter()
 
-  -- Navigate up: Table -> Database (no schemas in new structure)
-  local db = self.parent
+  -- Get database using get_database() method (handles both schema and non-schema databases)
+  local db = self:get_database()
 
   -- Validate we have a database
   if not db then
-    vim.notify(string.format("SSNS: Table %s has no parent (database)", self.table_name), vim.log.levels.ERROR)
+    vim.notify(string.format("SSNS: Table %s has no parent database", self.table_name), vim.log.levels.ERROR)
     self.indexes = {}
     self.indexes_loaded = true
     return self.indexes
@@ -351,12 +355,12 @@ function TableClass:load_constraints()
 
   local adapter = self:get_adapter()
 
-  -- Navigate up: Table -> Database (no schemas in new structure)
-  local db = self.parent
+  -- Get database using get_database() method (handles both schema and non-schema databases)
+  local db = self:get_database()
 
   -- Validate we have a database
   if not db then
-    vim.notify(string.format("SSNS: Table %s has no parent (database)", self.table_name), vim.log.levels.ERROR)
+    vim.notify(string.format("SSNS: Table %s has no parent database", self.table_name), vim.log.levels.ERROR)
     self.constraints = {}
     self.constraints_loaded = true
     return self.constraints
@@ -449,8 +453,13 @@ end
 ---@return string sql
 function TableClass:generate_select(top)
   local adapter = self:get_adapter()
+
+  -- Get database - handle both SQL Server (Table->Schema->Database) and MySQL (Table->Database)
+  local db = self:get_database()
+  local db_name = db and db.db_name or nil
+
   local qualified_name = adapter:get_qualified_name(
-    self.parent.parent.db_name,
+    db_name,
     self.schema_name,
     self.table_name
   )
@@ -458,7 +467,7 @@ function TableClass:generate_select(top)
   if top then
     if adapter.db_type == "sqlserver" then
       return string.format("SELECT TOP %d * FROM %s;", top, qualified_name)
-    elseif adapter.db_type == "postgres" or adapter.db_type == "mysql" then
+    elseif adapter.db_type == "postgres" or adapter.db_type == "mysql" or adapter.db_type == "sqlite" then
       return string.format("SELECT * FROM %s LIMIT %d;", qualified_name, top)
     end
   end
@@ -470,8 +479,10 @@ end
 ---@return string sql
 function TableClass:generate_insert()
   local adapter = self:get_adapter()
+  local db = self:get_database()
+  local db_name = db and db.db_name or nil
   local qualified_name = adapter:get_qualified_name(
-    self.parent.parent.db_name,
+    db_name,
     self.schema_name,
     self.table_name
   )
@@ -500,8 +511,10 @@ end
 ---@return string sql
 function TableClass:generate_drop()
   local adapter = self:get_adapter()
+  local db = self:get_database()
+  local db_name = db and db.db_name or nil
   local qualified_name = adapter:get_qualified_name(
-    self.parent.parent.db_name,
+    db_name,
     self.schema_name,
     self.table_name
   )
@@ -513,8 +526,10 @@ end
 ---@return string sql
 function TableClass:generate_count()
   local adapter = self:get_adapter()
+  local db = self:get_database()
+  local db_name = db and db.db_name or nil
   local qualified_name = adapter:get_qualified_name(
-    self.parent.parent.db_name,
+    db_name,
     self.schema_name,
     self.table_name
   )
@@ -526,8 +541,10 @@ end
 ---@return string sql
 function TableClass:generate_describe()
   local adapter = self:get_adapter()
+  local db = self:get_database()
+  local db_name = db and db.db_name or nil
   local qualified_name = adapter:get_qualified_name(
-    self.parent.parent.db_name,
+    db_name,
     self.schema_name,
     self.table_name
   )
@@ -544,8 +561,10 @@ end
 ---@return string sql
 function TableClass:generate_update()
   local adapter = self:get_adapter()
+  local db = self:get_database()
+  local db_name = db and db.db_name or nil
   local qualified_name = adapter:get_qualified_name(
-    self.parent.parent.db_name,
+    db_name,
     self.schema_name,
     self.table_name
   )
@@ -576,8 +595,10 @@ end
 ---@return string sql
 function TableClass:generate_delete()
   local adapter = self:get_adapter()
+  local db = self:get_database()
+  local db_name = db and db.db_name or nil
   local qualified_name = adapter:get_qualified_name(
-    self.parent.parent.db_name,
+    db_name,
     self.schema_name,
     self.table_name
   )
@@ -634,8 +655,10 @@ end
 ---@return string sql The CREATE TABLE script
 function TableClass:construct_create_table_from_metadata()
   local adapter = self:get_adapter()
+  local db = self:get_database()
+  local db_name = db and db.db_name or nil
   local qualified_name = adapter:get_qualified_name(
-    self.parent.parent.db_name,
+    db_name,
     self.schema_name,
     self.table_name
   )

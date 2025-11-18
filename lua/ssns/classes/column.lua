@@ -47,8 +47,13 @@ end
 function ColumnClass:get_full_type()
   local type_str = self.data_type
 
+  -- Helper to check if value is a valid number (not nil or vim.NIL)
+  local function is_valid_number(val)
+    return val and type(val) == "number"
+  end
+
   -- Add length/precision/scale based on type
-  if self.max_length and self.max_length > 0 then
+  if is_valid_number(self.max_length) and self.max_length > 0 then
     -- Character and binary types
     if self.max_length == -1 then
       -- MAX length in SQL Server
@@ -59,9 +64,9 @@ function ColumnClass:get_full_type()
     else
       type_str = string.format("%s(%d)", type_str, self.max_length)
     end
-  elseif self.precision and self.precision > 0 then
+  elseif is_valid_number(self.precision) and self.precision > 0 then
     -- Numeric types with precision
-    if self.scale and self.scale > 0 then
+    if is_valid_number(self.scale) and self.scale > 0 then
       type_str = string.format("%s(%d,%d)", type_str, self.precision, self.scale)
     else
       type_str = string.format("%s(%d)", type_str, self.precision)

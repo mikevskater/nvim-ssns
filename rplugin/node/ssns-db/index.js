@@ -1,6 +1,6 @@
-const SqlServerDriver = require('./drivers/sqlserver');
+const DriverFactory = require('./drivers/factory');
 
-// Driver registry
+// Driver registry - reuse drivers for same connection strings
 const drivers = new Map();
 
 /**
@@ -8,30 +8,16 @@ const drivers = new Map();
  * @param {string} connectionString - Database connection string
  * @returns {BaseDriver} Driver instance
  */
-function getDriver(connectionString) {
+function getDriverInstance(connectionString) {
   // Check if driver already exists in registry
   if (drivers.has(connectionString)) {
     return drivers.get(connectionString);
   }
 
-  // Determine driver type from connection string
-  let driver;
-  if (connectionString.startsWith('sqlserver://')) {
-    driver = new SqlServerDriver(connectionString);
-  } else if (connectionString.startsWith('postgres://')) {
-    // TODO: PostgreSQL driver (Phase 8)
-    throw new Error('PostgreSQL driver not yet implemented');
-  } else if (connectionString.startsWith('mysql://')) {
-    // TODO: MySQL driver (Phase 8)
-    throw new Error('MySQL driver not yet implemented');
-  } else if (connectionString.startsWith('sqlite://')) {
-    // TODO: SQLite driver (Phase 8)
-    throw new Error('SQLite driver not yet implemented');
-  } else {
-    throw new Error(`Unknown connection string format: ${connectionString}`);
-  }
+  // Use factory to create appropriate driver
+  const driver = DriverFactory.getDriver(connectionString);
 
-  // Store in registry
+  // Store in registry for reuse
   drivers.set(connectionString, driver);
   return driver;
 }
@@ -74,7 +60,7 @@ module.exports = (plugin) => {
       }
 
       // Get driver for this connection
-      const driver = getDriver(connectionString);
+      const driver = getDriverInstance(connectionString);
 
       // Execute query
       const result = await driver.execute(query);
@@ -120,7 +106,7 @@ module.exports = (plugin) => {
       }
 
       // Get driver for this connection
-      const driver = getDriver(connectionString);
+      const driver = getDriverInstance(connectionString);
 
       // Get metadata
       const metadata = await driver.getMetadata(objectType, objectName, schemaName);
@@ -172,7 +158,7 @@ module.exports = (plugin) => {
 
       console.error('[SSNS] Getting driver for:', connectionString);
       // Get driver for this connection
-      const driver = getDriver(connectionString);
+      const driver = getDriverInstance(connectionString);
 
       console.error('[SSNS] Testing connection...');
       // Test connection
