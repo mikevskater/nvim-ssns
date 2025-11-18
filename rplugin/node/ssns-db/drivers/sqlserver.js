@@ -227,58 +227,98 @@ class SqlServerDriver extends BaseDriver {
 
   /**
    * Execute query using msnodesqlv8 (Windows auth)
+   *
+   * Uses queryRaw to handle multiple result sets properly.
+   * The callback is invoked once per result set, with 'more' parameter
+   * indicating if there are additional result sets.
    */
   async executeWithMsnodesqlv8(query, startTime) {
     return new Promise((resolve) => {
-      this.connection.query(query, (err, rows) => {
-        const endTime = Date.now();
-        const executionTime = endTime - startTime;
+      const allResultSets = [];
+      let hasError = false;
+      let errorInfo = null;
 
+      // Use queryRaw for multi-result set support
+      this.connection.queryRaw(query, (err, results, more) => {
+        // Check for errors
         if (err) {
-          resolve({
-            resultSets: [],
-            metadata: {
-              executionTime: executionTime,
-              rowsAffected: []
-            },
-            error: {
-              message: err.message || 'Unknown error',
-              code: err.code || null,
-              lineNumber: err.lineNumber || null,
-              procName: err.procName || null,
-              state: err.state || null,
-              class: err.class || null
-            }
-          });
+          hasError = true;
+          errorInfo = err;
+
+          // If error, don't wait for more results - resolve immediately
+          if (!more) {
+            const endTime = Date.now();
+            const executionTime = endTime - startTime;
+
+            resolve({
+              resultSets: [],
+              metadata: {
+                executionTime: executionTime,
+                rowsAffected: []
+              },
+              error: {
+                message: err.message || 'Unknown error',
+                code: err.code || null,
+                lineNumber: err.lineNumber || null,
+                procName: err.procName || null,
+                state: err.state || null,
+                class: err.class || null
+              }
+            });
+          }
           return;
         }
 
-        // Format rows into result sets
-        const columns = {};
-        if (rows && rows.length > 0) {
-          // Infer columns from first row
-          Object.keys(rows[0]).forEach((colName, index) => {
-            columns[colName] = {
+        // Process this result set
+        if (results && results.rows) {
+          // queryRaw returns { meta, rows }
+          // meta contains column metadata
+          // rows is array of arrays (not objects!)
+
+          const columns = {};
+          const meta = results.meta || [];
+
+          // Build column metadata from meta array
+          meta.forEach((colMeta, index) => {
+            columns[colMeta.name] = {
               index: index,
-              name: colName,
-              type: 'unknown',
-              nullable: true
+              name: colMeta.name,
+              type: this.mapSqlType(colMeta.sqlType) || 'unknown',
+              nullable: colMeta.nullable !== false,
+              size: colMeta.size
             };
+          });
+
+          // Convert rows from array of arrays to array of objects
+          const rowObjects = results.rows.map(rowArray => {
+            const rowObj = {};
+            meta.forEach((colMeta, index) => {
+              rowObj[colMeta.name] = rowArray[index];
+            });
+            return rowObj;
+          });
+
+          allResultSets.push({
+            columns: columns,
+            rows: rowObjects,
+            rowCount: rowObjects.length
           });
         }
 
-        resolve({
-          resultSets: [{
-            columns: columns,
-            rows: rows || [],
-            rowCount: rows ? rows.length : 0
-          }],
-          metadata: {
-            executionTime: executionTime,
-            rowsAffected: [rows ? rows.length : 0]
-          },
-          error: null
-        });
+        // Check if this is the last result set
+        if (!more) {
+          const endTime = Date.now();
+          const executionTime = endTime - startTime;
+
+          resolve({
+            resultSets: allResultSets,
+            metadata: {
+              executionTime: executionTime,
+              rowsAffected: allResultSets.map(rs => rs.rowCount)
+            },
+            error: null
+          });
+        }
       });
     });
   }

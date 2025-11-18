@@ -64,7 +64,8 @@ class MySQLDriver extends BaseDriver {
       connectionLimit: 10,
       queueLimit: 0,
       enableKeepAlive: true,
-      keepAliveInitialDelay: 0
+      keepAliveInitialDelay: 0,
+      multipleStatements: true  // Enable multiple result sets
     };
 
     if (auth) {

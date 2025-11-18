@@ -116,6 +116,10 @@ class PostgresDriver extends BaseDriver {
   /**
    * Execute SQL query with structured result sets
    *
+   * PostgreSQL's pg library supports multiple queries separated by semicolons.
+   * For single query: result is an object { rows, fields, rowCount }
+   * For multiple queries: result is an array of result objects
+   *
    * @param {string} query - SQL query to execute
    * @param {Object} options - Execution options
    * @returns {Promise<Object>} Structured result object
@@ -129,24 +133,24 @@ class PostgresDriver extends BaseDriver {
         await this.connect();
       }
 
-      // Execute query
+      // Execute query - pg supports multiple statements separated by semicolons
       const result = await this.pool.query(query);
 
       const endTime = Date.now();
       const executionTime = endTime - startTime;
 
-      // PostgreSQL returns result differently than MySQL
-      // result.rows = array of row objects
-      // result.fields = array of field metadata
-      // result.rowCount = number of affected rows
+      // Check if this is a single result or multiple results
+      // pg@7.0+ returns an array for multiple statements
+      const results = Array.isArray(result) ? result : [result];
 
-      const resultSet = this.formatResultSet(result.rows, result.fields);
+      // Format each result set
+      const resultSets = results.map(res => this.formatResultSet(res.rows, res.fields));
 
       return {
-        resultSets: [resultSet],
+        resultSets: resultSets,
         metadata: {
           executionTime: executionTime,
-          rowsAffected: [result.rowCount || resultSet.rowCount]
+          rowsAffected: results.map(res => res.rowCount || 0)
         },
         error: null
       };
