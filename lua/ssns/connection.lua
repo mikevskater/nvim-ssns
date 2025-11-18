@@ -2,6 +2,36 @@
 ---Uses Node.js backend for SQL execution
 local Connection = {}
 
+---Query cache for metadata queries
+local QueryCache = require('ssns.query_cache')
+
+---Check if a query should be cached
+---@param query string The SQL query
+---@return boolean should_cache True if query should be cached
+local function should_cache_query(query)
+  local normalized = vim.trim(query):upper()
+
+  -- Don't cache data-modifying queries
+  if normalized:match("^INSERT%s") or
+     normalized:match("^UPDATE%s") or
+     normalized:match("^DELETE%s") or
+     normalized:match("^CREATE%s") or
+     normalized:match("^ALTER%s") or
+     normalized:match("^DROP%s") or
+     normalized:match("^TRUNCATE%s") or
+     normalized:match("^EXEC%s") or
+     normalized:match("^EXECUTE%s") then
+    return false
+  end
+
+  -- Cache SELECT queries (including metadata queries)
+  if normalized:match("^SELECT%s") then
+    return true
+  end
+
+  return false
+end
+
 ---Test a database connection
 ---@param connection_string string The connection string to test
 ---@return boolean success
@@ -58,13 +88,24 @@ end
 ---Execute a query using Node.js backend
 ---@param connection_string string The connection string
 ---@param query string The SQL query to execute
----@param opts table? Options (reserved for future use)
+---@param opts table? Options { use_cache: boolean?, ttl: number? }
 ---@return table result Node.js result object { success, resultSets, metadata, error }
 function Connection.execute(connection_string, query, opts)
   opts = opts or {}
+  local use_cache = opts.use_cache == nil and true or opts.use_cache -- Default to true
+  local ttl = opts.ttl -- Optional custom TTL
 
   -- Handle USE statement - modify connection string if needed
   local final_conn_string, final_query = handle_use_statement(connection_string, query)
+
+  -- Check cache if enabled and query is cacheable
+  if use_cache and should_cache_query(final_query) then
+    local cached_result = QueryCache.get(final_conn_string, final_query, ttl)
+    if cached_result then
+      -- Return cached result
+      return cached_result
+    end
+  end
 
   -- Call Node.js RPC function SSNSExecuteQuery
   local success, raw_result = pcall(function()
@@ -118,12 +159,19 @@ function Connection.execute(connection_string, query, opts)
   end
 
   -- Success - return the full Node.js result object
-  return {
+  local result = {
     success = true,
     resultSets = raw_result.resultSets or raw_result["resultSets"] or {},
     metadata = raw_result.metadata or {},
     error = nil
   }
+
+  -- Cache successful results if caching is enabled and query is cacheable
+  if use_cache and should_cache_query(final_query) then
+    QueryCache.set(final_conn_string, final_query, result)
+  end
+
+  return result
 end
 
 ---Execute multiple queries in sequence
@@ -276,6 +324,24 @@ function Connection.get_pool_stats()
   end
 
   return stats
+end
+
+---Invalidate cached query results for a specific connection
+---@param connection_string string
+---@return number count Number of cache entries removed
+function Connection.invalidate_cache(connection_string)
+  return QueryCache.invalidate_connection(connection_string)
+end
+
+---Clear all cached query results
+function Connection.clear_cache()
+  QueryCache.clear_all()
+end
+
+---Get query cache statistics
+---@return table stats Cache statistics
+function Connection.get_cache_stats()
+  return QueryCache.get_stats()
 end
 
 ---Parse connection string into components

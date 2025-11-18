@@ -80,6 +80,13 @@ end
 ---Reload schemas from database
 ---@return boolean success
 function DbClass:reload()
+  -- Invalidate query cache for this database's server connection
+  local Connection = require('ssns.connection')
+  local server = self:get_server()
+  if server and server.connection_string then
+    Connection.invalidate_cache(server.connection_string)
+  end
+
   self:clear_children()
   return self:load()
 end

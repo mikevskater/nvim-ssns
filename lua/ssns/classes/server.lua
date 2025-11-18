@@ -233,6 +233,10 @@ end
 ---Reload databases from server
 ---@return boolean success
 function ServerClass:reload()
+  -- Invalidate query cache for this server's connection
+  local Connection = require('ssns.connection')
+  Connection.invalidate_cache(self.connection_string)
+
   self:clear_children()
   return self:load()
 end
