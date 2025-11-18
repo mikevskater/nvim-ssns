@@ -15,6 +15,7 @@
     "mssql": "^10.0.0",
     "mysql2": "^3.6.5",
     "neovim": "^5.1.0",
+    "pg": "^8.11.3",
     "sql.js": "^1.10.3"
   },
   "devDependencies": {

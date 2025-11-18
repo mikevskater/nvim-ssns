@@ -11,6 +11,7 @@
 const SqlServerDriver = require('./sqlserver');
 const MySQLDriver = require('./mysql');
 const SQLiteDriver = require('./sqlite');
+const PostgresDriver = require('./postgres');
 
 /**
  * Get the appropriate driver for a connection string
@@ -41,9 +42,9 @@ function getDriver(connectionString) {
     return new SQLiteDriver(connectionString);
   }
 
-  // PostgreSQL (future support)
+  // PostgreSQL
   if (connStr.startsWith('postgres://') || connStr.startsWith('postgresql://')) {
-    throw new Error('PostgreSQL support not yet implemented. Coming in Phase 8.1!');
+    return new PostgresDriver(connectionString);
   }
 
   // Unknown database type
@@ -106,7 +107,7 @@ function isSupported(dbType) {
  * @returns {Array<string>} List of supported database types
  */
 function getSupportedTypes() {
-  return ['sqlserver', 'mysql', 'sqlite'];
+  return ['sqlserver', 'mysql', 'sqlite', 'postgres'];
 }
 
 module.exports = {
