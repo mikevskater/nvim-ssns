@@ -54,6 +54,9 @@ function ServerClass.new(opts)
 
   self.adapter = adapter
 
+  -- Set object type for highlighting
+  self.object_type = "server"
+
   -- Set appropriate icon for server
   self.ui_state.icon = ""  -- Server icon
 
@@ -258,14 +261,19 @@ function ServerClass:get_databases()
 end
 
 ---Get connection status indicator for UI
----@return string status_icon "✓" for connected, "✗" for error, "" for disconnected
+---@return string status_icon Icon from config for current connection state
 function ServerClass:get_status_icon()
+  local Config = require('ssns.config')
+  local icons = Config.get_ui().icons
+
   if self.connection_state == ConnectionState.CONNECTED then
-    return "✓"
+    return icons.connected or "\u{f00c}"  -- ✓
   elseif self.connection_state == ConnectionState.ERROR then
-    return "✗"
+    return icons.error or "\u{f026}"  -- ⚠
   elseif self.connection_state == ConnectionState.CONNECTING then
-    return "⋯"
+    return icons.connecting or "\u{f110}"  --
+  elseif self.connection_state == ConnectionState.DISCONNECTED then
+    return icons.disconnected or "\u{f00d}"  -- ✗
   else
     return ""
   end

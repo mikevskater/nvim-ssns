@@ -34,6 +34,12 @@
 ---@field action string Action icon
 ---@field sequence string Sequence icon
 ---@field synonym string Synonym icon
+---@field connected string Connected status icon
+---@field disconnected string Disconnected status icon
+---@field connecting string Connecting/loading status icon
+---@field error string Error status icon
+---@field expanded string Expanded tree node icon
+---@field collapsed string Collapsed tree node icon
 
 ---@class CacheConfig
 ---@field ttl number Time to live in seconds for cached data
@@ -100,19 +106,30 @@ local default_config = {
     show_result_set_info = false,  -- Show divider/info before first result set and single result sets
 
     icons = {
-      server = "",
-      database = "",
-      schema = "",
-      table = "",
-      view = "",
-      procedure = "",
-      ["function"] = "",
-      column = "",
-      index = "",
-      key = "",
-      action = "",
-      sequence = "",
-      synonym = "",
+      -- Nerd Font icons (safe Unicode encoding)
+      server = "\u{f233}",      --
+      database = "\u{f1c0}",    --
+      schema = "\u{f07b}",      --
+      table = "\u{f0ce}",       --
+      view = "\u{f06e}",        --
+      procedure = "\u{f013}",   --
+      ["function"] = "\u{0192}", -- ƒ
+      column = "\u{f0ca}",      --
+      index = "\u{f0e7}",       --
+      key = "\u{f084}",         --
+      action = "\u{f04b}",      --
+      sequence = "\u{f292}",    --
+      synonym = "\u{f0c1}",     --
+
+      -- Status indicators
+      connected = "\u{f00c}",      --
+      disconnected = "\u{f00d}",   --
+      connecting = "\u{f110}",     --
+      error = "\u{f026}",          --
+
+      -- Tree expand/collapse
+      expanded = "\u{f078}",    --
+      collapsed = "\u{f054}",   --
     },
   },
 

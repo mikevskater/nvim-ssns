@@ -85,22 +85,65 @@ require('ssns').setup({
     show_result_set_info = false,
 
     -- Icons for different object types
-    -- Uses Nerd Fonts - set to "" if you don't have Nerd Fonts installed
+    -- Uses Nerd Fonts with Unicode escape sequences for safe encoding
+    -- If you don't have Nerd Fonts, replace with ASCII: server = "[S]", etc.
     icons = {
-      server = "",      -- Server icon
-      database = "",    -- Database icon
-      schema = "",      -- Schema/folder icon
-      table = "",       -- Table icon
-      view = "",        -- View icon
-      procedure = "",   -- Procedure icon
-      ["function"] = "", -- Function icon (note: 'function' is keyword, use brackets)
-      column = "",      -- Column icon
-      index = "",       -- Index icon
-      key = "",         -- Key/constraint icon
-      action = "",      -- Action icon
-      sequence = "",    -- Sequence icon (PostgreSQL)
-      synonym = "",     -- Synonym icon (SQL Server)
+      -- Object type icons
+      server = "\u{f233}",      --  Server icon
+      database = "\u{f1c0}",    --  Database icon
+      schema = "\u{f07b}",      --  Schema/folder icon
+      table = "\u{f0ce}",       --  Table icon
+      view = "\u{f06e}",        --  View icon
+      procedure = "\u{f013}",   --  Procedure icon
+      ["function"] = "\u{0192}", -- ƒ Function icon (note: 'function' is keyword, use brackets)
+      column = "\u{f0ca}",      --  Column icon
+      index = "\u{f0e7}",       --  Index icon
+      key = "\u{f084}",         --  Key/constraint icon
+      action = "\u{f04b}",      --  Action icon
+      sequence = "\u{f292}",    --  Sequence icon (PostgreSQL)
+      synonym = "\u{f0c1}",     --  Synonym icon (SQL Server)
+
+      -- Status indicators
+      connected = "\u{f00c}",      --  Connected status
+      disconnected = "\u{f00d}",   --  Disconnected status
+      connecting = "\u{f110}",     --  Connecting/loading status
+      error = "\u{f026}",          --  Error status
+
+      -- Tree expand/collapse
+      expanded = "\u{f078}",    --  Expanded tree node
+      collapsed = "\u{f054}",   --  Collapsed tree node
     },
+
+    -- ASCII Fallback (if you don't have Nerd Fonts installed):
+    -- Uncomment and use this instead of the Nerd Font icons above
+    --[[
+    icons = {
+      -- Object type icons
+      server = "[S]",           -- Server
+      database = "[DB]",        -- Database
+      schema = "[SCH]",         -- Schema
+      table = "[T]",            -- Table
+      view = "[V]",             -- View
+      procedure = "[P]",        -- Procedure
+      ["function"] = "[F]",     -- Function
+      column = "[C]",           -- Column
+      index = "[I]",            -- Index
+      key = "[K]",              -- Key
+      action = "[>]",           -- Action
+      sequence = "[#]",         -- Sequence
+      synonym = "[~]",          -- Synonym
+
+      -- Status indicators
+      connected = "[OK]",       -- Connected
+      disconnected = "[X]",     -- Disconnected
+      connecting = "[..]",      -- Connecting
+      error = "[!]",            -- Error
+
+      -- Tree expand/collapse
+      expanded = "[-]",         -- Expanded
+      collapsed = "[+]",        -- Collapsed
+    },
+    --]]
   },
 
   -- ============================================================================

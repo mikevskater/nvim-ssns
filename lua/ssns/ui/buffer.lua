@@ -424,8 +424,8 @@ function UiBuffer.get_name_column(line_number)
   end
 
   -- Find where the actual name starts
-  -- Pattern: skip whitespace, then arrow (▸ or ▾) if present, then optional icon, then the name
-  local col = 0
+  -- Pattern: skip whitespace, then expand/collapse icon if present, then object icon, then the name
+  -- Example: "  ▸  server_name" or "    ▾  dbo.Employees"
   local i = 1
 
   -- Skip leading whitespace (indent)
@@ -437,27 +437,28 @@ function UiBuffer.get_name_column(line_number)
     i = i + 1
   end
 
-  -- Skip arrow if present (▸ or ▾ are 3 bytes in UTF-8)
-  local arrow = line:sub(i, i + 2)
-  if arrow == "▸ " or arrow == "▾ " then
-    i = i + 4  -- 3 bytes for arrow + 1 space
-  end
+  -- Skip all icons and spaces until we reach the actual text name
+  -- Icons are UTF-8 characters (multi-byte, > 127)
+  -- We need to skip: expand icon + space + object icon + space
+  while i <= #line do
+    local byte = line:byte(i)
 
-  -- Skip icon if present (most icons are 3-4 bytes in UTF-8)
-  -- Check if next character looks like an icon (non-ASCII)
-  local byte = line:byte(i)
-  if byte and byte > 127 then
-    -- This is likely an icon, skip it
-    -- Icons are typically 3-4 bytes
-    local icon_bytes = 0
-    while i <= #line and line:byte(i) and line:byte(i) > 127 do
+    -- Skip UTF-8 icon characters (multi-byte characters)
+    if byte and byte > 127 then
+      -- Skip the multi-byte icon character
+      -- UTF-8 icons can be 1-4 bytes
+      local bytes_to_skip = 1
+      if byte >= 240 then bytes_to_skip = 4
+      elseif byte >= 224 then bytes_to_skip = 3
+      elseif byte >= 192 then bytes_to_skip = 2
+      end
+      i = i + bytes_to_skip
+    -- Skip spaces between icons
+    elseif byte and (line:sub(i, i) == " " or line:sub(i, i) == "\t") then
       i = i + 1
-      icon_bytes = icon_bytes + 1
-      if icon_bytes >= 4 then break end
-    end
-    -- Skip space after icon if present
-    if i <= #line and line:sub(i, i) == " " then
-      i = i + 1
+    else
+      -- We've reached the start of the actual name
+      break
     end
   end
 
