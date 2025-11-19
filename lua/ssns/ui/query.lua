@@ -3,7 +3,7 @@
 local UiQuery = {}
 
 ---Track query buffers
----@type table<number, {server: ServerClass, database: DbClass?}>
+---@type table<number, {server: ServerClass, database: DbClass?, last_database: string?}>
 UiQuery.query_buffers = {}
 
 ---Track buffer counter for unique names
@@ -118,10 +118,11 @@ function UiQuery.create_query_buffer(server, database, sql, object_name)
   -- Enable line numbers
   vim.api.nvim_buf_set_option(bufnr, 'buflisted', true)
 
-  -- Track this buffer
+  -- Track this buffer with initial database context
   UiQuery.query_buffers[bufnr] = {
     server = server,
     database = database,
+    last_database = database and database.db_name or nil,  -- Initial context from parent
   }
 
   -- Set buffer-local keymaps
@@ -222,11 +223,28 @@ function UiQuery.execute_query(bufnr, visual)
   -- Execute query
   vim.notify("SSNS: Executing query...", vim.log.levels.INFO)
 
-  local adapter = server:get_adapter()
+  -- Get buffer's current database context
+  -- Priority: last_database > database.db_name > nil
+  local buffer_db = buffer_info.last_database
+  if not buffer_db and buffer_info.database then
+    buffer_db = buffer_info.database.db_name
+  end
+
+  -- Execute with buffer context (handles USE statements and GO separators)
+  local Connection = require('ssns.connection')
   local start_time = vim.loop.hrtime()
-  local result = adapter:execute(server.connection, sql)
+  local result, last_database = Connection.execute_with_buffer_context(
+    server.connection_string,
+    sql,
+    buffer_db
+  )
   local end_time = vim.loop.hrtime()
   local execution_time_ms = (end_time - start_time) / 1000000  -- Convert nanoseconds to milliseconds
+
+  -- Update buffer state with last database used
+  if last_database then
+    buffer_info.last_database = last_database
+  end
 
   -- Check if query succeeded
   if not result.success then
@@ -418,7 +436,8 @@ function UiQuery.display_results(result, sql, execution_time_ms)
   end
 
   -- Format results from Node.js format
-  local lines = UiQuery.format_results(result.resultSets, sql, execution_time_ms)
+  -- Pass metadata for total_time support
+  local lines = UiQuery.format_results(result.resultSets, sql, execution_time_ms, result.metadata)
 
   -- Set lines in buffer
   vim.api.nvim_buf_set_option(result_buf, 'modifiable', true)
@@ -449,34 +468,44 @@ function UiQuery.display_results(result, sql, execution_time_ms)
 end
 
 ---Parse divider format string and generate lines
----@param format string Divider format (e.g., "20#", "10-\n10-", "5-(%row_count% rows)5-", "%fit%=")
----@param metadata table Metadata for variable replacement
+---@param format string Divider format (e.g., "20#", "10-\n10-", "5-(%row_count% rows)5-", "%fit%=", "%fit_results%-")
+---@param metadata table Metadata for variable replacement (row_count, col_count, result_set_num, total_result_sets, run_time, total_time, chunk_number, batch_number, date, time, result_width)
 ---@return string[] lines Array of divider lines
 function UiQuery.parse_divider_format(format, metadata)
   if not format or format == "" then
     return { "" }  -- Default: single blank line
   end
 
-  -- Replace variables with metadata values (except %fit%)
+  -- Replace variables with metadata values (except %fit% and %fit_results%)
   local processed = format
   for key, value in pairs(metadata) do
-    processed = processed:gsub("%%" .. key .. "%%", tostring(value))
+    -- Skip special patterns that need width calculation
+    if key ~= "result_width" then
+      processed = processed:gsub("%%" .. key .. "%%", tostring(value))
+    end
   end
 
   -- Split by \n for multiple lines
   -- Handle both actual newlines and escaped \n
   local parts = vim.split(processed, "\n", { plain = true })
 
-  -- PASS 1: Generate lines with %fit% placeholder, track max width
+  -- PASS 1: Generate lines with %fit% and %fit_results% placeholders, track max width
   local lines = {}
   local max_width = 0
   local has_fit_pattern = false
+  local has_fit_results_pattern = false
 
   for _, part in ipairs(parts) do
     local line
 
+    -- Check if this part contains %fit_results% pattern
+    if part:match("%%fit_results%%") then
+      has_fit_results_pattern = true
+      -- Temporarily replace %fit_results% with empty string to calculate the base line
+      local temp_part = part:gsub("%%fit_results%%", "")
+      line = temp_part
     -- Check if this part contains %fit% pattern
-    if part:match("%%fit%%") then
+    elseif part:match("%%fit%%") then
       has_fit_pattern = true
       -- Temporarily replace %fit% with empty string to calculate the base line
       local temp_part = part:gsub("%%fit%%", "")
@@ -502,7 +531,28 @@ function UiQuery.parse_divider_format(format, metadata)
     end
   end
 
-  -- PASS 2: If %fit% pattern exists, replace with max_width
+  -- PASS 2: If %fit_results% pattern exists, replace with result_width
+  if has_fit_results_pattern then
+    local result_width = metadata.result_width or 0
+    for i, part in ipairs(parts) do
+      if part:match("%%fit_results%%") then
+        -- Extract character after %fit_results%
+        local char = part:match("%%fit_results%%(.)")
+        if char then
+          -- Replace %fit_results% with the result_width count
+          lines[i] = part:gsub("%%fit_results%%", tostring(result_width))
+
+          -- Now parse the repeat pattern
+          local count_str, repeat_char = lines[i]:match("^(%d+)(.+)$")
+          if count_str and repeat_char then
+            lines[i] = string.rep(repeat_char, tonumber(count_str))
+          end
+        end
+      end
+    end
+  end
+
+  -- PASS 3: If %fit% pattern exists, replace with max_width
   if has_fit_pattern then
     for i, part in ipairs(parts) do
       if part:match("%%fit%%") then
@@ -530,7 +580,7 @@ end
 ---@param sql string The SQL that was executed
 ---@param execution_time_ms number? Execution time in milliseconds
 ---@return string[] lines
-function UiQuery.format_results(resultSets, sql, execution_time_ms)
+function UiQuery.format_results(resultSets, sql, execution_time_ms, query_metadata)
   local lines = {}
 
   -- Get current date/time
@@ -555,13 +605,21 @@ function UiQuery.format_results(resultSets, sql, execution_time_ms)
   local divider_format = ui_config.result_set_divider or ""
   local show_result_set_info = ui_config.show_result_set_info or false
 
-  -- Format execution time once
-  local run_time = ""
-  if execution_time_ms then
-    if execution_time_ms < 1000 then
-      run_time = string.format("%.0fms", execution_time_ms)
+  -- Format total execution time from metadata (if available)
+  local total_time = ""
+  if query_metadata and query_metadata.total_execution_time_ms then
+    local total_ms = query_metadata.total_execution_time_ms
+    if total_ms < 1000 then
+      total_time = string.format("%.0fms", total_ms)
     else
-      run_time = string.format("%.2fs", execution_time_ms / 1000)
+      total_time = string.format("%.2fs", total_ms / 1000)
+    end
+  elseif execution_time_ms then
+    -- Fallback to execution_time_ms if no metadata
+    if execution_time_ms < 1000 then
+      total_time = string.format("%.0fms", execution_time_ms)
+    else
+      total_time = string.format("%.2fs", execution_time_ms / 1000)
     end
   end
 
@@ -583,17 +641,35 @@ function UiQuery.format_results(resultSets, sql, execution_time_ms)
       end
     end
 
+    -- Format this result set FIRST to get its width (needed for %fit_results%)
+    local set_lines, result_width = UiQuery.format_single_result_set(rows, resultSet.columns)
+
     -- Show divider if multiple result sets or configured to show for single
     if #resultSets > 1 or show_result_set_info then
       if i > 1 or show_result_set_info then
+        -- Format per-result execution time (from chunk timing)
+        local run_time = ""
+        if resultSet.chunk_execution_time_ms then
+          local ms = resultSet.chunk_execution_time_ms
+          if ms < 1000 then
+            run_time = string.format("%.0fms", ms)
+          else
+            run_time = string.format("%.2fs", ms / 1000)
+          end
+        end
+
         local metadata = {
           row_count = row_count,
           col_count = col_count,
           result_set_num = i,
           total_result_sets = #resultSets,
-          run_time = run_time,
+          run_time = run_time,               -- Per-result execution time
+          total_time = total_time,           -- Total query execution time (all chunks)
+          chunk_number = resultSet.chunk_number,
+          batch_number = resultSet.batch_number,
           date = date_str,
           time = time_str,
+          result_width = result_width,       -- Width of the formatted result table
         }
 
         -- Add custom divider
@@ -604,8 +680,7 @@ function UiQuery.format_results(resultSets, sql, execution_time_ms)
       end
     end
 
-    -- Format this result set (rows array + column metadata)
-    local set_lines = UiQuery.format_single_result_set(rows, resultSet.columns)
+    -- Add formatted result set lines
     for _, line in ipairs(set_lines) do
       table.insert(lines, line)
     end
@@ -617,7 +692,8 @@ end
 ---Format a single result set for display
 ---@param result_set table Array of row objects
 ---@param columns_metadata table? Column metadata from Node.js { colName: { index: 0, ... }, ... }
----@return string[] lines
+---@return string[] lines Formatted lines
+---@return number result_width Width of the formatted result table
 function UiQuery.format_single_result_set(result_set, columns_metadata)
   local lines = {}
 
@@ -659,8 +735,9 @@ function UiQuery.format_single_result_set(result_set, columns_metadata)
 
   if not has_columns then
     -- No rows and no column metadata - driver limitation with 0-row results
-    table.insert(lines, "(Query returned 0 rows - column information not available from driver)")
-    return lines
+    local msg = "(Query returned 0 rows - column information not available from driver)"
+    table.insert(lines, msg)
+    return lines, #msg
   end
 
   -- Calculate column widths
@@ -686,14 +763,19 @@ function UiQuery.format_single_result_set(result_set, columns_metadata)
     local padded = tostring(col) .. string.rep(" ", widths[col] - #tostring(col))
     table.insert(header_parts, padded)
   end
-  table.insert(lines, table.concat(header_parts, " | "))
+  local header_line = table.concat(header_parts, " | ")
+  table.insert(lines, header_line)
 
   -- Build separator
   local sep_parts = {}
   for _, col in ipairs(columns) do
     table.insert(sep_parts, string.rep("-", widths[col]))
   end
-  table.insert(lines, table.concat(sep_parts, "-+-"))
+  local separator_line = table.concat(sep_parts, "-+-")
+  table.insert(lines, separator_line)
+
+  -- Calculate result width from header (which includes all column widths + separators)
+  local result_width = #header_line
 
   -- Build rows
   if #result_set > 0 then
@@ -714,7 +796,7 @@ function UiQuery.format_single_result_set(result_set, columns_metadata)
     table.insert(lines, "(0 rows)")
   end
 
-  return lines
+  return lines, result_width
 end
 
 ---Save query to file

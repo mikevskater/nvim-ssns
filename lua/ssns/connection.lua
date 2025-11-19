@@ -196,6 +196,143 @@ function Connection.execute_batch(connection_string, queries)
   return all_results, nil
 end
 
+---Execute query with buffer database context
+---Handles multi-database queries with USE statements and GO separators
+---@param connection_string string The connection string
+---@param query string The SQL query (may contain USE statements and GO)
+---@param buffer_database string|nil Current buffer database context
+---@return table result Combined result from all chunks
+---@return string|nil last_database Last database from execution (for buffer state update)
+function Connection.execute_with_buffer_context(connection_string, query, buffer_database)
+  local QueryParser = require('ssns.query_parser')
+  local ConnectionString = require('ssns.connection_string')
+
+  -- Parse query with full context awareness
+  local chunks, debug_info = QueryParser.parse_query(query, buffer_database)
+
+  -- If no chunks, return empty success result
+  if #chunks == 0 then
+    return {
+      success = true,
+      resultSets = {},
+      metadata = {
+        total_chunks = 0,
+        execution_time = 0
+      }
+    }, buffer_database
+  end
+
+  -- Execute each chunk
+  local all_results = {}
+  local last_database = buffer_database
+  local total_start_time = vim.loop.hrtime()
+
+  for i, chunk in ipairs(chunks) do
+    -- Build connection string for this chunk's database
+    local chunk_conn_string
+    if chunk.database then
+      chunk_conn_string = ConnectionString.with_database(connection_string, chunk.database)
+    else
+      chunk_conn_string = connection_string
+    end
+
+    -- Track timing for this chunk
+    local chunk_start_time = vim.loop.hrtime()
+
+    -- Execute chunk using simple execution (bypasses USE handling)
+    local result = Connection.execute(chunk_conn_string, chunk.sql)
+
+    local chunk_end_time = vim.loop.hrtime()
+    local chunk_execution_time_ms = (chunk_end_time - chunk_start_time) / 1000000  -- Convert to milliseconds
+
+    if not result.success then
+      -- Add chunk context to error
+      if result.error then
+        result.error.chunk_number = i
+        result.error.total_chunks = #chunks
+        result.error.batch_number = chunk.batch_number
+        result.error.chunk_database = chunk.database
+      end
+      return result, last_database
+    end
+
+    -- Add chunk execution time to each result set in this chunk
+    if result.resultSets then
+      for _, resultSet in ipairs(result.resultSets) do
+        resultSet.chunk_execution_time_ms = chunk_execution_time_ms
+        resultSet.chunk_number = i
+        resultSet.batch_number = chunk.batch_number
+      end
+    end
+
+    table.insert(all_results, result)
+
+    -- Track last database for buffer state update
+    if chunk.database then
+      last_database = chunk.database
+    end
+  end
+
+  local total_time = (vim.loop.hrtime() - total_start_time) / 1e9
+  local total_time_ms = total_time * 1000  -- Convert to milliseconds for consistency
+
+  -- Combine results
+  local combined = combine_multi_chunk_results(all_results, {
+    total_chunks = #chunks,
+    go_batches = debug_info.go_batches,
+    comments_removed = debug_info.comments_removed.line_comments_removed +
+                       debug_info.comments_removed.block_comments_removed,
+    total_execution_time = total_time,
+    total_execution_time_ms = total_time_ms
+  })
+
+  return combined, last_database
+end
+
+---Combine results from multiple query chunks
+---@param results table[] Array of result objects
+---@param metadata table? Optional metadata to include
+---@return table combined Combined result object
+function combine_multi_chunk_results(results, metadata)
+  if #results == 0 then
+    return {
+      success = true,
+      resultSets = {},
+      metadata = metadata or {}
+    }
+  end
+
+  if #results == 1 then
+    -- Single result - just add metadata
+    local result = results[1]
+    if metadata then
+      result.metadata = vim.tbl_extend("force", result.metadata or {}, metadata)
+    end
+    return result
+  end
+
+  -- Multiple results - combine all result sets
+  local all_result_sets = {}
+
+  for i, result in ipairs(results) do
+    if result.resultSets then
+      -- Add all result sets from this chunk
+      for _, result_set in ipairs(result.resultSets) do
+        -- Add chunk identifier to result set metadata
+        local enhanced_result_set = vim.deepcopy(result_set)
+        enhanced_result_set.chunk_number = i
+        table.insert(all_result_sets, enhanced_result_set)
+      end
+    end
+  end
+
+  return {
+    success = true,
+    resultSets = all_result_sets,
+    metadata = metadata or {}
+  }
+end
+
 ---Switch database context (USE statement for SQL Server)
 ---@param connection_string string The connection string
 ---@param database_name string Database name to switch to

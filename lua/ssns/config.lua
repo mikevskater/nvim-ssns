@@ -98,10 +98,15 @@ local default_config = {
     -- Repeat: "20#" = 20 hashes, "10-" = 10 dashes
     -- Auto-width: "%fit%" = matches longest line width
     -- Multi-line: use \n (newline character, e.g., "20#\n20#\n20#")
-    -- Variables: %row_count%, %col_count%, %run_time%, %result_set_num%, %total_result_sets%, %date%, %time%, %fit%
+    -- Variables: %row_count%, %col_count%, %run_time%, %total_time%, %result_set_num%, %total_result_sets%, %chunk_number%, %batch_number%, %date%, %time%, %fit%, %fit_results%
+    -- Special width patterns:
+    --   %fit% = Auto-width matching the longest divider text line
+    --   %fit_results% = Auto-width matching the result table width (columns + separators)
     -- Examples:
     --   "5-(%row_count% rows)5-" → "-----(11 rows)-----"
     --   "%fit%=\n---- Result Set %result_set_num% (%row_count% rows, %run_time%) ----\n%fit%="
+    --   "%fit_results%-\n---- Result %result_set_num% (%row_count% rows) ----\n%fit_results%-"
+    --   "%fit%-\n---- Batch %batch_number% (%row_count% rows in %run_time%, total: %total_time%) ----\n%fit%-"
     result_set_divider = "",
     show_result_set_info = false,  -- Show divider/info before first result set and single result sets
 
