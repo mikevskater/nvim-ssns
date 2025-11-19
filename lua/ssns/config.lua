@@ -107,7 +107,15 @@ local default_config = {
 
     icons = {
       -- Nerd Font icons (safe Unicode encoding)
-      server = "\u{f233}",      --
+      server = "\u{f233}",      --  (default/unknown)
+
+      -- Database-type specific server icons
+      server_sqlserver = "\u{e272}",   --  (SQL Server)
+      server_postgres = "\u{e76e}",    --  (PostgreSQL)
+      server_mysql = "\u{e704}",       --  (MySQL)
+      server_sqlite = "\u{e7c4}",      --  (SQLite)
+      server_bigquery = "\u{e7b2}",    --  (BigQuery)
+
       database = "\u{f1c0}",    --
       schema = "\u{f07b}",      --
       table = "\u{f0ce}",       --

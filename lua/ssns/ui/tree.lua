@@ -10,6 +10,40 @@ UiTree.line_map = {}
 ---@type table<BaseDbObject, number>
 UiTree.object_map = {}
 
+---Get icon for object type
+---@param object_type string
+---@param icons table
+---@return string
+function UiTree.get_object_icon(object_type, icons)
+  -- Map object types to icon names
+  local icon_map = {
+    table = icons.table or "",
+    view = icons.view or "",
+    procedure = icons.procedure or "",
+    ["function"] = icons["function"] or "",
+    column = icons.column or "",
+    index = icons.index or "",
+    key = icons.key or "",
+    sequence = icons.sequence or "",
+    synonym = icons.synonym or "",
+    -- Groups use folder icon
+    databases_group = icons.schema or "",
+    tables_group = icons.schema or "",
+    views_group = icons.schema or "",
+    procedures_group = icons.schema or "",
+    functions_group = icons.schema or "",
+    sequences_group = icons.schema or "",
+    synonyms_group = icons.schema or "",
+    column_group = icons.schema or "",
+    index_group = icons.schema or "",
+    key_group = icons.schema or "",
+    parameter_group = icons.schema or "",
+    actions_group = icons.schema or "",
+  }
+
+  return icon_map[object_type] or ""
+end
+
 ---Render the entire tree
 function UiTree.render()
   local Cache = require('ssns').get_cache()
@@ -43,6 +77,10 @@ function UiTree.render()
 
   -- Write to buffer
   Buffer.set_lines(lines)
+
+  -- Apply syntax highlighting
+  local Highlights = require('ssns.ui.highlights')
+  Highlights.apply(UiTree.line_map)
 end
 
 ---Render a server and its children
@@ -51,26 +89,48 @@ end
 ---@param line_number number
 ---@param indent_level number
 function UiTree.render_server(server, lines, line_number, indent_level)
+  local Config = require('ssns.config')
+  local icons = Config.get_ui().icons
+
   local indent = string.rep("  ", indent_level)
-  local icon = server.ui_state.expanded and "▾ " or "▸ "
+  local expand_icon = server.ui_state.expanded and (icons.expanded or "▾") or (icons.collapsed or "▸")
+
+  -- Get database-type specific server icon
+  local server_icon = icons.server or ""
+  local db_type = server:get_db_type()
+  if db_type == "sqlserver" then
+    server_icon = icons.server_sqlserver or icons.server or ""
+  elseif db_type == "postgres" or db_type == "postgresql" then
+    server_icon = icons.server_postgres or icons.server or ""
+  elseif db_type == "mysql" then
+    server_icon = icons.server_mysql or icons.server or ""
+  elseif db_type == "sqlite" then
+    server_icon = icons.server_sqlite or icons.server or ""
+  elseif db_type == "bigquery" then
+    server_icon = icons.server_bigquery or icons.server or ""
+  end
+
   local status = server:get_status_icon()
 
-  -- Server line
-  local line = string.format("%s%s%s %s", indent, icon, server.name, status)
+  -- Server line with icon
+  local line = string.format("%s%s %s %s %s", indent, expand_icon, server_icon, server.name, status)
   table.insert(lines, line)
 
   -- Map line to object
-  UiTree.line_map[#lines] = server
-  UiTree.object_map[server] = #lines
+  local line_num = #lines
+  UiTree.line_map[line_num] = server
+  UiTree.object_map[server] = line_num
 
   -- If expanded, render children (Databases group, etc.)
   if server.ui_state.expanded then
     if server.ui_state.error then
       -- Show error message
-      table.insert(lines, indent .. "    ✗ Error: " .. server.ui_state.error)
+      local error_icon = icons.error or "✗"
+      table.insert(lines, indent .. "    " .. error_icon .. " Error: " .. server.ui_state.error)
     elseif server.ui_state.loading then
       -- Show loading indicator
-      table.insert(lines, indent .. "    ⋯ Loading...")
+      local loading_icon = icons.connecting or "⋯"
+      table.insert(lines, indent .. "    " .. loading_icon .. " Loading...")
     elseif server.is_loaded and server:has_children() then
       -- Render server children (Databases group, New Query, Saved Queries)
       for _, child in ipairs(server.children) do
@@ -84,7 +144,8 @@ function UiTree.render_server(server, lines, line_number, indent_level)
       end
     elseif server:is_connected() and not server.is_loaded then
       -- Show loading indicator (fallback if loading flag not set)
-      table.insert(lines, indent .. "    ⋯ Loading...")
+      local loading_icon = icons.connecting or "⋯"
+      table.insert(lines, indent .. "    " .. loading_icon .. " Loading...")
     end
   end
 end
@@ -94,12 +155,16 @@ end
 ---@param lines string[]
 ---@param indent_level number
 function UiTree.render_database(db, lines, indent_level)
+  local Config = require('ssns.config')
+  local icons = Config.get_ui().icons
+
   local indent = string.rep("  ", indent_level)
-  local icon = db.ui_state.expanded and "▾ " or "▸ "
+  local expand_icon = db.ui_state.expanded and (icons.expanded or "▾") or (icons.collapsed or "▸")
+  local db_icon = icons.database or ""
   local status = db:get_status_icon()
 
-  -- Database line
-  local line = string.format("%s%s%s %s", indent, icon, db.name, status)
+  -- Database line with icon
+  local line = string.format("%s%s %s %s %s", indent, expand_icon, db_icon, db.name, status)
   table.insert(lines, line)
 
   -- Map line to object
@@ -110,17 +175,20 @@ function UiTree.render_database(db, lines, indent_level)
   if db.ui_state.expanded then
     if db.ui_state.error then
       -- Show error message
-      table.insert(lines, indent .. "    ✗ Error: " .. db.ui_state.error)
+      local error_icon = icons.error or "✗"
+      table.insert(lines, indent .. "    " .. error_icon .. " Error: " .. db.ui_state.error)
     elseif db.ui_state.loading then
       -- Show loading indicator
-      table.insert(lines, indent .. "    ⋯ Loading...")
+      local loading_icon = icons.connecting or "⋯"
+      table.insert(lines, indent .. "    " .. loading_icon .. " Loading...")
     elseif db.is_loaded and db:has_children() then
       -- Render each object type group
       for _, group in ipairs(db.children) do
         UiTree.render_object(group, lines, indent_level + 1)
       end
     else
-      table.insert(lines, indent .. "    ⋯ Loading...")
+      local loading_icon = icons.connecting or "⋯"
+      table.insert(lines, indent .. "    " .. loading_icon .. " Loading...")
     end
   end
 end
@@ -130,11 +198,15 @@ end
 ---@param lines string[]
 ---@param indent_level number
 function UiTree.render_schema(schema, lines, indent_level)
-  local indent = string.rep("  ", indent_level)
-  local icon = schema.ui_state.expanded and "▾ " or "▸ "
+  local Config = require('ssns.config')
+  local icons = Config.get_ui().icons
 
-  -- Schema line
-  local line = string.format("%s%s%s", indent, icon, schema.name)
+  local indent = string.rep("  ", indent_level)
+  local expand_icon = schema.ui_state.expanded and (icons.expanded or "▾") or (icons.collapsed or "▸")
+  local schema_icon = icons.schema or ""
+
+  -- Schema line with icon
+  local line = string.format("%s%s %s %s", indent, expand_icon, schema_icon, schema.name)
   table.insert(lines, line)
 
   -- Map line to object
@@ -148,7 +220,8 @@ function UiTree.render_schema(schema, lines, indent_level)
         UiTree.render_object_group(group, lines, indent_level + 1)
       end
     else
-      table.insert(lines, indent .. "    Loading...")
+      local loading_icon = icons.connecting or "⋯"
+      table.insert(lines, indent .. "    " .. loading_icon .. " Loading...")
     end
   end
 end
@@ -182,12 +255,15 @@ end
 ---@param lines string[]
 ---@param indent_level number
 function UiTree.render_object(obj, lines, indent_level)
+  local Config = require('ssns.config')
+  local icons = Config.get_ui().icons
   local indent = string.rep("  ", indent_level)
 
   -- Check if this is an action or detail node
   if obj.object_type == "action" then
     -- Action nodes (SELECT, DROP, etc.)
-    local line = string.format("%s  %s", indent, obj.name)
+    local action_icon = icons.action or ""
+    local line = string.format("%s  %s %s", indent, action_icon, obj.name)
     table.insert(lines, line)
     UiTree.line_map[#lines] = obj
     UiTree.object_map[obj] = #lines
@@ -215,14 +291,17 @@ function UiTree.render_object(obj, lines, indent_level)
     or obj.object_type == "parameter_group"
     or obj.object_type == "actions_group"
 
-  local icon = ""
+  local expand_icon = ""
   if has_children then
-    icon = obj.ui_state.expanded and "▾ " or "▸ "
+    expand_icon = obj.ui_state.expanded and (icons.expanded or "▾") or (icons.collapsed or "▸")
   end
 
-  -- Object line
+  -- Get object-type specific icon
+  local obj_icon = UiTree.get_object_icon(obj.object_type, icons)
+
+  -- Object line with icon
   local display_name = obj.get_display_name and obj:get_display_name() or obj.name
-  local line = string.format("%s%s%s", indent, icon, display_name)
+  local line = string.format("%s%s %s %s", indent, expand_icon, obj_icon, display_name)
   table.insert(lines, line)
 
   -- Map line to object
@@ -233,10 +312,12 @@ function UiTree.render_object(obj, lines, indent_level)
   if obj.ui_state.expanded then
     if obj.ui_state.error then
       -- Show error message
-      table.insert(lines, indent .. "  ✗ Error: " .. obj.ui_state.error)
+      local error_icon = icons.error or "✗"
+      table.insert(lines, indent .. "  " .. error_icon .. " Error: " .. obj.ui_state.error)
     elseif obj.ui_state.loading then
       -- Show loading indicator
-      table.insert(lines, indent .. "  ⋯ Loading...")
+      local loading_icon = icons.connecting or "⋯"
+      table.insert(lines, indent .. "  " .. loading_icon .. " Loading...")
     else
       -- Check if this is a structural group that needs alignment
       if obj.object_type == "column_group" or obj.object_type == "index_group" or
