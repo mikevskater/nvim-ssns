@@ -13,8 +13,14 @@ UiTree.object_map = {}
 ---Get icon for object type
 ---@param object_type string
 ---@param icons table
+---@param obj BaseDbObject? Optional object for special handling
 ---@return string
-function UiTree.get_object_icon(object_type, icons)
+function UiTree.get_object_icon(object_type, icons, obj)
+  -- Special handling for object references - use the referenced object's icon
+  if object_type == "object_reference" and obj and obj.referenced_object then
+    object_type = obj.referenced_object.object_type
+  end
+
   -- Map object types to icon names
   local icon_map = {
     database = icons.database or "",
@@ -38,11 +44,14 @@ function UiTree.get_object_icon(object_type, icons)
     functions_group = icons.schema or "",
     sequences_group = icons.schema or "",
     synonyms_group = icons.schema or "",
+    schemas_group = icons.schema or "",
     column_group = icons.schema or "",
     index_group = icons.schema or "",
     key_group = icons.schema or "",
     parameter_group = icons.schema or "",
     actions_group = icons.schema or "",
+    -- Schema nodes
+    schema_view = icons.schema or "",
   }
 
   return icon_map[object_type] or ""
@@ -291,11 +300,20 @@ function UiTree.render_object(obj, lines, indent_level)
     or obj.object_type == "procedures_group"
     or obj.object_type == "functions_group"
     or obj.object_type == "synonyms_group"
+    or obj.object_type == "schemas_group"
+    or obj.object_type == "schema_view"
     or obj.object_type == "column_group"
     or obj.object_type == "index_group"
     or obj.object_type == "key_group"
     or obj.object_type == "parameter_group"
     or obj.object_type == "actions_group"
+    -- Object references show expand arrow if their referenced object can have children
+    or (obj.object_type == "object_reference" and obj.referenced_object
+        and (obj.referenced_object.object_type == "table"
+             or obj.referenced_object.object_type == "view"
+             or obj.referenced_object.object_type == "procedure"
+             or obj.referenced_object.object_type == "function"
+             or obj.referenced_object.object_type == "synonym"))
 
   local expand_icon = ""
   if has_children then
@@ -303,7 +321,7 @@ function UiTree.render_object(obj, lines, indent_level)
   end
 
   -- Get object-type specific icon
-  local obj_icon = UiTree.get_object_icon(obj.object_type, icons)
+  local obj_icon = UiTree.get_object_icon(obj.object_type, icons, obj)
 
   -- Object line with icon
   local display_name = obj.get_display_name and obj:get_display_name() or obj.name
@@ -397,7 +415,7 @@ function UiTree.render_aligned_group(group, lines, indent_level)
 
     -- Get icon for this object type
     local child = children[i]
-    local obj_icon = UiTree.get_object_icon(child.object_type, icons)
+    local obj_icon = UiTree.get_object_icon(child.object_type, icons, child)
 
     -- Add icon and aligned content
     local line = indent .. "  " .. obj_icon .. " " .. table.concat(parts, " | ")
@@ -502,13 +520,6 @@ function UiTree.toggle_node()
   -- Handle action nodes
   if obj.object_type == "action" then
     UiTree.execute_action(obj)
-    return
-  end
-
-  -- Handle object reference nodes (from SCHEMAS group)
-  if obj.object_type == "object_reference" and obj.referenced_object then
-    -- Navigate to the actual object in the main tree
-    UiTree.navigate_to_object(obj.referenced_object)
     return
   end
 
@@ -660,6 +671,9 @@ function UiTree.execute_action(action)
     vim.notify("SSNS: Cannot find parent object for action", vim.log.levels.WARN)
     return
   end
+
+  -- If parent is an object_reference, it already proxies all methods to the referenced object
+  -- so we can use it directly without dereferencing
 
   -- Get the server and database for this action
   local server = parent:get_server()
@@ -863,6 +877,162 @@ function UiTree.show_dependencies(obj)
   vim.api.nvim_buf_set_keymap(buf, "n", "q", ":close<CR>", { noremap = true, silent = true })
   vim.api.nvim_buf_set_keymap(buf, "n", "<Esc>", ":close<CR>", { noremap = true, silent = true })
   vim.api.nvim_buf_set_keymap(buf, "n", "<CR>", ":close<CR>", { noremap = true, silent = true })
+end
+
+---Navigate to an object in the tree (expand parents and position cursor)
+---@param target_object BaseDbObject The object to navigate to
+function UiTree.navigate_to_object(target_object)
+  if not target_object then
+    vim.notify("No object to navigate to", vim.log.levels.WARN)
+    return
+  end
+
+  -- Collect all parents up to root (for cross-database, go to target database's tree)
+  local parents = {}
+  local current = target_object
+  while current do
+    table.insert(parents, 1, current)  -- Insert at beginning to get root-to-target order
+    current = current.parent
+  end
+
+  -- Expand all parent nodes
+  for _, parent in ipairs(parents) do
+    if not parent.ui_state.expanded and parent:has_children() then
+      parent.ui_state.expanded = true
+      -- Load if needed
+      if not parent.is_loaded and parent.load then
+        parent:load()
+      end
+    end
+  end
+
+  -- Find the database that contains the target object
+  local database = target_object:get_database()
+  if not database or not database.is_loaded then
+    vim.notify("Target database not loaded", vim.log.levels.WARN)
+    return
+  end
+
+  -- Verify object exists in cached data before expanding groups
+  local group_type = nil
+  local object_exists = false
+
+  if target_object.object_type == "table" then
+    group_type = "tables_group"
+    -- Check in TABLES group's children
+    for _, child in ipairs(database.children) do
+      if child.object_type == "tables_group" then
+        for _, table_obj in ipairs(child.children) do
+          if table_obj == target_object then
+            object_exists = true
+            break
+          end
+        end
+        break
+      end
+    end
+  elseif target_object.object_type == "view" then
+    group_type = "views_group"
+    for _, child in ipairs(database.children) do
+      if child.object_type == "views_group" then
+        for _, view_obj in ipairs(child.children) do
+          if view_obj == target_object then
+            object_exists = true
+            break
+          end
+        end
+        break
+      end
+    end
+  elseif target_object.object_type == "procedure" then
+    group_type = "procedures_group"
+    for _, child in ipairs(database.children) do
+      if child.object_type == "procedures_group" then
+        for _, proc_obj in ipairs(child.children) do
+          if proc_obj == target_object then
+            object_exists = true
+            break
+          end
+        end
+        break
+      end
+    end
+  elseif target_object.object_type == "function" then
+    group_type = "functions_group"
+    for _, child in ipairs(database.children) do
+      if child.object_type == "functions_group" then
+        for _, func_obj in ipairs(child.children) do
+          if func_obj == target_object then
+            object_exists = true
+            break
+          end
+        end
+        break
+      end
+    end
+  elseif target_object.object_type == "synonym" then
+    group_type = "synonyms_group"
+    for _, child in ipairs(database.children) do
+      if child.object_type == "synonyms_group" then
+        for _, syn_obj in ipairs(child.children) do
+          if syn_obj == target_object then
+            object_exists = true
+            break
+          end
+        end
+        break
+      end
+    end
+  end
+
+  -- Object doesn't exist in cached data - don't expand
+  if not object_exists then
+    vim.notify(string.format("Object '%s' not found in database (may have been dropped)", target_object.name), vim.log.levels.WARN)
+    return
+  end
+
+  -- Object exists - expand the group
+  if group_type then
+    for _, child in ipairs(database.children) do
+      if child.object_type == group_type then
+        child.ui_state.expanded = true
+        if not child.is_loaded and child.load then
+          child:load()
+        end
+        break
+      end
+    end
+  end
+
+  -- Re-render tree to show all expanded nodes
+  UiTree.render()
+
+  -- Find the line number for the target object
+  local target_line = UiTree.object_map[target_object]
+  if not target_line then
+    vim.notify("Object not found in tree after expansion", vim.log.levels.WARN)
+    return
+  end
+
+  -- Position cursor on the target object with smart positioning
+  local Buffer = require('ssns.ui.buffer')
+  local Config = require('ssns.config')
+  local smart_positioning = Config.get_ui().smart_cursor_positioning
+
+  -- Use smart positioning to align cursor at object name start
+  local col = smart_positioning and Buffer.get_name_column(target_line) or 0
+  Buffer.set_cursor(target_line, col)
+
+  -- Update indent tracking for smart positioning
+  if smart_positioning then
+    Buffer.last_indent_info = {
+      line = target_line,
+      indent_level = Buffer.get_indent_level(target_line),
+      column = col,
+    }
+  end
+
+  vim.notify(string.format("Navigated to %s", target_object.name), vim.log.levels.INFO)
 end
 
 ---Refresh node at current cursor

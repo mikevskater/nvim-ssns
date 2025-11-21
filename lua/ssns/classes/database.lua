@@ -375,6 +375,253 @@ function DbClass:create_object_type_groups(tables, views, procedures, functions,
   end
 
   funcs_group.is_loaded = true
+
+  -- Create SYNONYMS group if adapter supports synonyms
+  local adapter = self:get_adapter()
+  if adapter.features.synonyms then
+    local synonyms_group = BaseDbObject.new({
+      name = string.format("SYNONYMS (%d)", #synonyms),
+      parent = self,
+    })
+    synonyms_group.object_type = "synonyms_group"
+
+    for _, syn_obj in ipairs(synonyms) do
+      table.insert(synonyms_group.children, syn_obj)
+    end
+
+    synonyms_group.is_loaded = true
+  end
+
+  -- Create SCHEMAS group (alternate schema-based view)
+  self:create_schemas_group(tables, views, procedures, functions, synonyms)
+end
+
+---Create SCHEMAS group with schema-based organization
+---@param tables table[]
+---@param views table[]
+---@param procedures table[]
+---@param functions table[]
+---@param synonyms table[]
+function DbClass:create_schemas_group(tables, views, procedures, functions, synonyms)
+  local BaseDbObject = require('ssns.classes.base')
+
+  -- Collect unique schemas
+  local schemas_map = {}
+
+  for _, table_obj in ipairs(tables) do
+    if table_obj.schema_name then
+      schemas_map[table_obj.schema_name] = true
+    end
+  end
+  for _, view_obj in ipairs(views) do
+    if view_obj.schema_name then
+      schemas_map[view_obj.schema_name] = true
+    end
+  end
+  for _, proc_obj in ipairs(procedures) do
+    if proc_obj.schema_name then
+      schemas_map[proc_obj.schema_name] = true
+    end
+  end
+  for _, func_obj in ipairs(functions) do
+    if func_obj.schema_name then
+      schemas_map[func_obj.schema_name] = true
+    end
+  end
+  for _, syn_obj in ipairs(synonyms) do
+    if syn_obj.schema_name then
+      schemas_map[syn_obj.schema_name] = true
+    end
+  end
+
+  local schema_names = {}
+  for schema_name in pairs(schemas_map) do
+    table.insert(schema_names, schema_name)
+  end
+  table.sort(schema_names)
+
+  -- Create SCHEMAS group
+  local schemas_group = BaseDbObject.new({
+    name = string.format("SCHEMAS (%d)", #schema_names),
+    parent = self,
+  })
+  schemas_group.object_type = "schemas_group"
+
+  -- Create schema nodes with lazy loading
+  for _, schema_name in ipairs(schema_names) do
+    local schema_node = BaseDbObject.new({
+      name = schema_name,
+      parent = schemas_group,
+    })
+    schema_node.object_type = "schema_view"
+    schema_node.schema_name = schema_name
+
+    -- Lazy load function for schema node
+    schema_node.load = function(self_node)
+      if self_node.is_loaded then
+        return true
+      end
+
+      self_node:clear_children()
+
+      -- Collect all objects in this schema
+      local schema_objects = {}
+
+      for _, table_obj in ipairs(tables) do
+        if table_obj.schema_name == schema_name then
+          table.insert(schema_objects, {
+            obj = table_obj,
+            name = string.format("[%s].[%s]", table_obj.schema_name, table_obj.table_name),
+            type = "table"
+          })
+        end
+      end
+      for _, view_obj in ipairs(views) do
+        if view_obj.schema_name == schema_name then
+          table.insert(schema_objects, {
+            obj = view_obj,
+            name = string.format("[%s].[%s]", view_obj.schema_name, view_obj.view_name),
+            type = "view"
+          })
+        end
+      end
+      for _, proc_obj in ipairs(procedures) do
+        if proc_obj.schema_name == schema_name then
+          table.insert(schema_objects, {
+            obj = proc_obj,
+            name = string.format("[%s].[%s]", proc_obj.schema_name, proc_obj.procedure_name),
+            type = "procedure"
+          })
+        end
+      end
+      for _, func_obj in ipairs(functions) do
+        if func_obj.schema_name == schema_name then
+          table.insert(schema_objects, {
+            obj = func_obj,
+            name = string.format("[%s].[%s]", func_obj.schema_name, func_obj.function_name),
+            type = "function"
+          })
+        end
+      end
+      for _, syn_obj in ipairs(synonyms) do
+        if syn_obj.schema_name == schema_name then
+          table.insert(schema_objects, {
+            obj = syn_obj,
+            name = string.format("[%s].[%s]", syn_obj.schema_name, syn_obj.synonym_name),
+            type = "synonym"
+          })
+        end
+      end
+
+      -- Sort objects by name
+      table.sort(schema_objects, function(a, b)
+        return a.name < b.name
+      end)
+
+      -- Add reference nodes that point to the actual objects
+      for _, item in ipairs(schema_objects) do
+        local ref_node = BaseDbObject.new({
+          name = item.name,
+          parent = self_node,
+        })
+        ref_node.object_type = "object_reference"
+        ref_node.referenced_object = item.obj
+
+        -- Proxy methods to the referenced object for full functionality
+        ref_node.has_children = function(self_ref)
+          return self_ref.referenced_object:has_children()
+        end
+
+        ref_node.get_children = function(self_ref)
+          return self_ref.referenced_object:get_children()
+        end
+
+        ref_node.load = function(self_ref)
+          -- Load the referenced object
+          if self_ref.referenced_object.load then
+            return self_ref.referenced_object:load()
+          end
+          return true
+        end
+
+        -- Proxy all query generation methods for actions
+        ref_node.generate_select = function(self_ref, limit)
+          if self_ref.referenced_object.generate_select then
+            return self_ref.referenced_object:generate_select(limit)
+          end
+        end
+
+        ref_node.generate_exec = function(self_ref)
+          if self_ref.referenced_object.generate_exec then
+            return self_ref.referenced_object:generate_exec()
+          end
+        end
+
+        ref_node.generate_count = function(self_ref)
+          if self_ref.referenced_object.generate_count then
+            return self_ref.referenced_object:generate_count()
+          end
+        end
+
+        ref_node.generate_describe = function(self_ref)
+          if self_ref.referenced_object.generate_describe then
+            return self_ref.referenced_object:generate_describe()
+          end
+        end
+
+        ref_node.generate_insert = function(self_ref)
+          if self_ref.referenced_object.generate_insert then
+            return self_ref.referenced_object:generate_insert()
+          end
+        end
+
+        ref_node.generate_update = function(self_ref)
+          if self_ref.referenced_object.generate_update then
+            return self_ref.referenced_object:generate_update()
+          end
+        end
+
+        ref_node.generate_delete = function(self_ref)
+          if self_ref.referenced_object.generate_delete then
+            return self_ref.referenced_object:generate_delete()
+          end
+        end
+
+        ref_node.get_definition = function(self_ref)
+          if self_ref.referenced_object.get_definition then
+            return self_ref.referenced_object:get_definition()
+          end
+        end
+
+        -- Proxy methods for getting server/database/adapter
+        ref_node.get_server = function(self_ref)
+          return self_ref.referenced_object:get_server()
+        end
+
+        ref_node.get_database = function(self_ref)
+          return self_ref.referenced_object:get_database()
+        end
+
+        ref_node.get_adapter = function(self_ref)
+          return self_ref.referenced_object:get_adapter()
+        end
+
+        -- Proxy synonym resolve method for GO-TO action
+        ref_node.resolve = function(self_ref)
+          if self_ref.referenced_object.resolve then
+            return self_ref.referenced_object:resolve()
+          end
+        end
+
+        ref_node.is_loaded = false  -- Will be loaded on demand
+      end
+
+      self_node.is_loaded = true
+      return true
+    end
+  end
+
+  schemas_group.is_loaded = true
 end
 
 return DbClass

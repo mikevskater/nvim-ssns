@@ -125,6 +125,11 @@ function UiHighlights.get_highlight_group(obj)
     end
   end
 
+  -- Special handling for object references - use the referenced object's type
+  if object_type == "object_reference" and obj.referenced_object then
+    object_type = obj.referenced_object.object_type
+  end
+
   -- Standard object type mapping
   local hl_map = {
     database = "SsnsDatabase",
@@ -148,11 +153,14 @@ function UiHighlights.get_highlight_group(obj)
     functions_group = "SsnsGroup",
     sequences_group = "SsnsGroup",
     synonyms_group = "SsnsGroup",
+    schemas_group = "SsnsGroup",
     column_group = "SsnsGroup",
     index_group = "SsnsGroup",
     key_group = "SsnsGroup",
     parameter_group = "SsnsGroup",
     actions_group = "SsnsGroup",
+    -- Schema nodes
+    schema_view = "SsnsSchema",
   }
 
   return hl_map[object_type]
