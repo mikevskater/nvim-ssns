@@ -66,6 +66,7 @@ function UiFilterInput.show_input(group, current_filters, callback)
   state = {
     group = group,
     filters = current_filters,
+    original_filters = vim.deepcopy(current_filters),  -- Save original for cancel
     fields = fields,
     selected_field_idx = 1,
     callback = callback,
@@ -343,7 +344,7 @@ function UiFilterInput._edit_field()
   }, function(input)
     if input ~= nil then
       field.value = input
-      UiFilterInput._render()
+      UiFilterInput._apply_live_preview()  -- Apply filters immediately
     end
   end)
 end
@@ -357,7 +358,7 @@ function UiFilterInput._toggle_checkbox()
   end
 
   field.value = not field.value
-  UiFilterInput._render()
+  UiFilterInput._apply_live_preview()  -- Apply filters immediately
 end
 
 ---Clear all filter values
@@ -373,6 +374,19 @@ function UiFilterInput._clear_all()
       end
     end
   end
+  UiFilterInput._apply_live_preview()  -- Apply filters immediately
+end
+
+---Apply current filters as live preview
+function UiFilterInput._apply_live_preview()
+  local filter_state = UiFilterInput._build_filter_state()
+
+  -- Apply filters immediately for live preview
+  if state.callback then
+    state.callback(filter_state)
+  end
+
+  -- Re-render to show updated match count
   UiFilterInput._render()
 end
 
@@ -420,18 +434,22 @@ function UiFilterInput._build_filter_state()
   return filter_state
 end
 
----Apply filters
+---Apply filters (confirm and close)
 function UiFilterInput._apply()
-  local filter_state = UiFilterInput._build_filter_state()
-  UiFilterInput._close(true, filter_state)
+  -- Filters already applied via live preview, just close
+  UiFilterInput._close(true)
 end
 
 ---Close filter input form
----@param apply boolean Whether to apply filters
----@param filter_state table? Filter state if applying
-function UiFilterInput._close(apply, filter_state)
+---@param apply boolean Whether to confirm or cancel
+function UiFilterInput._close(apply)
   if not state then
     return
+  end
+
+  -- If canceling, restore original filters
+  if not apply and state.callback and state.original_filters then
+    state.callback(state.original_filters)
   end
 
   -- Close windows
@@ -440,11 +458,6 @@ function UiFilterInput._close(apply, filter_state)
   end
   if state.footer_win and vim.api.nvim_win_is_valid(state.footer_win) then
     pcall(vim.api.nvim_win_close, state.footer_win, true)
-  end
-
-  -- Call callback if applying
-  if apply and filter_state and state.callback then
-    state.callback(filter_state)
   end
 
   state = nil
