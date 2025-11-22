@@ -158,9 +158,26 @@ function Source:get_completions(ctx, callback)
     wrapped_callback({})
     return
   elseif context_result.type == Context.Type.KEYWORD then
-    -- Keyword completion (Phase 10.4)
-    -- TODO: Implement in providers/keywords.lua
-    wrapped_callback({})
+    -- Keyword completion (Phase 10.7)
+    local KeywordsProvider = require('ssns.completion.providers.keywords')
+    local SnippetsProvider = require('ssns.completion.providers.snippets')
+
+    -- Get both keywords and snippets
+    local items = {}
+
+    -- Get keywords
+    local keyword_success, keyword_items = pcall(KeywordsProvider._get_completions_impl, provider_ctx)
+    if keyword_success and keyword_items then
+      vim.list_extend(items, keyword_items)
+    end
+
+    -- Get snippets
+    local snippet_success, snippet_items = pcall(SnippetsProvider._get_completions_impl, provider_ctx)
+    if snippet_success and snippet_items then
+      vim.list_extend(items, snippet_items)
+    end
+
+    wrapped_callback(items)
     return
   else
     -- Unknown context - no completions
