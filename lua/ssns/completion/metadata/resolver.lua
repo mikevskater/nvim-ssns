@@ -5,13 +5,20 @@ local Resolver = {}
 
 ---Resolve table/view/synonym reference to actual object
 ---Handles aliases, schema-qualified names, and synonym chains
----@param reference string Table reference (could be alias, table name, or synonym)
+---Enhanced to check buffer cache for temp tables first
+---@param reference string Table reference (could be alias, table name, temp table, or synonym)
 ---@param connection table Connection context { server: ServerClass, database: DbClass, connection_string: string }
 ---@param bufnr number Buffer number (for alias resolution)
----@return table? table_obj Resolved TableClass/ViewClass or nil if not found
-function Resolver.resolve_table(reference, connection, bufnr)
+---@param cursor_pos table? {row, col} Cursor position (optional)
+---@return table? table_obj Resolved TableClass/ViewClass/TempTableClass or nil if not found
+function Resolver.resolve_table(reference, connection, bufnr, cursor_pos)
   if not reference or not connection or not connection.database then
     return nil
+  end
+
+  -- Step 0: Check if reference is a temp table (#temp or ##temp)
+  if reference:match("^#") then
+    return Resolver._resolve_temp_table(reference, bufnr, cursor_pos, connection)
   end
 
   -- Step 1: Try to resolve as alias first
@@ -21,6 +28,11 @@ function Resolver.resolve_table(reference, connection, bufnr)
   if resolved_name then
     -- Alias was resolved, use the resolved table name
     reference = resolved_name
+
+    -- Check again if resolved name is a temp table
+    if reference:match("^#") then
+      return Resolver._resolve_temp_table(reference, bufnr, cursor_pos, connection)
+    end
   end
 
   -- Step 2: Parse schema-qualified name if present
@@ -360,6 +372,77 @@ function Resolver._resolve_synonym(synonym_obj, max_depth)
   -- Fallback: return the synonym itself if resolution fails
   -- (caller can still try to get columns from it)
   return nil
+end
+
+---Resolve temp table reference
+---Checks buffer cache for temp tables, with fallback to tempdb for global temps
+---@param temp_name string Temp table name (#temp or ##temp)
+---@param bufnr number Buffer number
+---@param cursor_pos table? {row, col} Cursor position
+---@param connection table Connection context
+---@return table? temp_table TempTableClass or nil
+function Resolver._resolve_temp_table(temp_name, bufnr, cursor_pos, connection)
+  local Cache = require('ssns.cache')
+
+  -- Get cursor line for chunk detection
+  local cursor_line = nil
+  if cursor_pos then
+    cursor_line = cursor_pos[1]
+  elseif bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+    local success, result = pcall(function()
+      return vim.api.nvim_win_get_cursor(0)[1]
+    end)
+    if success then
+      cursor_line = result
+    end
+  end
+
+  -- Check buffer cache
+  local temp_tables = Cache.get_buffer_temp_tables(bufnr, cursor_line)
+  local temp_table = temp_tables[temp_name]
+
+  if temp_table then
+    return temp_table
+  end
+
+  -- Fallback: Check global cache (for ##globalTemp after execution)
+  -- Look in tempdb.dbo for global temp tables
+  if temp_name:match("^##") and connection then
+    return Resolver._find_in_tempdb(temp_name, connection)
+  end
+
+  return nil
+end
+
+---Find global temp table in tempdb (for ##temp after execution)
+---@param temp_name string Global temp table name (##temp)
+---@param connection table Connection context
+---@return table? table_obj TableClass from tempdb or nil
+function Resolver._find_in_tempdb(temp_name, connection)
+  if not connection or not connection.server then
+    return nil
+  end
+
+  -- Get tempdb from server
+  local server = connection.server
+  local tempdb = server:find_database("tempdb")
+
+  if not tempdb then
+    return nil
+  end
+
+  -- Look for temp table in tempdb.dbo (or tempdb tree)
+  -- Global temp tables appear in tempdb after execution
+  local dbo_schema = tempdb:find_schema("dbo")
+
+  if not dbo_schema then
+    return nil
+  end
+
+  -- Search for temp table in tables
+  local table_obj = dbo_schema:find_table(temp_name)
+
+  return table_obj
 end
 
 return Resolver

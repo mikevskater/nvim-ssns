@@ -9,6 +9,10 @@ Cache.servers = {}
 ---@type table<string, ServerClass>
 Cache.servers_by_name = {}
 
+---Buffer-scoped cache for temp tables and CTEs (per query buffer)
+---@type table<number, table>
+Cache.buffer_cache = {}
+
 ---Default TTL (Time To Live) in seconds for cached data
 Cache.default_ttl = 300  -- 5 minutes
 
@@ -393,5 +397,88 @@ function Cache.import(data)
 
   return true
 end
+
+---Get temp tables for current buffer and GO chunk
+---Returns temp tables visible at the current cursor position
+---@param bufnr number Buffer number
+---@param cursor_line number? Current line (optional, for chunk detection)
+---@return table<string, table> temp_tables Map of temp table name -> TempTableClass
+function Cache.get_buffer_temp_tables(bufnr, cursor_line)
+  -- Get buffer cache
+  local buf_cache = Cache.buffer_cache[bufnr]
+  if not buf_cache then
+    return {}
+  end
+
+  -- If no cursor_line, return all temp tables
+  if not cursor_line then
+    return buf_cache.temp_tables or {}
+  end
+
+  -- Find which GO chunk the cursor is in
+  -- For now, just return all temp tables (chunk-based filtering can be added later)
+  -- Local temps are cleared at GO boundaries by clear_local_temps_at_go()
+  return buf_cache.temp_tables or {}
+end
+
+---Add temp table to buffer cache
+---@param bufnr number Buffer number
+---@param temp_table table TempTableClass object
+---@param chunk_index number GO chunk index
+function Cache.add_buffer_temp_table(bufnr, temp_table, chunk_index)
+  -- Initialize buffer cache if needed
+  if not Cache.buffer_cache[bufnr] then
+    Cache.buffer_cache[bufnr] = {
+      temp_tables = {},
+      go_chunks = {},
+      last_go_line = 0,
+    }
+  end
+
+  -- Add to buffer cache
+  Cache.buffer_cache[bufnr].temp_tables[temp_table.name] = temp_table
+
+  -- Track in chunk
+  if not Cache.buffer_cache[bufnr].go_chunks[chunk_index] then
+    Cache.buffer_cache[bufnr].go_chunks[chunk_index] = { temp_tables = {} }
+  end
+
+  Cache.buffer_cache[bufnr].go_chunks[chunk_index].temp_tables[temp_table.name] = temp_table
+end
+
+---Clear local temp tables at GO boundary
+---Removes all local temp tables (#temp, not ##temp)
+---@param bufnr number Buffer number
+---@param go_line number Line number of GO statement
+function Cache.clear_local_temps_at_go(bufnr, go_line)
+  -- Get buffer cache
+  local buf_cache = Cache.buffer_cache[bufnr]
+  if not buf_cache then
+    return
+  end
+
+  -- Remove all local temp tables (#temp, not ##temp)
+  for name, temp_table in pairs(buf_cache.temp_tables) do
+    if temp_table.type == "local" then
+      buf_cache.temp_tables[name] = nil
+    end
+  end
+
+  -- Update last_go_line
+  buf_cache.last_go_line = go_line
+end
+
+---Clear all buffer cache on buffer close
+---@param bufnr number Buffer number
+function Cache.clear_buffer_cache(bufnr)
+  Cache.buffer_cache[bufnr] = nil
+end
+
+-- Setup autocmd to clear buffer cache on buffer close
+vim.api.nvim_create_autocmd("BufDelete", {
+  callback = function(args)
+    Cache.clear_buffer_cache(args.buf)
+  end,
+})
 
 return Cache
