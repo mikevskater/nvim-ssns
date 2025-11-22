@@ -1,5 +1,6 @@
 ---SQL context detection for intelligent completion
 ---Analyzes cursor position and SQL syntax to determine what kind of completion to provide
+---Uses Tree-sitter for robust parsing with regex fallback
 ---@class CompletionContext
 local Context = {}
 
@@ -312,10 +313,33 @@ function Context.get_table_before_dot(line, col)
 end
 
 ---Parse query for table aliases (FROM/JOIN clauses)
----Returns a map of alias -> table_name
+---Enhanced with Tree-sitter support, falls back to regex
 ---@param query string The SQL query (can be multi-line)
 ---@return table<string, string> aliases Map of alias -> table_name
 function Context.parse_aliases(query)
+  -- TRY: Tree-sitter parsing first (more robust, handles comments/strings)
+  local Treesitter = require('ssns.completion.metadata.treesitter')
+  if Treesitter.is_available() then
+    local refs = Treesitter.extract_table_references(query)
+    if refs and #refs > 0 then
+      -- Convert refs to alias map
+      local aliases = {}
+      for _, ref in ipairs(refs) do
+        if ref.alias then
+          -- Handle schema-qualified: dbo.Employees -> dbo.Employees
+          local table_name = ref.table
+          if ref.schema then
+            table_name = ref.schema .. "." .. ref.table
+          end
+          aliases[ref.alias:lower()] = table_name
+        end
+      end
+      return aliases
+    end
+  end
+
+  -- FALLBACK: Use existing regex-based parsing
+  -- (Kept for compatibility when tree-sitter unavailable or returns no results)
   local aliases = {}
   local query_lower = query:lower()
 
