@@ -244,20 +244,37 @@ end
 ---@param lines string[]
 ---@param indent_level number
 function UiTree.render_object_group(group, lines, indent_level)
+  local UiFilters = require('ssns.ui.filters')
   local indent = string.rep("  ", indent_level)
   local icon = group.ui_state.expanded and "▾ " or "▸ "
 
-  -- Group line
-  local line = string.format("%s%s%s", indent, icon, group.name)
+  -- Get all children
+  local all_children = group:has_children() and group:get_children() or {}
+
+  -- Apply filters if any
+  local filters = UiFilters.get(group)
+  local filtered_children, total_count, filter_error = UiFilters.apply(all_children, filters)
+  local filtered_count = #filtered_children
+
+  -- Show filter error if any
+  if filter_error then
+    vim.notify(string.format("SSNS: Filter error on %s: %s", group.name, filter_error), vim.log.levels.WARN)
+  end
+
+  -- Group line with count display
+  -- Strip any existing count from name (in case it's already there)
+  local base_name = group.name:gsub("%s*%([%d/]+%)$", "")
+  local count_display = UiFilters.get_count_display(group, filtered_count, total_count)
+  local line = string.format("%s%s%s %s", indent, icon, base_name, count_display)
   table.insert(lines, line)
 
   -- Map line to object
   UiTree.line_map[#lines] = group
   UiTree.object_map[group] = #lines
 
-  -- If expanded, render children
-  if group.ui_state.expanded and group:has_children() then
-    for _, child in ipairs(group:get_children()) do
+  -- If expanded, render filtered children
+  if group.ui_state.expanded and #filtered_children > 0 then
+    for _, child in ipairs(filtered_children) do
       UiTree.render_object(child, lines, indent_level + 1)
     end
   end
@@ -323,8 +340,35 @@ function UiTree.render_object(obj, lines, indent_level)
   -- Get object-type specific icon
   local obj_icon = UiTree.get_object_icon(obj.object_type, icons, obj)
 
-  -- Object line with icon
-  local display_name = obj.get_display_name and obj:get_display_name() or obj.name
+  -- Check if this is a schema node or object group
+  local is_schema_node = obj.object_type == "schema" or obj.object_type == "schema_view"
+  local is_object_group = obj.object_type == "databases_group" or
+                          obj.object_type == "tables_group" or
+                          obj.object_type == "views_group" or
+                          obj.object_type == "procedures_group" or
+                          obj.object_type == "functions_group" or
+                          obj.object_type == "synonyms_group" or
+                          obj.object_type == "sequences_group"
+
+  -- For groups and schemas, use name directly and add count
+  -- For other objects, use get_display_name if available
+  local display_name
+  if is_schema_node or is_object_group then
+    -- Strip any existing count from name (in case it's already there)
+    local base_name = obj.name:gsub("%s*%([%d/]+%)$", "")
+    display_name = base_name
+    if obj:has_children() then
+      local UiFilters = require('ssns.ui.filters')
+      local filters = UiFilters.get(obj)
+      local all_children = obj:get_children()
+      local filtered_children = UiFilters.apply(all_children, filters)
+      local count_display = UiFilters.get_count_display(obj, #filtered_children, #all_children)
+      display_name = display_name .. " " .. count_display
+    end
+  else
+    display_name = obj.get_display_name and obj:get_display_name() or obj.name
+  end
+
   local line = string.format("%s%s %s %s", indent, expand_icon, obj_icon, display_name)
   table.insert(lines, line)
 
@@ -353,8 +397,37 @@ function UiTree.render_object(obj, lines, indent_level)
         UiTree.render_aligned_group(obj, lines, indent_level + 1)
       elseif obj:has_children() then
         -- Regular children rendering (only if has children)
-        for _, child in ipairs(obj:get_children()) do
-          UiTree.render_object(child, lines, indent_level + 1)
+        local all_children = obj:get_children()
+
+        -- Apply filtering for schema nodes or object groups
+        local is_schema_node = obj.object_type == "schema" or obj.object_type == "schema_view"
+        local is_object_group = obj.object_type == "databases_group" or
+                                obj.object_type == "tables_group" or
+                                obj.object_type == "views_group" or
+                                obj.object_type == "procedures_group" or
+                                obj.object_type == "functions_group" or
+                                obj.object_type == "synonyms_group" or
+                                obj.object_type == "sequences_group"
+
+        if is_schema_node or is_object_group then
+          local UiFilters = require('ssns.ui.filters')
+          local filters = UiFilters.get(obj)
+          local filtered_children, total_count, filter_error = UiFilters.apply(all_children, filters)
+
+          -- Show filter error if any
+          if filter_error then
+            vim.notify(string.format("SSNS: Filter error on %s: %s", obj.name, filter_error), vim.log.levels.WARN)
+          end
+
+          -- Render filtered children
+          for _, child in ipairs(filtered_children) do
+            UiTree.render_object(child, lines, indent_level + 1)
+          end
+        else
+          -- Regular rendering without filters
+          for _, child in ipairs(all_children) do
+            UiTree.render_object(child, lines, indent_level + 1)
+          end
         end
       end
     end
@@ -1206,6 +1279,89 @@ function UiTree.set_lualine_color()
   -- Prompt for color
   local LualineColors = require('ssns.lualine_colors')
   LualineColors.prompt_set_color(name, is_server)
+end
+
+---Open filter editor for the current group
+function UiTree.open_filter()
+  local Buffer = require('ssns.ui.buffer')
+
+  local line = Buffer.get_current_line()
+  if not line then
+    return
+  end
+
+  local obj = UiTree.line_map[line]
+  if not obj then
+    vim.notify("SSNS: No object at current line", vim.log.levels.WARN)
+    return
+  end
+
+  -- Check if this is a filterable object (group or schema node)
+  local filterable_types = {
+    "databases_group", "tables_group", "views_group", "procedures_group", "functions_group",
+    "synonyms_group", "sequences_group", "schema", "schema_view"  -- Individual schema nodes, not schemas_group
+  }
+
+  local is_filterable = false
+  for _, type_name in ipairs(filterable_types) do
+    if obj.object_type == type_name then
+      is_filterable = true
+      break
+    end
+  end
+
+  if not is_filterable then
+    vim.notify("SSNS: Filters can only be applied to object groups or schema nodes", vim.log.levels.WARN)
+    return
+  end
+
+  -- Open filter editor
+  local UiFilterEditor = require('ssns.ui.filter_editor')
+  UiFilterEditor.open(obj)
+end
+
+---Clear filters for the current group
+function UiTree.clear_filter()
+  local Buffer = require('ssns.ui.buffer')
+
+  local line = Buffer.get_current_line()
+  if not line then
+    return
+  end
+
+  local obj = UiTree.line_map[line]
+  if not obj then
+    vim.notify("SSNS: No object at current line", vim.log.levels.WARN)
+    return
+  end
+
+  -- Check if this is a filterable object (group or schema node)
+  local filterable_types = {
+    "databases_group", "tables_group", "views_group", "procedures_group", "functions_group",
+    "synonyms_group", "sequences_group", "schema", "schema_view"  -- Individual schema nodes, not schemas_group
+  }
+
+  local is_filterable = false
+  for _, type_name in ipairs(filterable_types) do
+    if obj.object_type == type_name then
+      is_filterable = true
+      break
+    end
+  end
+
+  if not is_filterable then
+    vim.notify("SSNS: Filters can only be cleared on object groups or schema nodes", vim.log.levels.WARN)
+    return
+  end
+
+  -- Clear filters
+  local UiFilters = require('ssns.ui.filters')
+  UiFilters.clear(obj)
+
+  -- Refresh tree
+  UiTree.render()
+
+  vim.notify("SSNS: Filters cleared", vim.log.levels.INFO)
 end
 
 return UiTree

@@ -160,6 +160,19 @@ function UiBuffer.setup_keymaps()
     desc = "Refresh all",
   })
 
+  -- Filter
+  vim.api.nvim_buf_set_keymap(bufnr, "n", "f", "<Cmd>lua require('ssns.ui.tree').open_filter()<CR>", {
+    noremap = true,
+    silent = true,
+    desc = "Filter group",
+  })
+
+  vim.api.nvim_buf_set_keymap(bufnr, "n", "F", "<Cmd>lua require('ssns.ui.tree').clear_filter()<CR>", {
+    noremap = true,
+    silent = true,
+    desc = "Clear filter",
+  })
+
   -- Connect/disconnect
   vim.api.nvim_buf_set_keymap(bufnr, "n", "d", "<Cmd>lua require('ssns.ui.tree').toggle_connection()<CR>", {
     noremap = true,
@@ -345,6 +358,11 @@ function UiBuffer.show_help()
     "  R          - Refresh all servers",
     "  d          - Toggle connection",
     "  <Leader>c  - Set lualine color (server/database)",
+    "",
+    "Filtering:",
+    "  f          - Open filter editor for group",
+    "  F          - Clear all filters on group",
+    "  <Leader>a  - Apply filters (in filter editor)",
     "",
     "Help:",
     "  ?          - Show this help",
