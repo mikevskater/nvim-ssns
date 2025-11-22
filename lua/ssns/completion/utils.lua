@@ -393,4 +393,122 @@ function Utils.format_parameter(param_obj, opts)
   }
 end
 
+---Format a view as an LSP CompletionItem
+---@param view_obj table View object { name: string, schema: string, view_name?: string, schema_name?: string }
+---@param opts table? Options { show_schema: boolean? }
+---@return table completion_item LSP CompletionItem
+function Utils.format_view(view_obj, opts)
+  opts = opts or {}
+  local show_schema = opts.show_schema ~= false -- Default true
+
+  local label = view_obj.name or view_obj.view_name
+  local schema = view_obj.schema or view_obj.schema_name
+
+  -- Detail shows schema.view and type
+  local detail
+  if show_schema and schema then
+    detail = string.format("%s.%s (VIEW)", schema, label)
+  else
+    detail = string.format("%s (VIEW)", label)
+  end
+
+  -- Build documentation (markdown)
+  local doc_items = {
+    Type = "VIEW",
+  }
+
+  if schema then
+    doc_items.Schema = schema
+  end
+
+  local documentation = {
+    kind = "markdown",
+    value = Utils.format_markdown_docs(label, doc_items)
+  }
+
+  -- Sort priority: views = 2 (after tables)
+  local priority = 2
+
+  return {
+    label = label,
+    kind = Utils.CompletionItemKind.Class,
+    detail = detail,
+    documentation = documentation,
+    insertText = label,
+    filterText = label,
+    sortText = Utils.generate_sort_text(priority, label),
+    data = {
+      type = "view",
+      schema = schema,
+      name = label,
+    }
+  }
+end
+
+---Format a synonym as an LSP CompletionItem
+---@param synonym_obj table Synonym object { name: string, schema: string, synonym_name?: string, schema_name?: string, base_object_name?: string }
+---@param opts table? Options { show_schema: boolean? }
+---@return table completion_item LSP CompletionItem
+function Utils.format_synonym(synonym_obj, opts)
+  opts = opts or {}
+  local show_schema = opts.show_schema ~= false -- Default true
+
+  local label = synonym_obj.name or synonym_obj.synonym_name
+  local schema = synonym_obj.schema or synonym_obj.schema_name
+  local base_object = synonym_obj.base_object_name
+
+  -- Detail shows schema.synonym and target
+  local detail
+  if show_schema and schema then
+    if base_object then
+      detail = string.format("%s.%s → %s", schema, label, base_object)
+    else
+      detail = string.format("%s.%s (SYNONYM)", schema, label)
+    end
+  else
+    if base_object then
+      detail = string.format("%s → %s", label, base_object)
+    else
+      detail = string.format("%s (SYNONYM)", label)
+    end
+  end
+
+  -- Build documentation (markdown)
+  local doc_items = {
+    Type = "SYNONYM",
+  }
+
+  if schema then
+    doc_items.Schema = schema
+  end
+
+  if base_object then
+    doc_items.Target = base_object
+  end
+
+  local documentation = {
+    kind = "markdown",
+    value = Utils.format_markdown_docs(label, doc_items)
+  }
+
+  -- Sort priority: synonyms = 3 (after tables and views)
+  local priority = 3
+
+  return {
+    label = label,
+    kind = Utils.CompletionItemKind.Reference,
+    detail = detail,
+    documentation = documentation,
+    insertText = label,
+    filterText = label,
+    sortText = Utils.generate_sort_text(priority, label),
+    data = {
+      type = "synonym",
+      schema = schema,
+      name = label,
+      target = base_object,
+    }
+  }
+end
+
 return Utils

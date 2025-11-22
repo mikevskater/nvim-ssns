@@ -68,77 +68,75 @@ function Source:get_completions(ctx, callback)
     return
   end
 
+  -- Get connection context for buffer
+  local connection_ctx = self:get_connection(ctx.bufnr)
+
+  -- Prepare context for providers
+  local provider_ctx = {
+    bufnr = ctx.bufnr,
+    connection = connection_ctx,
+    sql_context = context_result,
+  }
+
+  -- Create callback wrapper to apply limits
+  local wrapped_callback = function(items)
+    -- Apply max_items limit
+    if self.opts.max_items > 0 and #items > self.opts.max_items then
+      items = vim.list_slice(items, 1, self.opts.max_items)
+    end
+
+    -- Return results via callback (async pattern)
+    vim.schedule(function()
+      callback({
+        items = items,
+        is_incomplete_backward = false,
+        is_incomplete_forward = false,
+      })
+    end)
+  end
+
   -- Route to appropriate provider based on context type
-  local items = {}
+  local Context = require('ssns.completion.context')
 
-  -- Use pcall to handle errors gracefully
-  local success, result = pcall(function()
-    local Context = require('ssns.completion.context')
-
-    if context_result.type == Context.Type.TABLE then
-      -- Table/view completion (Phase 10.2)
-      -- TODO: Implement in providers/tables.lua
-      return {}
-    elseif context_result.type == Context.Type.COLUMN then
-      -- Column completion (Phase 10.2)
-      -- TODO: Implement in providers/columns.lua
-      return {}
-    elseif context_result.type == Context.Type.PROCEDURE then
-      -- Procedure/function completion (Phase 10.5)
-      -- TODO: Implement in providers/procedures.lua
-      return {}
-    elseif context_result.type == Context.Type.PARAMETER then
-      -- Parameter completion (Phase 10.5)
-      -- TODO: Implement in providers/parameters.lua
-      return {}
-    elseif context_result.type == Context.Type.DATABASE then
-      -- Database completion (Phase 10.5)
-      -- TODO: Implement in providers/databases.lua
-      return {}
-    elseif context_result.type == Context.Type.SCHEMA then
-      -- Schema completion (Phase 10.5)
-      -- TODO: Implement in providers/schemas.lua
-      return {}
-    elseif context_result.type == Context.Type.KEYWORD then
-      -- Keyword completion (Phase 10.4)
-      -- TODO: Implement in providers/keywords.lua
-      return {}
-    else
-      -- Unknown context - no completions
-      return {}
-    end
-  end)
-
-  if success then
-    items = result or {}
+  if context_result.type == Context.Type.TABLE then
+    -- Table/view/synonym completion (Phase 10.2)
+    local TablesProvider = require('ssns.completion.providers.tables')
+    TablesProvider.get_completions(provider_ctx, wrapped_callback)
+    return
+  elseif context_result.type == Context.Type.COLUMN then
+    -- Column completion (Phase 10.3)
+    -- TODO: Implement in providers/columns.lua
+    wrapped_callback({})
+    return
+  elseif context_result.type == Context.Type.PROCEDURE then
+    -- Procedure/function completion (Phase 10.5)
+    -- TODO: Implement in providers/procedures.lua
+    wrapped_callback({})
+    return
+  elseif context_result.type == Context.Type.PARAMETER then
+    -- Parameter completion (Phase 10.5)
+    -- TODO: Implement in providers/parameters.lua
+    wrapped_callback({})
+    return
+  elseif context_result.type == Context.Type.DATABASE then
+    -- Database completion (Phase 10.5)
+    -- TODO: Implement in providers/databases.lua
+    wrapped_callback({})
+    return
+  elseif context_result.type == Context.Type.SCHEMA then
+    -- Schema completion (Phase 10.5)
+    -- TODO: Implement in providers/schemas.lua
+    wrapped_callback({})
+    return
+  elseif context_result.type == Context.Type.KEYWORD then
+    -- Keyword completion (Phase 10.4)
+    -- TODO: Implement in providers/keywords.lua
+    wrapped_callback({})
+    return
   else
-    -- Log error if debug enabled
-    if self.opts.debug then
-      vim.notify(
-        string.format("[SSNS Completion] Error: %s", tostring(result)),
-        vim.log.levels.ERROR
-      )
-    end
-    items = {}
-  end
-
-  -- Apply max_items limit
-  if self.opts.max_items > 0 and #items > self.opts.max_items then
-    items = vim.list_slice(items, 1, self.opts.max_items)
-  end
-
-  -- Return results via callback (async pattern)
-  vim.schedule(function()
-    callback({
-      items = items,
-      is_incomplete_backward = false,
-      is_incomplete_forward = false,
-    })
-  end)
-
-  -- Return cancellation function (optional)
-  return function()
-    -- Cancel any pending operations if needed
+    -- Unknown context - no completions
+    wrapped_callback({})
+    return
   end
 end
 
