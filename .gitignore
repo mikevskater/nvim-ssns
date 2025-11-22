@@ -1,5 +1,10 @@
 *.md
 
+tests/
+sql/
+
 # Ignore Node artifacts in rplugin/node/ssns-db
 rplugin/node/ssns-db/node_modules/
 rplugin/node/ssns-db/package-lock.json
+*.json
+nul
