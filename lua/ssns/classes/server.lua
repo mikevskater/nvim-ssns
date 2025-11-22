@@ -112,6 +112,49 @@ function ServerClass:connect()
   self.connection_state = ConnectionState.CONNECTED
   self.last_connected_at = os.time()
 
+  -- Eagerly load metadata for completion if enabled
+  local Config = require('ssns.config')
+  local config = Config.get()
+  if config.completion and config.completion.eager_load then
+    -- Load databases in background to avoid blocking
+    vim.schedule(function()
+      -- Load databases (this will trigger eager loading of tables/views/procedures/functions/synonyms)
+      local load_success = self:load()
+      if not load_success then
+        -- Silent failure - metadata will be loaded on-demand if eager load fails
+        if config.completion.debug then
+          vim.notify(
+            string.format("SSNS: Failed to eagerly load metadata for '%s'", self.name),
+            vim.log.levels.WARN
+          )
+        end
+      end
+
+      -- For each database, trigger load() to populate tables/views/procedures/functions/synonyms
+      if load_success and self.children then
+        for _, child in ipairs(self.children) do
+          -- Skip non-database children (like "Databases (N)" group)
+          if child.object_type == "databases_group" and child.children then
+            for _, db in ipairs(child.children) do
+              if db.object_type == "database" then
+                vim.schedule(function()
+                  -- Database:load() eagerly loads tables/views/procedures/functions/synonyms
+                  local db_load_success = db:load()
+                  if not db_load_success and config.completion.debug then
+                    vim.notify(
+                      string.format("SSNS: Failed to eagerly load database '%s'", db.name),
+                      vim.log.levels.WARN
+                    )
+                  end
+                end)
+              end
+            end
+          end
+        end
+      end
+    end)
+  end
+
   return true, nil
 end
 
@@ -237,7 +280,35 @@ function ServerClass:reload()
   Connection.invalidate_cache(self.connection_string)
 
   self:clear_children()
-  return self:load()
+  local load_success = self:load()
+
+  -- Eagerly load metadata for completion if enabled
+  local Config = require('ssns.config')
+  local config = Config.get()
+  if config.completion and config.completion.eager_load and load_success and self.children then
+    -- For each database, trigger load() to populate tables/views/procedures/functions/synonyms
+    for _, child in ipairs(self.children) do
+      -- Skip non-database children (like "Databases (N)" group)
+      if child.object_type == "databases_group" and child.children then
+        for _, db in ipairs(child.children) do
+          if db.object_type == "database" then
+            vim.schedule(function()
+              -- Database:load() eagerly loads tables/views/procedures/functions/synonyms
+              local db_load_success = db:load()
+              if not db_load_success and config.completion.debug then
+                vim.notify(
+                  string.format("SSNS: Failed to eagerly load database '%s'", db.name),
+                  vim.log.levels.WARN
+                )
+              end
+            end)
+          end
+        end
+      end
+    end
+  end
+
+  return load_success
 end
 
 ---Find a database by name

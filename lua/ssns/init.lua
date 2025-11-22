@@ -157,6 +157,20 @@ function Ssns._register_commands()
     desc = "Export query history to file",
     complete = "file",
   })
+
+  -- :SSNSCompletionStats - Show completion performance statistics
+  vim.api.nvim_create_user_command("SSNSCompletionStats", function()
+    Ssns.show_completion_stats()
+  end, {
+    desc = "Show completion performance statistics",
+  })
+
+  -- :SSNSCompletionStatsReset - Reset completion performance statistics
+  vim.api.nvim_create_user_command("SSNSCompletionStatsReset", function()
+    Ssns.reset_completion_stats()
+  end, {
+    desc = "Reset completion performance statistics",
+  })
 end
 
 ---Toggle the tree UI
@@ -386,6 +400,125 @@ end
 ---@return Config
 function Ssns.get_config()
   return require('ssns.config')
+end
+
+---Show completion performance statistics
+function Ssns.show_completion_stats()
+  local Source = require('ssns.completion.source')
+
+  -- Try to get stats from the source module
+  -- Note: This accesses the module-level stats through the Source class
+  local success, result = pcall(function()
+    -- Create a temporary source instance to access the get_stats method
+    local temp_source = Source.new()
+    return temp_source:get_stats()
+  end)
+
+  if not success then
+    vim.notify("SSNS: Failed to get completion stats: " .. tostring(result), vim.log.levels.ERROR)
+    return
+  end
+
+  local stats = result
+
+  local lines = {
+    "=== SSNS Completion Performance Statistics ===",
+    "",
+    string.format("Total Requests: %d", stats.total_requests),
+    string.format("Average Time: %.2fms", stats.avg_time_ms),
+    string.format(
+      "Slow Requests (>100ms): %d (%.1f%%)",
+      stats.slow_requests,
+      stats.total_requests > 0 and (stats.slow_requests / stats.total_requests * 100) or 0
+    ),
+    "",
+    string.format("Cache Hits: %d", stats.cache_hits),
+    string.format("Cache Misses: %d", stats.cache_misses),
+    stats.cache_hits + stats.cache_misses > 0
+        and string.format(
+          "Cache Hit Rate: %.1f%%",
+          (stats.cache_hits / (stats.cache_hits + stats.cache_misses) * 100)
+        )
+      or "Cache Hit Rate: N/A",
+    "",
+    "Requests by Type:",
+  }
+
+  -- Sort by request count (descending)
+  local types = {}
+  for type_name, type_stats in pairs(stats.requests_by_type) do
+    table.insert(types, { name = type_name, stats = type_stats })
+  end
+  table.sort(types, function(a, b)
+    return a.stats.count > b.stats.count
+  end)
+
+  for _, type_data in ipairs(types) do
+    table.insert(
+      lines,
+      string.format(
+        "  %s: %d requests, avg %.2fms",
+        type_data.name,
+        type_data.stats.count,
+        type_data.stats.avg_ms
+      )
+    )
+  end
+
+  if #types == 0 then
+    table.insert(lines, "  (no requests recorded)")
+  end
+
+  table.insert(lines, "")
+  table.insert(lines, "Note: Stats only tracked when debug mode is enabled")
+  table.insert(lines, "===============================================")
+
+  -- Display in a floating window
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+
+  local width = math.min(70, vim.o.columns - 4)
+  local height = math.min(#lines, vim.o.lines - 4)
+  local row = math.floor((vim.o.lines - height) / 2)
+  local col = math.floor((vim.o.columns - width) / 2)
+
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = row,
+    col = col,
+    style = "minimal",
+    border = "rounded",
+    title = " Completion Stats ",
+    title_pos = "center",
+  })
+
+  -- Set buffer options
+  vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+
+  -- Close on any key press
+  vim.api.nvim_buf_set_keymap(buf, "n", "q", ":close<CR>", { noremap = true, silent = true })
+  vim.api.nvim_buf_set_keymap(buf, "n", "<Esc>", ":close<CR>", { noremap = true, silent = true })
+  vim.api.nvim_buf_set_keymap(buf, "n", "<CR>", ":close<CR>", { noremap = true, silent = true })
+end
+
+---Reset completion performance statistics
+function Ssns.reset_completion_stats()
+  local Source = require('ssns.completion.source')
+
+  -- Reset stats through the source module
+  local success, err = pcall(function()
+    local temp_source = Source.new()
+    temp_source:reset_stats()
+  end)
+
+  if success then
+    vim.notify("SSNS: Completion statistics reset", vim.log.levels.INFO)
+  else
+    vim.notify("SSNS: Failed to reset completion stats: " .. tostring(err), vim.log.levels.ERROR)
+  end
 end
 
 return Ssns

@@ -118,6 +118,8 @@ end
 ---@return string query
 function SqlServerAdapter:get_databases_query()
   return [[
+SET NOCOUNT ON;
+
 SELECT name
 FROM sys.databases
 WHERE database_id > 4  -- Exclude system databases (master, tempdb, model, msdb)
@@ -133,6 +135,8 @@ end
 function SqlServerAdapter:get_schemas_query(database_name)
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
+
 SELECT s.name
 FROM sys.schemas s
 WHERE s.schema_id < 16384  -- Exclude system schemas
@@ -153,6 +157,8 @@ function SqlServerAdapter:get_tables_query(database_name, schema_name)
 
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
+
 SELECT
   s.name AS schema_name,
   t.name AS table_name,
@@ -176,6 +182,8 @@ function SqlServerAdapter:get_views_query(database_name, schema_name)
 
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
+
 SELECT
   s.name AS schema_name,
   v.name AS view_name
@@ -198,6 +206,8 @@ function SqlServerAdapter:get_procedures_query(database_name, schema_name)
 
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
+
 SELECT
   s.name AS schema_name,
   p.name AS procedure_name
@@ -220,6 +230,8 @@ function SqlServerAdapter:get_functions_query(database_name, schema_name)
 
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
+
 SELECT
   s.name AS schema_name,
   o.name AS function_name,
@@ -244,6 +256,8 @@ function SqlServerAdapter:get_synonyms_query(database_name, schema_name)
 
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
+
 SELECT
   s.name AS schema_name,
   syn.name AS synonym_name,
@@ -267,6 +281,8 @@ function SqlServerAdapter:get_sequences_query(database_name, schema_name)
 
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
+
 SELECT
   s.name AS schema_name,
   seq.name AS sequence_name,
@@ -290,6 +306,8 @@ function SqlServerAdapter:get_columns_query(database_name, schema_name, table_na
 
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
+
 SELECT
   c.name AS column_name,
   t.name AS data_type,
@@ -321,6 +339,8 @@ function SqlServerAdapter:get_indexes_query(database_name, schema_name, table_na
 
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
+
 SELECT
   i.name AS index_name,
   i.type_desc AS index_type,
@@ -351,6 +371,8 @@ function SqlServerAdapter:get_constraints_query(database_name, schema_name, tabl
 
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
+
 SELECT
   con.name AS constraint_name,
   con.type_desc AS constraint_type,
@@ -385,6 +407,8 @@ function SqlServerAdapter:get_parameters_query(database_name, schema_name, routi
 
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
+
 SELECT
   CASE
     WHEN p.parameter_id = 0 THEN 'RETURNS'
@@ -426,6 +450,8 @@ function SqlServerAdapter:get_definition_query(database_name, schema_name, objec
 
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
+
 SELECT
     OBJECT_DEFINITION(o.object_id) AS definition
 FROM sys.objects o WITH (NOWAIT)
@@ -449,6 +475,7 @@ function SqlServerAdapter:get_table_definition_query(database_name, schema_name,
 
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
 
 DECLARE @table_name VARCHAR(800) = '%s';
 DECLARE @object_name SYSNAME, @object_id INT;
@@ -892,6 +919,8 @@ end
 function SqlServerAdapter:get_dependencies_query(database_name, schema_name, object_name)
   return string.format([[
 USE [%s];
+SET NOCOUNT ON;
+
 -- Get objects that THIS object depends on (referenced objects)
 SELECT
   'DEPENDS ON' AS dependency_type,

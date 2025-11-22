@@ -3,6 +3,18 @@
 ---@class SsnsCompletionSource
 local Source = {}
 
+---Performance statistics (only tracked when debug enabled)
+---@class CompletionStats
+local stats = {
+  total_requests = 0,
+  total_time_ms = 0,
+  cache_hits = 0,
+  cache_misses = 0,
+  slow_requests = 0, -- > 100ms
+  requests_by_type = {}, -- { TABLE = {count, total_ms, avg_ms}, ... }
+  avg_time_ms = 0,
+}
+
 ---Constructor for the completion source
 ---@param opts table? User configuration options
 ---@return table source The source instance
@@ -57,6 +69,9 @@ end
 ---@param callback function Callback function(response: { items: table[], is_incomplete_backward?: boolean, is_incomplete_forward?: boolean })
 ---@return function? cancel Optional cancellation function
 function Source:get_completions(ctx, callback)
+  -- Start performance timer
+  local start_time = vim.loop.hrtime()
+
   -- Detect SQL context
   local context_result = self:detect_context(ctx)
 
@@ -107,11 +122,20 @@ function Source:get_completions(ctx, callback)
     end
   end
 
-  -- Create callback wrapper to apply limits
+  -- Create callback wrapper to apply limits and track performance
   local wrapped_callback = function(items)
+    -- Calculate elapsed time
+    local end_time = vim.loop.hrtime()
+    local elapsed_ms = (end_time - start_time) / 1e6 -- Convert nanoseconds to milliseconds
+
     -- Apply max_items limit
     if self.opts.max_items > 0 and #items > self.opts.max_items then
       items = vim.list_slice(items, 1, self.opts.max_items)
+    end
+
+    -- Update performance stats if debug enabled
+    if self.opts.debug then
+      self:_update_stats(context_result.type, elapsed_ms, #items)
     end
 
     -- Return results via callback (async pattern)
@@ -308,6 +332,76 @@ function Source:log(message, level)
     level = level or vim.log.levels.INFO
     vim.notify(string.format("[SSNS Completion] %s", message), level)
   end
+end
+
+---Update performance statistics
+---@param context_type string Context type (TABLE, COLUMN, etc.)
+---@param elapsed_ms number Elapsed time in milliseconds
+---@param item_count number Number of items returned
+function Source:_update_stats(context_type, elapsed_ms, item_count)
+  stats.total_requests = stats.total_requests + 1
+  stats.total_time_ms = stats.total_time_ms + elapsed_ms
+  stats.avg_time_ms = stats.total_time_ms / stats.total_requests
+
+  -- Track by type
+  if not stats.requests_by_type[context_type] then
+    stats.requests_by_type[context_type] = { count = 0, total_ms = 0, avg_ms = 0 }
+  end
+  local type_stats = stats.requests_by_type[context_type]
+  type_stats.count = type_stats.count + 1
+  type_stats.total_ms = type_stats.total_ms + elapsed_ms
+  type_stats.avg_ms = type_stats.total_ms / type_stats.count
+
+  -- Track slow requests (>100ms)
+  if elapsed_ms > 100 then
+    stats.slow_requests = stats.slow_requests + 1
+    vim.notify(
+      string.format(
+        "[SSNS Completion] Slow completion detected: %s (%.2fms, %d items)",
+        context_type,
+        elapsed_ms,
+        item_count
+      ),
+      vim.log.levels.WARN
+    )
+  end
+
+  -- Log every request if debug enabled
+  vim.notify(
+    string.format("[SSNS Completion] %s: %.2fms (%d items)", context_type, elapsed_ms, item_count),
+    vim.log.levels.DEBUG
+  )
+end
+
+---Track cache hit (called by providers)
+function Source:track_cache_hit()
+  if self.opts.debug then
+    stats.cache_hits = stats.cache_hits + 1
+  end
+end
+
+---Track cache miss (called by providers)
+function Source:track_cache_miss()
+  if self.opts.debug then
+    stats.cache_misses = stats.cache_misses + 1
+  end
+end
+
+---Get performance statistics (for debugging)
+---@return table stats Performance statistics
+function Source:get_stats()
+  return vim.tbl_deep_extend('force', {}, stats) -- Return copy
+end
+
+---Reset performance statistics
+function Source:reset_stats()
+  stats.total_requests = 0
+  stats.total_time_ms = 0
+  stats.cache_hits = 0
+  stats.cache_misses = 0
+  stats.slow_requests = 0
+  stats.requests_by_type = {}
+  stats.avg_time_ms = 0
 end
 
 return Source

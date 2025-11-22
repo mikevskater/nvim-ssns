@@ -8,6 +8,7 @@
 ---@field table_helpers TableHelpersConfig Table helper templates per database type
 ---@field performance PerformanceConfig Performance tuning options
 ---@field lualine LualineConfig Lualine statusline integration
+---@field completion CompletionConfig IntelliSense completion configuration
 
 ---@class UiConfig
 ---@field position string Window position: "left", "right", "float"
@@ -87,6 +88,16 @@
 ---@field colors table<string, table> Color map for database connections { fg, bg, gui }
 ---@field default_color table? Default color { fg, bg, gui }
 ---@field save_colors boolean Save color customizations to file (default: true)
+
+---@class CompletionConfig
+---@field enabled boolean Enable/disable completion globally (default: true)
+---@field timeout_ms number Completion timeout in milliseconds (default: 200)
+---@field cache_ttl number Cache TTL in seconds (default: 300)
+---@field max_items number Maximum completion items to return (default: 100, 0 = unlimited)
+---@field show_documentation boolean Show documentation in completion popup (default: true)
+---@field eager_load boolean Eagerly load tables/views/procedures on connection (default: true)
+---@field min_keyword_length number Minimum keyword length for completion (default: 2)
+---@field debug boolean Enable debug logging for completion (default: false)
 
 ---Default configuration
 ---@type SsnsConfig
@@ -295,6 +306,18 @@ local default_config = {
     },
     default_color = nil,  -- Default color (nil = use lualine theme)
   },
+
+  -- IntelliSense completion configuration
+  completion = {
+    enabled = true,              -- Enable/disable completion globally
+    timeout_ms = 200,            -- Completion timeout in milliseconds
+    cache_ttl = 300,             -- Cache TTL in seconds (5 minutes)
+    max_items = 100,             -- Maximum completion items to return (0 = unlimited)
+    show_documentation = true,   -- Show documentation in completion popup
+    eager_load = true,           -- Eagerly load tables/views/procedures on connection
+    min_keyword_length = 2,      -- Minimum keyword length for completion
+    debug = false,               -- Enable debug logging for completion
+  },
 }
 
 ---@class Config
@@ -387,6 +410,12 @@ function Config.get_performance()
   return Config.current.performance
 end
 
+---Get completion configuration
+---@return CompletionConfig
+function Config.get_completion()
+  return Config.current.completion
+end
+
 ---Validate configuration
 ---@param config SsnsConfig
 ---@return boolean valid
@@ -431,6 +460,34 @@ function Config.validate(config)
   if config.performance then
     if config.performance.page_size and config.performance.page_size < 0 then
       return false, "performance.page_size must be non-negative"
+    end
+  end
+
+  -- Validate completion configuration
+  if config.completion then
+    if config.completion.enabled ~= nil and type(config.completion.enabled) ~= "boolean" then
+      return false, "completion.enabled must be a boolean"
+    end
+    if config.completion.timeout_ms and (type(config.completion.timeout_ms) ~= "number" or config.completion.timeout_ms <= 0 or config.completion.timeout_ms > 10000) then
+      return false, "completion.timeout_ms must be a number between 1 and 10000"
+    end
+    if config.completion.cache_ttl and (type(config.completion.cache_ttl) ~= "number" or config.completion.cache_ttl < 0) then
+      return false, "completion.cache_ttl must be a non-negative number"
+    end
+    if config.completion.max_items and (type(config.completion.max_items) ~= "number" or config.completion.max_items < 0) then
+      return false, "completion.max_items must be a non-negative number"
+    end
+    if config.completion.show_documentation ~= nil and type(config.completion.show_documentation) ~= "boolean" then
+      return false, "completion.show_documentation must be a boolean"
+    end
+    if config.completion.eager_load ~= nil and type(config.completion.eager_load) ~= "boolean" then
+      return false, "completion.eager_load must be a boolean"
+    end
+    if config.completion.min_keyword_length and (type(config.completion.min_keyword_length) ~= "number" or config.completion.min_keyword_length < 0) then
+      return false, "completion.min_keyword_length must be a non-negative number"
+    end
+    if config.completion.debug ~= nil and type(config.completion.debug) ~= "boolean" then
+      return false, "completion.debug must be a boolean"
     end
   end
 
