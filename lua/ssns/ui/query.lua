@@ -2,6 +2,8 @@
 ---Query buffer management for SSNS
 local UiQuery = {}
 
+local QueryHistory = require('ssns.query_history')
+
 ---Track query buffers
 ---@type table<number, {server: ServerClass, database: DbClass?, last_database: string?}>
 UiQuery.query_buffers = {}
@@ -256,12 +258,52 @@ function UiQuery.execute_query(bufnr, visual)
     buffer_info.last_database = last_database
   end
 
+  -- Track query in history
+  local buffer_name = vim.api.nvim_buf_get_name(bufnr)
+  if buffer_name == "" then
+    buffer_name = string.format("Query Buffer %d", bufnr)
+  else
+    buffer_name = vim.fn.fnamemodify(buffer_name, ':t')  -- Get filename only
+  end
+
+  local current_database = buffer_info.last_database
+    or (buffer_info.database and buffer_info.database.db_name)
+    or "master"
+
   -- Check if query succeeded
   if not result.success then
+    -- Track error in history
+    QueryHistory.add_entry(bufnr, buffer_name, {
+      query = sql,
+      server_name = server.name,
+      database = current_database,
+      timestamp = os.date("%Y-%m-%d %H:%M:%S"),
+      execution_time_ms = execution_time_ms,
+      status = "error",
+      error_message = result.error and result.error.message or "Unknown error",
+      error_line = result.error and result.error.lineNumber or nil,
+    })
+
     -- Display detailed error with structured information
     UiQuery.display_error(result.error, sql, bufnr)
     return
   end
+
+  -- Track success in history
+  local row_count = 0
+  if result.resultSets and result.resultSets[1] and result.resultSets[1].rows then
+    row_count = #result.resultSets[1].rows
+  end
+
+  QueryHistory.add_entry(bufnr, buffer_name, {
+    query = sql,
+    server_name = server.name,
+    database = current_database,
+    timestamp = os.date("%Y-%m-%d %H:%M:%S"),
+    execution_time_ms = execution_time_ms,
+    status = "success",
+    row_count = row_count,
+  })
 
   -- Display results with execution metadata
   UiQuery.display_results(result, sql, execution_time_ms)

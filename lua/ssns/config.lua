@@ -3,6 +3,7 @@
 ---@field ui UiConfig UI configuration
 ---@field cache CacheConfig Cache configuration
 ---@field query QueryConfig Query execution configuration
+---@field query_history QueryHistoryConfig Query history configuration
 ---@field keymaps KeymapsConfig Keymap configuration
 ---@field table_helpers TableHelpersConfig Table helper templates per database type
 ---@field performance PerformanceConfig Performance tuning options
@@ -50,6 +51,14 @@
 ---@field default_limit number Default LIMIT for SELECT queries (0 = no limit)
 ---@field timeout number Query timeout in milliseconds (0 = no timeout)
 ---@field auto_execute_on_open boolean Auto-execute query when opening action (default: false)
+
+---@class QueryHistoryConfig
+---@field enabled boolean Enable query history tracking (default: true)
+---@field max_buffers number Maximum buffer histories to keep (default: 100)
+---@field max_entries_per_buffer number Maximum entries per buffer (default: 100)
+---@field auto_persist boolean Auto-save history to file (default: true)
+---@field persist_file string Path to history file
+---@field exclude_patterns string[] Queries to exclude from history (default: {"SELECT 1", "SELECT @@"})
 
 ---@class KeymapsConfig
 ---@field toggle string Toggle SSNS tree window
@@ -199,6 +208,18 @@ local default_config = {
     default_limit = 100,  -- Default LIMIT for SELECT queries (0 = no limit)
     timeout = 30000,  -- Query timeout in milliseconds (30 seconds, 0 = no timeout)
     auto_execute_on_open = false,  -- Auto-execute query when opening action
+  },
+
+  query_history = {
+    enabled = true,  -- Enable query history tracking
+    max_buffers = 100,  -- Maximum buffer histories to keep (RedGate-style per-file tracking)
+    max_entries_per_buffer = 100,  -- Maximum entries per buffer (100 changes per file)
+    auto_persist = true,  -- Auto-save history to file after each query
+    persist_file = vim.fn.stdpath('data') .. '/ssns/query_history.json',
+    exclude_patterns = {
+      "SELECT 1",  -- Health check queries
+      "SELECT @@",  -- Server variable queries
+    },
   },
 
   keymaps = {

@@ -51,6 +51,18 @@ function Ssns.setup(user_config)
   Highlights.setup()
   Highlights.setup_filetype()
 
+  -- Initialize query history
+  local QueryHistory = require('ssns.query_history')
+  local config = Config.get()
+  QueryHistory.max_buffers = config.query_history.max_buffers
+  QueryHistory.max_entries_per_buffer = config.query_history.max_entries_per_buffer
+  QueryHistory.auto_persist = config.query_history.auto_persist
+  QueryHistory.persist_file = config.query_history.persist_file
+  QueryHistory.exclude_patterns = config.query_history.exclude_patterns
+  if config.query_history.enabled then
+    QueryHistory.init()
+  end
+
   -- Register commands
   Ssns._register_commands()
 end
@@ -121,6 +133,29 @@ function Ssns._register_commands()
     Ssns.debug()
   end, {
     desc = "Debug SSNS cache contents",
+  })
+
+  -- :SSNSHistory - Show query history
+  vim.api.nvim_create_user_command("SSNSHistory", function()
+    Ssns.show_history()
+  end, {
+    desc = "Show query execution history",
+  })
+
+  -- :SSNSHistoryClear - Clear query history
+  vim.api.nvim_create_user_command("SSNSHistoryClear", function()
+    Ssns.clear_history()
+  end, {
+    desc = "Clear all query history",
+  })
+
+  -- :SSNSHistoryExport - Export query history
+  vim.api.nvim_create_user_command("SSNSHistoryExport", function(opts)
+    Ssns.export_history(opts.args)
+  end, {
+    nargs = "?",
+    desc = "Export query history to file",
+    complete = "file",
   })
 end
 
@@ -294,6 +329,39 @@ end
 function Ssns.debug()
   local Cache = require('ssns.cache')
   Cache.debug_print()
+end
+
+---Show query history
+function Ssns.show_history()
+  local UiHistory = require('ssns.ui.history')
+  UiHistory.show_history()
+end
+
+---Clear query history
+function Ssns.clear_history()
+  local QueryHistory = require('ssns.query_history')
+  QueryHistory.clear_all()
+end
+
+---Export query history
+---@param filepath string? Optional file path
+function Ssns.export_history(filepath)
+  local QueryHistory = require('ssns.query_history')
+
+  if not filepath or filepath == "" then
+    filepath = vim.fn.stdpath('data') .. '/ssns/history_export.txt'
+  end
+
+  local format = filepath:match("%.([^.]+)$")
+  if format == "json" then
+    format = "json"
+  else
+    format = "txt"
+  end
+
+  if QueryHistory.export(filepath, format) then
+    vim.notify("History exported to " .. filepath, vim.log.levels.INFO)
+  end
 end
 
 ---Get current version
