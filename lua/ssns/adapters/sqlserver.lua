@@ -768,16 +768,40 @@ function SqlServerAdapter:parse_parameters(result)
   if result.success and result.resultSets and #result.resultSets > 0 then
     local rows = result.resultSets[1].rows or {}
     for _, row in ipairs(rows) do
-      table.insert(parameters, {
-        name = row.parameter_name,
-        data_type = row.data_type,
-        max_length = row.max_length,
-        precision = row.precision,
-        scale = row.scale,
-        mode = (row.is_output == 1 or row.is_output == true) and "OUT" or "IN",
-        has_default = row.has_default_value == 1 or row.has_default_value == true,
-        ordinal_position = row.ordinal_position,
-      })
+      -- Skip return value (parameter_name = 'RETURNS')
+      if row.parameter_name ~= 'RETURNS' and row.is_return_value ~= 1 then
+        -- Format data type with length/precision
+        local data_type = row.data_type
+        if row.max_length and row.max_length > 0 and row.max_length ~= -1 then
+          if data_type:match("char") or data_type:match("binary") then
+            local length = row.max_length
+            if data_type:match("n") then -- nvarchar, nchar use double bytes
+              length = length / 2
+            end
+            if length == -1 then
+              data_type = data_type .. "(MAX)"
+            else
+              data_type = data_type .. "(" .. length .. ")"
+            end
+          end
+        elseif row.precision and row.precision > 0 then
+          if row.scale and row.scale > 0 then
+            data_type = data_type .. "(" .. row.precision .. "," .. row.scale .. ")"
+          else
+            data_type = data_type .. "(" .. row.precision .. ")"
+          end
+        end
+
+        table.insert(parameters, {
+          name = row.parameter_name,
+          data_type = data_type,
+          direction = (row.is_output == 1 or row.is_output == true) and "OUT" or "IN",
+          default_value = nil,  -- SQL Server doesn't expose default value in sys.parameters
+          is_nullable = true,  -- SQL Server parameters are generally nullable unless NOT NULL specified
+          has_default = row.has_default_value == 1 or row.has_default_value == true,
+          ordinal_position = row.ordinal_position,
+        })
+      end
     end
   end
   return parameters

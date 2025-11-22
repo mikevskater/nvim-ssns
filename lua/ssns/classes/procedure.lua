@@ -148,13 +148,17 @@ function ProcedureClass:load_parameters()
     local param_obj = ParameterClass.new({
       name = param_data.name,
       data_type = param_data.data_type,
-      mode = param_data.mode,
+      mode = param_data.direction or param_data.mode,  -- Support both 'direction' and 'mode'
       has_default = param_data.has_default,
       max_length = param_data.max_length,
       precision = param_data.precision,
       scale = param_data.scale,
       parent = nil,
     })
+    -- Also copy other fields needed by param_input UI
+    param_obj.direction = param_data.direction or param_data.mode
+    param_obj.default_value = param_data.default_value
+    param_obj.is_nullable = param_data.is_nullable
     table.insert(self.parameters, param_obj)
   end
 

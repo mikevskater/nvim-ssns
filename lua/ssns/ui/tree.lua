@@ -772,10 +772,47 @@ function UiTree.execute_action(action)
       end
     end
   elseif action.action_type == "exec" then
-    -- Generate EXEC statement
+    -- Generate EXEC statement with parameter prompts if needed
     if parent.generate_exec then
-      local sql = parent:generate_exec()
-      Query.create_query_buffer(server, database, sql, parent.name)
+      -- Load parameters to check if we need prompts
+      if parent.load_parameters then
+        parent:load_parameters()
+      end
+
+      local parameters = parent.parameters or {}
+
+      -- Filter to only input parameters (IN or INOUT)
+      local input_params = {}
+      for _, param in ipairs(parameters) do
+        if param.direction == "IN" or param.direction == "INOUT" then
+          table.insert(input_params, param)
+        end
+      end
+
+      if #input_params > 0 then
+        -- Show parameter input UI BEFORE creating buffer
+        local UiParamInput = require('ssns.ui.param_input')
+        local proc_name = (parent.schema_name and parent.schema_name .. "." or "") .. parent.procedure_name
+
+        UiParamInput.show_input(
+          proc_name,
+          server.name,
+          database and database.db_name or nil,
+          input_params,
+          function(values)
+            -- Build EXEC statement with user-provided values
+            local UiQuery = require('ssns.ui.query')
+            local sql = UiQuery.build_exec_statement(parent.schema_name, parent.procedure_name, input_params, values)
+
+            -- Create buffer with the fully-formed EXEC statement
+            Query.create_query_buffer(server, database, sql, parent.name)
+          end
+        )
+      else
+        -- No parameters, create buffer with simple EXEC
+        local sql = parent:generate_exec()
+        Query.create_query_buffer(server, database, sql, parent.name)
+      end
     end
   elseif action.action_type == "alter" then
     -- Show definition (ALTER displays the object definition)
@@ -1315,9 +1352,17 @@ function UiTree.open_filter()
     return
   end
 
-  -- Open filter editor
-  local UiFilterEditor = require('ssns.ui.filter_editor')
-  UiFilterEditor.open(obj)
+  -- Open filter input UI
+  local UiFilterInput = require('ssns.ui.filter_input')
+  local UiFilters = require('ssns.ui.filters')
+  local current_filters = UiFilters.get(obj)
+
+  UiFilterInput.show_input(obj, current_filters, function(filter_state)
+    -- Apply filters
+    UiFilters.set(obj, filter_state)
+    -- Re-render tree
+    UiTree.render()
+  end)
 end
 
 ---Clear filters for the current group
