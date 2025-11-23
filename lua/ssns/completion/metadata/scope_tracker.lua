@@ -92,6 +92,10 @@ function ScopeTracker._build_scope_tree_recursive(node, query_text, parent_scope
     -- Statement container: Process as a SELECT scope
     ScopeTracker._extract_select_scope(node, query_text, parent_scope)
     return  -- Don't recurse - _extract_select_scope handles children
+  elseif node_type == "subquery" then
+    -- Subquery node: Contains select + from as direct children (not wrapped in statement)
+    ScopeTracker._extract_subquery_scope(node, query_text, parent_scope)
+    return  -- Don't recurse - handler takes care of children
   elseif node_type:match("with_clause") or node_type == "cte_clause" then
     ScopeTracker._extract_ctes(node, query_text, parent_scope)
   end
@@ -157,6 +161,16 @@ function ScopeTracker._extract_select_scope(node, query_text, parent_scope)
   debug_log(string.format("_extract_select_scope: Creating scope for statement at lines %d-%d",
     start_row + 1, end_row + 1))
 
+  -- Check if this statement contains a set_operation (UNION, INTERSECT, EXCEPT)
+  -- If so, extract each SELECT as a separate scope instead of one statement scope
+  for child in node:iter_children() do
+    if child:type() == "set_operation" then
+      debug_log("Found set_operation (UNION/INTERSECT/EXCEPT), extracting each SELECT separately")
+      ScopeTracker._extract_set_operation_scopes(child, query_text, parent_scope)
+      return  -- Don't create a single scope for the whole statement
+    end
+  end
+
   -- Determine scope type
   local scope_type = "main"
   local parent = node:parent()
@@ -204,6 +218,129 @@ function ScopeTracker._extract_select_scope(node, query_text, parent_scope)
   end
 end
 
+---Extract scopes from a set_operation node (UNION, INTERSECT, EXCEPT)
+---Each SELECT in the set operation gets its own scope
+---@param node table Tree-sitter node (set_operation)
+---@param query_text string Original query text
+---@param parent_scope QueryScope Parent scope to add children to
+function ScopeTracker._extract_set_operation_scopes(node, query_text, parent_scope)
+  debug_log("_extract_set_operation_scopes: Processing UNION/INTERSECT/EXCEPT")
+
+  -- set_operation contains:
+  --   select (first)
+  --   from (first)
+  --   keyword_union/keyword_intersect/keyword_except
+  --   select (second)
+  --   from (second)
+  --   ... (can be more)
+
+  -- We need to group select + from pairs and create a scope for each
+  local current_select = nil
+  local current_from = nil
+
+  for child in node:iter_children() do
+    local child_type = child:type()
+
+    if child_type == "select" then
+      -- Save the current SELECT
+      current_select = child
+    elseif child_type == "from" then
+      -- Match this FROM with the current SELECT
+      current_from = child
+
+      -- Create a scope for this SELECT + FROM pair
+      if current_select then
+        local start_row, start_col = current_select:range()
+        local _, _, end_row, end_col = current_from:range()
+
+        local select_scope = {
+          type = "main",  -- Each part of UNION is a main-level scope
+          start_pos = {start_row + 1, start_col},
+          end_pos = {end_row + 1, end_col},
+          aliases = {},
+          ctes = {},
+          parent = parent_scope,
+          children = {},
+          temp_tables = {},
+        }
+
+        debug_log(string.format("Created UNION/set scope: start={%d,%d}, end={%d,%d}",
+          select_scope.start_pos[1], select_scope.start_pos[2],
+          select_scope.end_pos[1], select_scope.end_pos[2]))
+
+        -- Add to parent
+        table.insert(parent_scope.children, select_scope)
+
+        -- Extract aliases from the FROM clause
+        ScopeTracker._extract_from_aliases(current_from, query_text, select_scope)
+
+        -- Process nested subqueries in the SELECT
+        for select_child in current_select:iter_children() do
+          ScopeTracker._build_scope_tree_recursive(select_child, query_text, select_scope)
+        end
+
+        debug_log(string.format("Extracted set_operation scope aliases: %s", vim.inspect(select_scope.aliases)))
+
+        -- Reset for next pair
+        current_select = nil
+        current_from = nil
+      end
+    end
+  end
+end
+
+---Extract scope from a subquery node (contains select + from as direct children, not wrapped in statement)
+---@param node table Tree-sitter node (subquery)
+---@param query_text string Original query text
+---@param parent_scope QueryScope Parent scope to add child to
+function ScopeTracker._extract_subquery_scope(node, query_text, parent_scope)
+  local start_row, start_col, end_row, end_col = node:range()
+
+  debug_log(string.format("_extract_subquery_scope: Creating scope for subquery at lines %d-%d",
+    start_row + 1, end_row + 1))
+
+  -- Subqueries are always "subquery" type
+  local subquery_scope = {
+    type = "subquery",
+    start_pos = {start_row + 1, start_col},
+    end_pos = {end_row + 1, end_col},
+    aliases = {},
+    ctes = {},
+    parent = parent_scope,
+    children = {},
+    temp_tables = {},
+  }
+
+  debug_log(string.format("Created subquery scope: start={%d,%d}, end={%d,%d}",
+    subquery_scope.start_pos[1], subquery_scope.start_pos[2],
+    subquery_scope.end_pos[1], subquery_scope.end_pos[2]))
+
+  -- Add to parent
+  table.insert(parent_scope.children, subquery_scope)
+
+  -- Extract aliases from subquery's children
+  -- Unlike statement nodes, subquery has select/from as DIRECT children
+  for child in node:iter_children() do
+    local child_type = child:type()
+
+    if child_type == "from" then
+      debug_log("Found FROM in subquery")
+      ScopeTracker._extract_from_aliases(child, query_text, subquery_scope)
+    elseif child_type:match("join") then
+      debug_log("Found JOIN in subquery")
+      ScopeTracker._extract_join_aliases(child, query_text, subquery_scope)
+    elseif child_type == "select" then
+      -- Process nested subqueries within the SELECT
+      for select_child in child:iter_children() do
+        ScopeTracker._build_scope_tree_recursive(select_child, query_text, subquery_scope)
+      end
+    end
+  end
+
+  debug_log(string.format("Extracted subquery aliases: %s", vim.inspect(subquery_scope.aliases)))
+  debug_log(string.format("Parent scope now has %d children", #parent_scope.children))
+end
+
 ---Extract aliases from statement node (select + from are siblings)
 ---@param node table Tree-sitter node (statement)
 ---@param query_text string Original query text
@@ -231,19 +368,31 @@ end
 function ScopeTracker._extract_from_aliases(node, query_text, scope)
   -- Real AST structure:
   -- from
-  --   └─ relation "dbo.Employees e"
-  --       ├─ object_reference "dbo.Employees"  (could be dotted: dbo.Employees)
-  --       └─ identifier "e"  (the alias)
+  --   ├─ relation "dbo.Employees e"  (main table)
+  --   │   ├─ object_reference "dbo.Employees"
+  --   │   └─ identifier "e"  (the alias)
+  --   └─ join  (JOIN clause is a child of FROM!)
+  --       └─ relation "dbo.Departments d"
+  --           ├─ object_reference "dbo.Departments"
+  --           └─ identifier "d"
+  --
+  -- For subqueries:
+  -- from
+  --   └─ relation
+  --       ├─ subquery (contains select/from)
+  --       └─ identifier "alias"  (SIBLING to subquery!)
 
   for child in node:iter_children() do
     local child_type = child:type()
 
     if child_type == "relation" then
-      -- Found a table reference
+      -- Found a table reference (main FROM table)
       local table_parts = {}
       local alias = nil
+      local has_subquery = false
 
       -- Get children of relation: object_reference + optional identifier (alias)
+      -- OR: subquery + identifier (alias as sibling)
       for relation_child in child:iter_children() do
         local relation_child_type = relation_child:type()
 
@@ -251,17 +400,29 @@ function ScopeTracker._extract_from_aliases(node, query_text, scope)
           -- Extract table name (may be schema.table)
           local table_name = vim.treesitter.get_node_text(relation_child, query_text)
           table.insert(table_parts, table_name)
+        elseif relation_child_type == "subquery" then
+          -- Mark that this is a subquery reference
+          has_subquery = true
+          -- Process the subquery to create nested scope
+          ScopeTracker._extract_subquery_scope(relation_child, query_text, scope)
         elseif relation_child_type == "identifier" then
-          -- This is the alias
+          -- This is the alias (for table OR subquery)
           alias = vim.treesitter.get_node_text(relation_child, query_text)
         end
       end
 
+      -- Only add alias if it's for a real table (not a subquery, which creates its own scope)
       if #table_parts > 0 and alias then
         local full_table_name = table.concat(table_parts, ".")
         scope.aliases[alias:lower()] = full_table_name
         debug_log(string.format("Extracted alias: %s -> %s", alias, full_table_name))
+      elseif has_subquery and alias then
+        debug_log(string.format("Found subquery alias: %s (subquery scope already created)", alias))
       end
+    elseif child_type == "join" or child_type:match("join") then
+      -- JOIN is a child of FROM, so extract its aliases here
+      debug_log(string.format("Found JOIN as child of FROM: %s", child_type))
+      ScopeTracker._extract_join_aliases(child, query_text, scope)
     end
   end
 end
