@@ -98,6 +98,7 @@
 ---@field eager_load boolean Eagerly load tables/views/procedures on connection (default: true)
 ---@field min_keyword_length number Minimum keyword length for completion (default: 2)
 ---@field debug boolean Enable debug logging for completion (default: false)
+---@field track_usage boolean Track usage from executed queries (default: true)
 ---@field usage_weight_increment number Weight increment per selection (default: 1)
 ---@field usage_weight_decay number? Time-based decay factor (default: nil, 0-1 range)
 ---@field usage_auto_save boolean Auto-save usage data (default: true)
@@ -322,6 +323,7 @@ local default_config = {
     eager_load = true,           -- Eagerly load tables/views/procedures on connection
     min_keyword_length = 2,      -- Minimum keyword length for completion
     debug = false,               -- Enable debug logging for completion
+    track_usage = true,          -- Track usage from executed queries (default: true)
     usage_weight_increment = 1,  -- Weight increment per selection
     usage_weight_decay = nil,    -- Time-based decay factor (nil = no decay, 0-1 = decay rate)
     usage_auto_save = true,      -- Auto-save usage data to file
@@ -498,6 +500,9 @@ function Config.validate(config)
     end
     if config.completion.debug ~= nil and type(config.completion.debug) ~= "boolean" then
       return false, "completion.debug must be a boolean"
+    end
+    if config.completion.track_usage ~= nil and type(config.completion.track_usage) ~= "boolean" then
+      return false, "completion.track_usage must be a boolean"
     end
     if config.completion.usage_weight_increment and (type(config.completion.usage_weight_increment) ~= "number" or config.completion.usage_weight_increment <= 0) then
       return false, "completion.usage_weight_increment must be a positive number"

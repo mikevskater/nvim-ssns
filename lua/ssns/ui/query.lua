@@ -321,6 +321,25 @@ function UiQuery.execute_query(bufnr, visual)
     row_count = row_count,
   })
 
+  -- Track usage from query analysis
+  local Config = require('ssns.config')
+  local config = Config.get()
+
+  if config.completion and config.completion.track_usage then
+    local success, err = pcall(function()
+      local UsageAnalyzer = require('ssns.completion.usage_analyzer')
+      UsageAnalyzer.analyze_and_record(sql, {
+        connection_string = server.connection_string
+      })
+    end)
+
+    if not success then
+      -- Silent failure - log only
+      local Debug = require('ssns.debug')
+      Debug.log("[USAGE] Query analysis error: " .. tostring(err))
+    end
+  end
+
   -- Display results with execution metadata
   UiQuery.display_results(result, sql, execution_time_ms)
 end
