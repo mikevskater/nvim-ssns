@@ -29,8 +29,9 @@ end
 ---Analyzes nested queries, CTEs, and derived tables to track aliases at each scope level
 ---@param query_text string SQL query (can be multi-line)
 ---@param bufnr number Buffer number
+---@param connection table? Optional connection context for CTE asterisk expansion
 ---@return QueryScope global_scope Root scope containing all nested scopes
-function ScopeTracker.build_scope_tree(query_text, bufnr)
+function ScopeTracker.build_scope_tree(query_text, bufnr, connection)
   debug_log("build_scope_tree START")
   debug_log("Query text: " .. query_text:sub(1, 200))  -- First 200 chars
 
@@ -67,7 +68,7 @@ function ScopeTracker.build_scope_tree(query_text, bufnr)
   }
 
   -- Step 3: Walk AST to find scopes
-  ScopeTracker._build_scope_tree_recursive(root, query_text, global_scope)
+  ScopeTracker._build_scope_tree_recursive(root, query_text, global_scope, bufnr, connection)
 
   debug_log("Scope tree built")
   debug_log("GlobalScope children count: " .. #global_scope.children)
@@ -80,7 +81,9 @@ end
 ---@param node table Tree-sitter node
 ---@param query_text string Original query text
 ---@param parent_scope QueryScope Parent scope to attach children to
-function ScopeTracker._build_scope_tree_recursive(node, query_text, parent_scope)
+---@param bufnr number Buffer number
+---@param connection table? Optional connection context
+function ScopeTracker._build_scope_tree_recursive(node, query_text, parent_scope, bufnr, connection)
   if not node then
     return
   end
@@ -89,64 +92,426 @@ function ScopeTracker._build_scope_tree_recursive(node, query_text, parent_scope
 
   -- Process different node types
   if node_type == "statement" then
-    -- Statement container: Process as a SELECT scope
-    ScopeTracker._extract_select_scope(node, query_text, parent_scope)
+    -- FIRST: Check if this statement has CTEs (direct cte children)
+    local has_ctes = false
+    for child in node:iter_children() do
+      if child:type() == "cte" then
+        has_ctes = true
+        break
+      end
+    end
+
+    -- If statement has CTEs, extract them to parent scope
+    -- (CTEs are visible to the entire query, not scoped to the SELECT)
+    if has_ctes then
+      debug_log("Statement has CTE children, extracting to parent scope")
+      for child in node:iter_children() do
+        if child:type() == "cte" then
+          ScopeTracker._extract_single_cte(child, query_text, parent_scope, bufnr, connection)
+        end
+      end
+    end
+
+    -- THEN: Process as a SELECT scope
+    ScopeTracker._extract_select_scope(node, query_text, parent_scope, bufnr, connection)
     return  -- Don't recurse - _extract_select_scope handles children
   elseif node_type == "subquery" then
     -- Subquery node: Contains select + from as direct children (not wrapped in statement)
-    ScopeTracker._extract_subquery_scope(node, query_text, parent_scope)
+    ScopeTracker._extract_subquery_scope(node, query_text, parent_scope, bufnr, connection)
     return  -- Don't recurse - handler takes care of children
   elseif node_type:match("with_clause") or node_type == "cte_clause" then
-    ScopeTracker._extract_ctes(node, query_text, parent_scope)
+    ScopeTracker._extract_ctes(node, query_text, parent_scope, bufnr, connection)
+  elseif node_type == "cte" then
+    -- Direct CTE node (in case it appears elsewhere)
+    ScopeTracker._extract_single_cte(node, query_text, parent_scope, bufnr, connection)
   end
 
   -- Recurse to children
   for child in node:iter_children() do
-    ScopeTracker._build_scope_tree_recursive(child, query_text, parent_scope)
+    ScopeTracker._build_scope_tree_recursive(child, query_text, parent_scope, bufnr, connection)
   end
 end
 
----Extract CTEs from WITH clause
+---Find SELECT statement within a CTE definition
+---@param cte_node table Tree-sitter CTE node
+---@param query_text string Original query text
+---@return string? select_statement The SELECT statement text or nil
+local function find_cte_select_statement(cte_node, query_text)
+  -- Walk CTE children to find the SELECT part
+  -- CTE structure: WITH name [(cols)] AS (select_statement)
+  -- Look for: select, from, subquery nodes
+
+  for child in cte_node:iter_children() do
+    local child_type = child:type()
+
+    -- Look for subquery or statement containing SELECT
+    if child_type == "subquery" or child_type == "statement" or child_type:match("select") then
+      -- Extract text for this node
+      local select_text = vim.treesitter.get_node_text(child, query_text)
+      -- Remove surrounding parentheses if present
+      select_text = select_text:gsub("^%s*%(", ""):gsub("%)%s*$", "")
+      return select_text
+    end
+  end
+
+  return nil
+end
+
+---Find standalone asterisk (not in functions like COUNT(*))
+---@param line string Line of text
+---@return number? col Column position (0-indexed) or nil
+local function find_standalone_asterisk(line)
+  local paren_depth = 0
+
+  for i = 1, #line do
+    local char = line:sub(i, i)
+
+    if char == '(' then
+      paren_depth = paren_depth + 1
+    elseif char == ')' then
+      paren_depth = paren_depth - 1
+    elseif char == '*' and paren_depth == 0 then
+      -- Found standalone asterisk
+      return i - 1  -- 0-indexed
+    end
+  end
+
+  return nil
+end
+
+---Find position of asterisk in SELECT statement
+---@param select_statement string The SELECT statement text
+---@return number? line Line number (1-indexed)
+---@return number? col Column number (0-indexed)
+local function find_asterisk_position(select_statement)
+  local lines = vim.split(select_statement, "\n")
+
+  for line_idx, line in ipairs(lines) do
+    -- Look for * in SELECT clause (not in functions like COUNT(*))
+    -- Simple heuristic: Find * that's not inside parentheses
+    local col = find_standalone_asterisk(line)
+    if col then
+      return line_idx, col
+    end
+  end
+
+  return nil, nil
+end
+
+---Extract column name from column expression (handle AS alias)
+---@param col_expr string Column expression
+---@return string? name Column name or alias
+local function extract_column_name(col_expr)
+  col_expr = vim.trim(col_expr)
+
+  -- Check for AS alias
+  local alias = col_expr:match("%s+AS%s+([%w_]+)")
+  if alias then
+    return alias
+  end
+
+  -- Extract identifier (last part of dotted name)
+  local identifier = col_expr:match("([%w_]+)%s*$")
+  return identifier
+end
+
+---Parse column list from CTE SELECT statement (fallback for explicit columns)
+---@param select_statement string The SELECT statement
+---@return string[] columns Array of column names
+local function parse_cte_column_list(select_statement)
+  -- Extract SELECT clause (between SELECT and FROM)
+  local select_clause = select_statement:match("SELECT%s+(.-)%s+FROM")
+  if not select_clause then
+    return {}
+  end
+
+  -- Split by comma (handle nested functions)
+  local columns = {}
+  local current_col = ""
+  local paren_depth = 0
+
+  for i = 1, #select_clause do
+    local char = select_clause:sub(i, i)
+
+    if char == '(' then
+      paren_depth = paren_depth + 1
+      current_col = current_col .. char
+    elseif char == ')' then
+      paren_depth = paren_depth - 1
+      current_col = current_col .. char
+    elseif char == ',' and paren_depth == 0 then
+      -- End of column
+      local col_name = extract_column_name(current_col)
+      if col_name then
+        table.insert(columns, col_name)
+      end
+      current_col = ""
+    else
+      current_col = current_col .. char
+    end
+  end
+
+  -- Last column
+  if current_col ~= "" then
+    local col_name = extract_column_name(current_col)
+    if col_name then
+      table.insert(columns, col_name)
+    end
+  end
+
+  return columns
+end
+
+---Expand asterisk in CTE SELECT statement to get column list
+---@param select_statement string The CTE's SELECT statement
+---@param bufnr number Buffer number
+---@param connection table? Connection context
+---@param query_text string Original full query text
+---@param parent_scope QueryScope Parent scope (for CTEs referencing other CTEs)
+---@return string[] columns Array of column names
+local function expand_cte_asterisk(select_statement, bufnr, connection, query_text, parent_scope)
+  -- Check if SELECT uses *
+  if not select_statement:match("%*") then
+    -- No asterisk, try to parse column list manually
+    debug_log("CTE SELECT has no asterisk, parsing explicit columns")
+    return parse_cte_column_list(select_statement)
+  end
+
+  -- Check if we have connection context (needed for expansion)
+  if not connection or not connection.connection_string or not connection.database then
+    debug_log("No connection context available for CTE asterisk expansion, falling back to empty")
+    return {}
+  end
+
+  local Resolver = require('ssns.completion.metadata.resolver')
+
+  -- Parse table references from SELECT statement
+  -- Handle multiple patterns:
+  -- 1. SELECT * FROM table
+  -- 2. SELECT * FROM table1 JOIN table2 (multiple tables)
+  -- 3. SELECT * FROM cte_name (where cte_name is in parent_scope)
+  -- 4. SELECT e.*, ... (qualified asterisk with mixed columns)
+
+  local col_names = {}
+
+  -- Check if this is a mixed SELECT (e.*, other_col, ...)
+  -- If SELECT has both * and other expressions, we need to handle both
+  local select_clause = select_statement:match("SELECT%s+(.-)%s+FROM")
+  if select_clause then
+    -- Split by comma to find all expressions
+    local expressions = {}
+    local current_expr = ""
+    local paren_depth = 0
+
+    for i = 1, #select_clause do
+      local char = select_clause:sub(i, i)
+      if char == '(' then
+        paren_depth = paren_depth + 1
+        current_expr = current_expr .. char
+      elseif char == ')' then
+        paren_depth = paren_depth - 1
+        current_expr = current_expr .. char
+      elseif char == ',' and paren_depth == 0 then
+        table.insert(expressions, vim.trim(current_expr))
+        current_expr = ""
+      else
+        current_expr = current_expr .. char
+      end
+    end
+    if current_expr ~= "" then
+      table.insert(expressions, vim.trim(current_expr))
+    end
+
+    -- Process each expression
+    for _, expr in ipairs(expressions) do
+      if expr == "*" then
+        -- Unqualified asterisk - expand all tables in FROM clause and JOINs
+        -- Extract full FROM clause (including JOINs)
+        local from_section = select_statement:match("FROM%s+(.-)%s*$") or select_statement:match("FROM%s+(.-)%s+WHERE")
+        if from_section then
+          -- Extract all table references (FROM table and JOIN table)
+          local table_refs = {}
+
+          -- Get main FROM table
+          local main_table = from_section:match("^([%w_%.]+)")
+          if main_table then
+            table.insert(table_refs, main_table)
+          end
+
+          -- Get JOIN tables
+          for join_table in from_section:gmatch("JOIN%s+([%w_%.]+)") do
+            table.insert(table_refs, join_table)
+          end
+
+          -- Expand columns from all tables
+          for _, table_ref in ipairs(table_refs) do
+            -- Check if it's a CTE from parent scope
+            if parent_scope.ctes[table_ref:lower()] then
+              local cte_info = parent_scope.ctes[table_ref:lower()]
+              for _, col in ipairs(cte_info.columns) do
+                table.insert(col_names, col)
+              end
+            else
+              -- It's a real table, resolve it
+              local success, table_obj = pcall(function()
+                return Resolver.resolve_table(table_ref, connection, bufnr, nil)
+              end)
+              if success and table_obj then
+                local success, columns = pcall(function()
+                  return Resolver.get_columns(table_obj, connection)
+                end)
+                if success and columns then
+                  for _, col in ipairs(columns) do
+                    table.insert(col_names, col.name)
+                  end
+                end
+              end
+            end
+          end
+        end
+      elseif expr:match("^%w+%.%*$") then
+        -- Qualified asterisk (e.*, d.*)
+        local table_alias = expr:match("^(%w+)%.")
+        if table_alias then
+          -- Find the table/CTE this alias refers to
+          -- For now, just get from first table (simplified)
+          local from_clause = select_statement:match("FROM%s+(.-)%s*$") or select_statement:match("FROM%s+(.-)%s+WHERE") or select_statement:match("FROM%s+(.-)%s+JOIN")
+          if from_clause then
+            local table_ref = from_clause:match("^([%w_%.]+)")
+            if table_ref then
+              if parent_scope.ctes[table_ref:lower()] then
+                local cte_info = parent_scope.ctes[table_ref:lower()]
+                for _, col in ipairs(cte_info.columns) do
+                  table.insert(col_names, col)
+                end
+              else
+                local success, table_obj = pcall(function()
+                  return Resolver.resolve_table(table_ref, connection, bufnr, nil)
+                end)
+                if success and table_obj then
+                  local success, columns = pcall(function()
+                    return Resolver.get_columns(table_obj, connection)
+                  end)
+                  if success and columns then
+                    for _, col in ipairs(columns) do
+                      table.insert(col_names, col.name)
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      else
+        -- Regular column expression (might have AS alias)
+        local col_name = extract_column_name(expr)
+        if col_name then
+          table.insert(col_names, col_name)
+        end
+      end
+    end
+
+    debug_log(string.format("Expanded CTE with mixed expressions to %d columns", #col_names))
+    return col_names
+  end
+
+  debug_log("Could not parse SELECT clause in CTE")
+  return {}
+end
+
+---Extract a single CTE node
+---@param cte_node table Tree-sitter CTE node
+---@param query_text string Original query text
+---@param scope QueryScope Scope to add CTE to
+---@param bufnr number? Buffer number
+---@param connection table? Connection context
+function ScopeTracker._extract_single_cte(cte_node, query_text, scope, bufnr, connection)
+  local child_type = cte_node:type()
+
+  if child_type ~= "cte" and child_type ~= "common_table_expression" then
+    return
+  end
+
+  -- Extract CTE name and explicit column list
+  -- AST structure: cte -> identifier (name) -> ( -> identifier (col1) -> , -> identifier (col2) -> ) -> keyword_as -> ...
+  local cte_name = nil
+  local cte_columns = {}
+  local start_row, start_col = cte_node:range()
+  local found_as = false
+
+  for cte_child in cte_node:iter_children() do
+    local cte_child_type = cte_child:type()
+
+    if cte_child_type == "identifier" and not cte_name then
+      -- First identifier is the CTE name
+      cte_name = vim.treesitter.get_node_text(cte_child, query_text)
+      cte_name = ScopeTracker._clean_identifier(cte_name)
+    elseif cte_child_type == "identifier" and cte_name and not found_as then
+      -- Subsequent identifiers before AS are column names
+      local col_name = vim.treesitter.get_node_text(cte_child, query_text)
+      table.insert(cte_columns, ScopeTracker._clean_identifier(col_name))
+    elseif cte_child_type == "keyword_as" then
+      -- Stop collecting columns after AS keyword
+      found_as = true
+    elseif cte_child_type == "column_list" then
+      -- Some parsers might wrap columns in column_list node
+      for col_child in cte_child:iter_children() do
+        if col_child:type() == "identifier" then
+          local col_name = vim.treesitter.get_node_text(col_child, query_text)
+          table.insert(cte_columns, ScopeTracker._clean_identifier(col_name))
+        end
+      end
+    end
+  end
+
+  -- Check if CTE definition uses SELECT * (when no explicit column list)
+  if #cte_columns == 0 and cte_name then
+    -- No explicit column list, try to infer from SELECT statement
+    debug_log(string.format("CTE '%s' has no explicit column list, attempting to infer from SELECT", cte_name))
+
+    local cte_select = find_cte_select_statement(cte_node, query_text)
+    if cte_select then
+      debug_log(string.format("Found CTE SELECT statement (length: %d)", #cte_select))
+
+      -- Try to expand asterisk or parse explicit columns
+      local success, expanded_cols = pcall(function()
+        return expand_cte_asterisk(cte_select, bufnr, connection, query_text, scope)
+      end)
+
+      if success and expanded_cols and #expanded_cols > 0 then
+        cte_columns = expanded_cols
+        debug_log(string.format("Successfully inferred %d columns for CTE '%s'", #cte_columns, cte_name))
+      else
+        debug_log(string.format("Could not infer columns for CTE '%s': %s", cte_name, tostring(expanded_cols)))
+      end
+    else
+      debug_log(string.format("Could not find SELECT statement for CTE '%s'", cte_name))
+    end
+  end
+
+  if cte_name then
+    scope.ctes[cte_name:lower()] = {
+      name = cte_name,
+      columns = cte_columns,
+      start_pos = { start_row + 1, start_col },
+    }
+    debug_log(string.format("Registered CTE '%s' with %d columns", cte_name, #cte_columns))
+  end
+end
+
+---Extract CTEs from WITH clause (wrapper that processes children)
 ---@param node table Tree-sitter node (with_clause)
 ---@param query_text string Original query text
 ---@param scope QueryScope Scope to add CTEs to
-function ScopeTracker._extract_ctes(node, query_text, scope)
+---@param bufnr number Buffer number
+---@param connection table? Optional connection context
+function ScopeTracker._extract_ctes(node, query_text, scope, bufnr, connection)
   -- Pattern: WITH cte_name [(columns)] AS (select_statement)
   -- CTEs are visible to all queries after their definition
 
   for child in node:iter_children() do
-    local child_type = child:type()
-
-    if child_type == "cte" or child_type == "common_table_expression" then
-      -- Extract CTE name
-      local cte_name = nil
-      local cte_columns = {}
-      local start_row, start_col = child:range()
-
-      for cte_child in child:iter_children() do
-        local cte_child_type = cte_child:type()
-
-        if cte_child_type == "identifier" and not cte_name then
-          cte_name = vim.treesitter.get_node_text(cte_child, query_text)
-          cte_name = ScopeTracker._clean_identifier(cte_name)
-        elseif cte_child_type == "column_list" then
-          -- Extract column definitions if present
-          for col_child in cte_child:iter_children() do
-            if col_child:type() == "identifier" then
-              local col_name = vim.treesitter.get_node_text(col_child, query_text)
-              table.insert(cte_columns, ScopeTracker._clean_identifier(col_name))
-            end
-          end
-        end
-      end
-
-      if cte_name then
-        scope.ctes[cte_name:lower()] = {
-          name = cte_name,
-          columns = cte_columns,
-          start_pos = { start_row + 1, start_col },
-        }
-      end
+    if child:type() == "cte" or child:type() == "common_table_expression" then
+      ScopeTracker._extract_single_cte(child, query_text, scope, bufnr, connection)
     end
   end
 end
@@ -155,7 +520,9 @@ end
 ---@param node table Tree-sitter node (statement)
 ---@param query_text string Original query text
 ---@param parent_scope QueryScope Parent scope to add child to
-function ScopeTracker._extract_select_scope(node, query_text, parent_scope)
+---@param bufnr number Buffer number
+---@param connection table? Optional connection context
+function ScopeTracker._extract_select_scope(node, query_text, parent_scope, bufnr, connection)
   local start_row, start_col, end_row, end_col = node:range()
 
   debug_log(string.format("_extract_select_scope: Creating scope for statement at lines %d-%d",
@@ -166,7 +533,7 @@ function ScopeTracker._extract_select_scope(node, query_text, parent_scope)
   for child in node:iter_children() do
     if child:type() == "set_operation" then
       debug_log("Found set_operation (UNION/INTERSECT/EXCEPT), extracting each SELECT separately")
-      ScopeTracker._extract_set_operation_scopes(child, query_text, parent_scope)
+      ScopeTracker._extract_set_operation_scopes(child, query_text, parent_scope, bufnr, connection)
       return  -- Don't create a single scope for the whole statement
     end
   end
@@ -207,14 +574,14 @@ function ScopeTracker._extract_select_scope(node, query_text, parent_scope)
 
   -- Extract aliases from the statement's children
   -- In real AST: statement has "select" and "from" as SIBLING children
-  ScopeTracker._extract_aliases_from_statement(node, query_text, select_scope)
+  ScopeTracker._extract_aliases_from_statement(node, query_text, select_scope, bufnr, connection)
 
   debug_log(string.format("Extracted aliases: %s", vim.inspect(select_scope.aliases)))
   debug_log(string.format("Parent scope now has %d children", #parent_scope.children))
 
   -- Recurse into nested statements (e.g., subqueries)
   for child in node:iter_children() do
-    ScopeTracker._build_scope_tree_recursive(child, query_text, select_scope)
+    ScopeTracker._build_scope_tree_recursive(child, query_text, select_scope, bufnr, connection)
   end
 end
 
@@ -223,7 +590,9 @@ end
 ---@param node table Tree-sitter node (set_operation)
 ---@param query_text string Original query text
 ---@param parent_scope QueryScope Parent scope to add children to
-function ScopeTracker._extract_set_operation_scopes(node, query_text, parent_scope)
+---@param bufnr number Buffer number
+---@param connection table? Optional connection context
+function ScopeTracker._extract_set_operation_scopes(node, query_text, parent_scope, bufnr, connection)
   debug_log("_extract_set_operation_scopes: Processing UNION/INTERSECT/EXCEPT")
 
   -- set_operation contains:
@@ -272,11 +641,11 @@ function ScopeTracker._extract_set_operation_scopes(node, query_text, parent_sco
         table.insert(parent_scope.children, select_scope)
 
         -- Extract aliases from the FROM clause
-        ScopeTracker._extract_from_aliases(current_from, query_text, select_scope)
+        ScopeTracker._extract_from_aliases(current_from, query_text, select_scope, bufnr, connection)
 
         -- Process nested subqueries in the SELECT
         for select_child in current_select:iter_children() do
-          ScopeTracker._build_scope_tree_recursive(select_child, query_text, select_scope)
+          ScopeTracker._build_scope_tree_recursive(select_child, query_text, select_scope, bufnr, connection)
         end
 
         debug_log(string.format("Extracted set_operation scope aliases: %s", vim.inspect(select_scope.aliases)))
@@ -293,7 +662,9 @@ end
 ---@param node table Tree-sitter node (subquery)
 ---@param query_text string Original query text
 ---@param parent_scope QueryScope Parent scope to add child to
-function ScopeTracker._extract_subquery_scope(node, query_text, parent_scope)
+---@param bufnr number Buffer number
+---@param connection table? Optional connection context
+function ScopeTracker._extract_subquery_scope(node, query_text, parent_scope, bufnr, connection)
   local start_row, start_col, end_row, end_col = node:range()
 
   debug_log(string.format("_extract_subquery_scope: Creating scope for subquery at lines %d-%d",
@@ -325,14 +696,14 @@ function ScopeTracker._extract_subquery_scope(node, query_text, parent_scope)
 
     if child_type == "from" then
       debug_log("Found FROM in subquery")
-      ScopeTracker._extract_from_aliases(child, query_text, subquery_scope)
+      ScopeTracker._extract_from_aliases(child, query_text, subquery_scope, bufnr, connection)
     elseif child_type:match("join") then
       debug_log("Found JOIN in subquery")
-      ScopeTracker._extract_join_aliases(child, query_text, subquery_scope)
+      ScopeTracker._extract_join_aliases(child, query_text, subquery_scope, bufnr, connection)
     elseif child_type == "select" then
       -- Process nested subqueries within the SELECT
       for select_child in child:iter_children() do
-        ScopeTracker._build_scope_tree_recursive(select_child, query_text, subquery_scope)
+        ScopeTracker._build_scope_tree_recursive(select_child, query_text, subquery_scope, bufnr, connection)
       end
     end
   end
@@ -345,7 +716,9 @@ end
 ---@param node table Tree-sitter node (statement)
 ---@param query_text string Original query text
 ---@param scope QueryScope Scope to add aliases to
-function ScopeTracker._extract_aliases_from_statement(node, query_text, scope)
+---@param bufnr number Buffer number
+---@param connection table? Optional connection context
+function ScopeTracker._extract_aliases_from_statement(node, query_text, scope, bufnr, connection)
   -- Walk children to find FROM and JOIN clauses
   -- NOTE: In real AST, FROM is a SIBLING of SELECT, not a child of SELECT
   for child in node:iter_children() do
@@ -353,10 +726,10 @@ function ScopeTracker._extract_aliases_from_statement(node, query_text, scope)
 
     if child_type == "from" then
       debug_log(string.format("Found FROM clause at %s", child_type))
-      ScopeTracker._extract_from_aliases(child, query_text, scope)
+      ScopeTracker._extract_from_aliases(child, query_text, scope, bufnr, connection)
     elseif child_type:match("join") then
       debug_log(string.format("Found JOIN clause at %s", child_type))
-      ScopeTracker._extract_join_aliases(child, query_text, scope)
+      ScopeTracker._extract_join_aliases(child, query_text, scope, bufnr, connection)
     end
   end
 end
@@ -365,7 +738,9 @@ end
 ---@param node table Tree-sitter node (from)
 ---@param query_text string Original query text
 ---@param scope QueryScope Scope to add aliases to
-function ScopeTracker._extract_from_aliases(node, query_text, scope)
+---@param bufnr number Buffer number
+---@param connection table? Optional connection context
+function ScopeTracker._extract_from_aliases(node, query_text, scope, bufnr, connection)
   -- Real AST structure:
   -- from
   --   ├─ relation "dbo.Employees e"  (main table)
@@ -404,7 +779,7 @@ function ScopeTracker._extract_from_aliases(node, query_text, scope)
           -- Mark that this is a subquery reference
           has_subquery = true
           -- Process the subquery to create nested scope
-          ScopeTracker._extract_subquery_scope(relation_child, query_text, scope)
+          ScopeTracker._extract_subquery_scope(relation_child, query_text, scope, bufnr, connection)
         elseif relation_child_type == "identifier" then
           -- This is the alias (for table OR subquery)
           alias = vim.treesitter.get_node_text(relation_child, query_text)
@@ -422,7 +797,7 @@ function ScopeTracker._extract_from_aliases(node, query_text, scope)
     elseif child_type == "join" or child_type:match("join") then
       -- JOIN is a child of FROM, so extract its aliases here
       debug_log(string.format("Found JOIN as child of FROM: %s", child_type))
-      ScopeTracker._extract_join_aliases(child, query_text, scope)
+      ScopeTracker._extract_join_aliases(child, query_text, scope, bufnr, connection)
     end
   end
 end
@@ -431,7 +806,9 @@ end
 ---@param node table Tree-sitter node (join_clause or join variant)
 ---@param query_text string Original query text
 ---@param scope QueryScope Scope to add aliases to
-function ScopeTracker._extract_join_aliases(node, query_text, scope)
+---@param bufnr number Buffer number (currently unused but kept for consistency)
+---@param connection table? Optional connection context (currently unused but kept for consistency)
+function ScopeTracker._extract_join_aliases(node, query_text, scope, bufnr, connection)
   -- Real AST structure similar to FROM:
   -- join_clause
   --   └─ relation "dbo.TableName alias"

@@ -7,15 +7,16 @@ local ColumnsProvider = {}
 ---@param cte_name string CTE name
 ---@param bufnr number Buffer number
 ---@param cursor_pos table {row, col} Cursor position
+---@param connection table? Optional connection context for CTE asterisk expansion
 ---@return table[]? items Completion items or nil
-local function _get_cte_columns(cte_name, bufnr, cursor_pos)
+local function _get_cte_columns(cte_name, bufnr, cursor_pos, connection)
   -- Wrap in pcall for error handling
   local success, result = pcall(function()
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
     local query = table.concat(lines, "\n")
 
     local ScopeTracker = require('ssns.completion.metadata.scope_tracker')
-    local scope_tree = ScopeTracker.build_scope_tree(query, bufnr)
+    local scope_tree = ScopeTracker.build_scope_tree(query, bufnr, connection)
 
     if not scope_tree then
       return nil
@@ -125,7 +126,7 @@ function ColumnsProvider._get_qualified_columns(sql_context, connection, bufnr, 
 
   -- Try CTE columns first (if cursor position available)
   if cursor_pos then
-    local cte_columns = _get_cte_columns(reference, bufnr, cursor_pos)
+    local cte_columns = _get_cte_columns(reference, bufnr, cursor_pos, connection)
     if cte_columns then
       return cte_columns
     end
@@ -225,7 +226,7 @@ function ColumnsProvider._get_qualified_bracket_columns(sql_context, connection,
 
   -- Try CTE columns first (if cursor position available)
   if cursor_pos then
-    local cte_columns = _get_cte_columns(reference, bufnr, cursor_pos)
+    local cte_columns = _get_cte_columns(reference, bufnr, cursor_pos, connection)
     if cte_columns then
       return cte_columns
     end

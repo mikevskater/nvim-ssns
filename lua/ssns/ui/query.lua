@@ -181,6 +181,12 @@ function UiQuery.setup_query_keymaps(bufnr)
   vim.keymap.set('n', '<Leader>s', function()
     UiQuery.save_query(bufnr)
   end, vim.tbl_extend('force', opts, { desc = 'Save query' }))
+
+  -- Expand asterisk
+  vim.keymap.set('n', '<Leader>ce', function()
+    local ExpandAsterisk = require('ssns.features.expand_asterisk')
+    ExpandAsterisk.expand_asterisk_at_cursor()
+  end, vim.tbl_extend('force', opts, { desc = 'Expand asterisk (Columns Expand)' }))
 end
 
 ---Execute query in buffer
