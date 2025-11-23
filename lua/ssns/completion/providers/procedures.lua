@@ -3,6 +3,34 @@
 ---@class ProceduresProvider
 local ProceduresProvider = {}
 
+local UsageTracker = require('ssns.completion.usage_tracker')
+local Config = require('ssns.config')
+
+---Get usage weight for an item
+---@param connection table Connection context
+---@param item_type string Type ("table", "column", etc.)
+---@param item_path string Full path to item
+---@return number weight Usage weight (0 if not found or tracking disabled)
+local function get_usage_weight(connection, item_type, item_path)
+  local config = Config.get()
+
+  -- If tracking disabled, return 0 (no weight)
+  if not config.completion or not config.completion.track_usage then
+    return 0
+  end
+
+  -- Get weight from UsageTracker
+  local success, weight = pcall(function()
+    return UsageTracker.get_weight(connection, item_type, item_path)
+  end)
+
+  if success then
+    return weight or 0
+  else
+    return 0
+  end
+end
+
 ---Get procedure/function completions for the given context
 ---@param ctx table Context from source (has bufnr, connection, sql_context)
 ---@param callback function Callback(items)
@@ -101,13 +129,40 @@ function ProceduresProvider._get_procedures(connection)
   end
 
   -- Iterate through procedures in the group
-  for _, proc_obj in ipairs(procedures_group.children) do
+  for idx, proc_obj in ipairs(procedures_group.children) do
     if proc_obj.object_type == "procedure" then
       local item = Utils.format_procedure(proc_obj, {
         show_schema = Config.ui and Config.ui.show_schema_prefix,
         priority = 1,
         with_params = true,
       })
+
+      -- Get procedure name and schema for weight lookup
+      local proc_name = proc_obj.name or proc_obj.procedure_name
+      local schema = proc_obj.schema or proc_obj.schema_name
+
+      if proc_name and schema then
+        -- Build procedure path: schema.procedure
+        local proc_path = string.format("%s.%s", schema, proc_name)
+
+        -- Get weight
+        local weight = get_usage_weight(connection, "procedure", proc_path)
+
+        -- Priority calculation
+        local priority
+        if weight > 0 then
+          priority = math.max(0, 4999 - weight)
+        else
+          priority = 5000 + idx
+        end
+
+        -- Update sortText with new priority
+        item.sortText = string.format("%05d_%s", priority, proc_name)
+
+        -- Store weight in data for debugging
+        item.data.weight = weight
+      end
+
       table.insert(items, item)
     end
   end
@@ -156,13 +211,40 @@ function ProceduresProvider._get_scalar_functions(connection)
   end
 
   -- Iterate through scalar functions in the group
-  for _, func_obj in ipairs(functions_group.children) do
+  for idx, func_obj in ipairs(functions_group.children) do
     if func_obj.object_type == "function" and func_obj.function_type == "SCALAR" then
       local item = Utils.format_procedure(func_obj, {
         show_schema = Config.ui and Config.ui.show_schema_prefix,
         priority = 2,
         with_params = true,
       })
+
+      -- Get function name and schema for weight lookup
+      local func_name = func_obj.name or func_obj.function_name
+      local schema = func_obj.schema or func_obj.schema_name
+
+      if func_name and schema then
+        -- Build function path: schema.function
+        local func_path = string.format("%s.%s", schema, func_name)
+
+        -- Get weight
+        local weight = get_usage_weight(connection, "function", func_path)
+
+        -- Priority calculation
+        local priority
+        if weight > 0 then
+          priority = math.max(0, 4999 - weight)
+        else
+          priority = 5000 + idx
+        end
+
+        -- Update sortText with new priority
+        item.sortText = string.format("%05d_%s", priority, func_name)
+
+        -- Store weight in data for debugging
+        item.data.weight = weight
+      end
+
       table.insert(items, item)
     end
   end
@@ -211,7 +293,7 @@ function ProceduresProvider._get_table_functions(connection)
   end
 
   -- Iterate through table-valued functions in the group
-  for _, func_obj in ipairs(functions_group.children) do
+  for idx, func_obj in ipairs(functions_group.children) do
     if func_obj.object_type == "function" and
        (func_obj.function_type == "TABLE" or func_obj.function_type == "INLINE_TABLE") then
       local item = Utils.format_procedure(func_obj, {
@@ -219,6 +301,33 @@ function ProceduresProvider._get_table_functions(connection)
         priority = 2,
         with_params = true,
       })
+
+      -- Get function name and schema for weight lookup
+      local func_name = func_obj.name or func_obj.function_name
+      local schema = func_obj.schema or func_obj.schema_name
+
+      if func_name and schema then
+        -- Build function path: schema.function
+        local func_path = string.format("%s.%s", schema, func_name)
+
+        -- Get weight
+        local weight = get_usage_weight(connection, "function", func_path)
+
+        -- Priority calculation
+        local priority
+        if weight > 0 then
+          priority = math.max(0, 4999 - weight)
+        else
+          priority = 5000 + idx
+        end
+
+        -- Update sortText with new priority
+        item.sortText = string.format("%05d_%s", priority, func_name)
+
+        -- Store weight in data for debugging
+        item.data.weight = weight
+      end
+
       table.insert(items, item)
     end
   end

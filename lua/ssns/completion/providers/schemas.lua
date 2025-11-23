@@ -3,6 +3,34 @@
 ---@class SchemasProvider
 local SchemasProvider = {}
 
+local UsageTracker = require('ssns.completion.usage_tracker')
+local Config = require('ssns.config')
+
+---Get usage weight for an item
+---@param connection table Connection context
+---@param item_type string Type ("table", "column", etc.)
+---@param item_path string Full path to item
+---@return number weight Usage weight (0 if not found or tracking disabled)
+local function get_usage_weight(connection, item_type, item_path)
+  local config = Config.get()
+
+  -- If tracking disabled, return 0 (no weight)
+  if not config.completion or not config.completion.track_usage then
+    return 0
+  end
+
+  -- Get weight from UsageTracker
+  local success, weight = pcall(function()
+    return UsageTracker.get_weight(connection, item_type, item_path)
+  end)
+
+  if success then
+    return weight or 0
+  else
+    return 0
+  end
+end
+
 ---Get schema completions for the given context
 ---@param ctx table Context from source (has bufnr, connection, sql_context)
 ---@param callback function Callback(items)
@@ -56,15 +84,44 @@ function SchemasProvider._get_completions_impl(ctx)
   end
 
   -- Format each schema as CompletionItem
-  for _, schema in ipairs(schemas) do
+  for idx, schema in ipairs(schemas) do
     local item = Utils.format_schema(schema, {})
+
+    -- Get schema name for weight lookup
+    local schema_name = schema.name or schema.schema_name
+
+    if schema_name and connection.database then
+      -- Build schema path: database.schema
+      local db_name = connection.database.name or connection.database.db_name or connection.database.database_name
+      local schema_path = db_name and string.format("%s.%s", db_name, schema_name) or schema_name
+
+      -- Get weight
+      local weight = get_usage_weight(connection, "schema", schema_path)
+
+      -- Priority calculation
+      local priority
+      if weight > 0 then
+        priority = math.max(0, 4999 - weight)
+      else
+        -- Default schemas (dbo, sys) get special treatment
+        if schema_name == "dbo" then
+          priority = 4000  -- dbo always high priority
+        elseif schema_name:match("^sys") then
+          priority = 8000  -- sys schemas lower priority
+        else
+          priority = 5000 + idx
+        end
+      end
+
+      -- Update sortText with new priority
+      item.sortText = string.format("%05d_%s", priority, schema_name)
+
+      -- Store weight in data for debugging
+      item.data.weight = weight
+    end
+
     table.insert(items, item)
   end
-
-  -- Sort by schema name (case-insensitive)
-  table.sort(items, function(a, b)
-    return a.label:lower() < b.label:lower()
-  end)
 
   return items
 end

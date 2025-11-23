@@ -197,6 +197,56 @@ function Ssns._register_commands()
     nargs = 0,
     desc = "Expand * or alias.* to column list (like SSMS RedGate)",
   })
+
+  -- :SSNSUsageStats - Display usage statistics for the current connection
+  vim.api.nvim_create_user_command("SSNSUsageStats", function()
+    Ssns.show_usage_stats()
+  end, {
+    nargs = 0,
+    desc = "Show usage-based completion statistics",
+  })
+
+  -- :SSNSUsageClear - Clear all usage weights
+  vim.api.nvim_create_user_command("SSNSUsageClear", function()
+    Ssns.clear_usage_weights()
+  end, {
+    nargs = 0,
+    desc = "Clear all usage weights (requires confirmation)",
+  })
+
+  -- :SSNSUsageClearCurrent - Clear weights for current connection only
+  vim.api.nvim_create_user_command("SSNSUsageClearCurrent", function()
+    Ssns.clear_usage_weights_current()
+  end, {
+    nargs = 0,
+    desc = "Clear usage weights for current connection (requires confirmation)",
+  })
+
+  -- :SSNSUsageExport - Export weights to a JSON file
+  vim.api.nvim_create_user_command("SSNSUsageExport", function(opts)
+    Ssns.export_usage_weights(opts.args)
+  end, {
+    nargs = "?",
+    desc = "Export usage weights to JSON file",
+    complete = "file",
+  })
+
+  -- :SSNSUsageImport - Import weights from a JSON file
+  vim.api.nvim_create_user_command("SSNSUsageImport", function(opts)
+    Ssns.import_usage_weights(opts.args)
+  end, {
+    nargs = "?",
+    desc = "Import usage weights from JSON file",
+    complete = "file",
+  })
+
+  -- :SSNSUsageToggle - Toggle usage tracking on/off
+  vim.api.nvim_create_user_command("SSNSUsageToggle", function()
+    Ssns.toggle_usage_tracking()
+  end, {
+    nargs = 0,
+    desc = "Toggle usage tracking on/off",
+  })
 end
 
 ---Toggle the tree UI
@@ -545,6 +595,295 @@ function Ssns.reset_completion_stats()
   else
     vim.notify("SSNS: Failed to reset completion stats: " .. tostring(err), vim.log.levels.ERROR)
   end
+end
+
+---Show usage-based completion statistics
+function Ssns.show_usage_stats()
+  local UsageTracker = require('ssns.completion.usage_tracker')
+  local Cache = require('ssns.cache')
+
+  -- Get active database
+  local active_db = Cache.get_active_database()
+  if not active_db then
+    vim.notify("No active database connection", vim.log.levels.WARN)
+    return
+  end
+
+  local server = active_db.parent
+  local connection = {
+    connection_string = server.connection_string,
+    database = active_db.name
+  }
+
+  -- Get statistics
+  local stats = UsageTracker.get_stats(connection)
+
+  -- Format output
+  local lines = {}
+  table.insert(lines, "=== Usage Statistics ===")
+  table.insert(lines, string.format("Connection: %s", server.name))
+  table.insert(lines, string.format("Database: %s", active_db.name))
+  table.insert(lines, "")
+  table.insert(lines, string.format("Total Items Tracked: %d", stats.total_items))
+  table.insert(lines, "")
+  table.insert(lines, "By Type:")
+  for type_name, count in pairs(stats.by_type) do
+    table.insert(lines, string.format("  %s: %d", type_name, count))
+  end
+  table.insert(lines, "")
+
+  -- Show top 10 tables
+  if stats.top_tables and #stats.top_tables > 0 then
+    table.insert(lines, "Top 10 Tables:")
+    for i = 1, math.min(10, #stats.top_tables) do
+      local item = stats.top_tables[i]
+      table.insert(lines, string.format("  %2d. %s (weight: %d)", i, item.path, item.weight))
+    end
+    table.insert(lines, "")
+  end
+
+  -- Show top 10 columns
+  if stats.top_columns and #stats.top_columns > 0 then
+    table.insert(lines, "Top 10 Columns:")
+    for i = 1, math.min(10, #stats.top_columns) do
+      local item = stats.top_columns[i]
+      table.insert(lines, string.format("  %2d. %s (weight: %d)", i, item.path, item.weight))
+    end
+    table.insert(lines, "")
+  end
+
+  -- Show top 10 procedures
+  if stats.top_procedures and #stats.top_procedures > 0 then
+    table.insert(lines, "Top 10 Procedures:")
+    for i = 1, math.min(10, #stats.top_procedures) do
+      local item = stats.top_procedures[i]
+      table.insert(lines, string.format("  %2d. %s (weight: %d)", i, item.path, item.weight))
+    end
+  end
+
+  -- Display in floating window
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.api.nvim_set_option_value('modifiable', false, { buf = buf })
+  vim.api.nvim_set_option_value('filetype', 'ssns-usage-stats', { buf = buf })
+
+  local width = 80
+  local height = math.min(#lines + 2, vim.o.lines - 4)
+  local row = math.floor((vim.o.lines - height) / 2)
+  local col = math.floor((vim.o.columns - width) / 2)
+
+  local opts = {
+    relative = 'editor',
+    width = width,
+    height = height,
+    row = row,
+    col = col,
+    style = 'minimal',
+    border = 'rounded',
+    title = ' Usage Statistics ',
+    title_pos = 'center'
+  }
+
+  local win = vim.api.nvim_open_win(buf, true, opts)
+
+  -- Close on q or <Esc>
+  vim.keymap.set('n', 'q', '<cmd>close<cr>', { buffer = buf, nowait = true })
+  vim.keymap.set('n', '<Esc>', '<cmd>close<cr>', { buffer = buf, nowait = true })
+end
+
+---Clear all usage weights
+function Ssns.clear_usage_weights()
+  local UsageTracker = require('ssns.completion.usage_tracker')
+
+  -- Confirm with user
+  local confirm = vim.fn.input("Clear ALL usage weights? This cannot be undone. (yes/no): ")
+  if confirm:lower() ~= "yes" then
+    vim.notify("Cancelled", vim.log.levels.INFO)
+    return
+  end
+
+  -- Clear all weights
+  UsageTracker.clear_weights()
+  UsageTracker.save_to_file()
+
+  vim.notify("Usage weights cleared", vim.log.levels.INFO)
+end
+
+---Clear usage weights for current connection only
+function Ssns.clear_usage_weights_current()
+  local UsageTracker = require('ssns.completion.usage_tracker')
+  local Cache = require('ssns.cache')
+
+  -- Get active database
+  local active_db = Cache.get_active_database()
+  if not active_db then
+    vim.notify("No active database connection", vim.log.levels.WARN)
+    return
+  end
+
+  local server = active_db.parent
+  local connection_key = server.connection_string
+
+  -- Confirm with user
+  local confirm = vim.fn.input(string.format("Clear weights for '%s'? (yes/no): ", server.name))
+  if confirm:lower() ~= "yes" then
+    vim.notify("Cancelled", vim.log.levels.INFO)
+    return
+  end
+
+  -- Clear weights for this connection
+  UsageTracker.clear_weights(connection_key)
+  UsageTracker.save_to_file()
+
+  vim.notify(string.format("Usage weights cleared for '%s'", server.name), vim.log.levels.INFO)
+end
+
+---Export usage weights to a JSON file
+---@param filepath string? Optional file path
+function Ssns.export_usage_weights(filepath)
+  local UsageTracker = require('ssns.completion.usage_tracker')
+
+  -- Get file path from args or prompt
+  local file_path = filepath
+  if not file_path or file_path == "" then
+    file_path = vim.fn.input("Export to file: ", "", "file")
+    if file_path == "" then
+      vim.notify("Cancelled", vim.log.levels.INFO)
+      return
+    end
+  end
+
+  -- Expand path
+  file_path = vim.fn.expand(file_path)
+
+  -- Check if file exists
+  if vim.fn.filereadable(file_path) == 1 then
+    local confirm = vim.fn.input(string.format("File '%s' exists. Overwrite? (yes/no): ", file_path))
+    if confirm:lower() ~= "yes" then
+      vim.notify("Cancelled", vim.log.levels.INFO)
+      return
+    end
+  end
+
+  -- Export (copy current persistence file to target)
+  local success, err = pcall(function()
+    local source = UsageTracker.persist_file
+    local content = vim.fn.readfile(source)
+    vim.fn.writefile(content, file_path)
+  end)
+
+  if success then
+    vim.notify(string.format("Usage weights exported to '%s'", file_path), vim.log.levels.INFO)
+  else
+    vim.notify(string.format("Export failed: %s", err), vim.log.levels.ERROR)
+  end
+end
+
+---Import usage weights from a JSON file
+---@param filepath string? Optional file path
+function Ssns.import_usage_weights(filepath)
+  local UsageTracker = require('ssns.completion.usage_tracker')
+
+  -- Get file path from args or prompt
+  local file_path = filepath
+  if not file_path or file_path == "" then
+    file_path = vim.fn.input("Import from file: ", "", "file")
+    if file_path == "" then
+      vim.notify("Cancelled", vim.log.levels.INFO)
+      return
+    end
+  end
+
+  -- Expand path
+  file_path = vim.fn.expand(file_path)
+
+  -- Check if file exists
+  if vim.fn.filereadable(file_path) ~= 1 then
+    vim.notify(string.format("File not found: %s", file_path), vim.log.levels.ERROR)
+    return
+  end
+
+  -- Confirm merge or replace
+  local action = vim.fn.input("Import action: (m)erge or (r)eplace existing weights? (m/r): ")
+  if action:lower() ~= "m" and action:lower() ~= "r" then
+    vim.notify("Cancelled", vim.log.levels.INFO)
+    return
+  end
+
+  local merge = (action:lower() == "m")
+
+  -- Import
+  local success, err = pcall(function()
+    if not merge then
+      -- Replace: clear existing first
+      UsageTracker.weights = { connections = {} }
+    end
+
+    -- Read and decode file
+    local content = vim.fn.readfile(file_path)
+    local json_str = table.concat(content, "\n")
+    local imported_data = vim.json.decode(json_str)
+
+    if not imported_data or not imported_data.connections then
+      error("Invalid usage data format")
+    end
+
+    -- Merge imported data
+    if merge then
+      for conn_key, conn_data in pairs(imported_data.connections) do
+        if not UsageTracker.weights.connections[conn_key] then
+          UsageTracker.weights.connections[conn_key] = conn_data
+        else
+          -- Merge weights (add them together)
+          for type_key, type_data in pairs(conn_data) do
+            if not UsageTracker.weights.connections[conn_key][type_key] then
+              UsageTracker.weights.connections[conn_key][type_key] = type_data
+            else
+              for path, weight_data in pairs(type_data) do
+                if UsageTracker.weights.connections[conn_key][type_key][path] then
+                  -- Add weights together
+                  local existing = UsageTracker.weights.connections[conn_key][type_key][path]
+                  if type(existing) == "table" and existing.weight then
+                    existing.weight = existing.weight + (weight_data.weight or weight_data)
+                  else
+                    UsageTracker.weights.connections[conn_key][type_key][path] = (existing or 0) + (weight_data.weight or weight_data)
+                  end
+                else
+                  UsageTracker.weights.connections[conn_key][type_key][path] = weight_data
+                end
+              end
+            end
+          end
+        end
+      end
+    else
+      -- Replace
+      UsageTracker.weights = imported_data
+    end
+
+    -- Save to file
+    UsageTracker.save_to_file()
+  end)
+
+  if success then
+    local mode_str = merge and "merged" or "replaced"
+    vim.notify(string.format("Usage weights %s from '%s'", mode_str, file_path), vim.log.levels.INFO)
+  else
+    vim.notify(string.format("Import failed: %s", err), vim.log.levels.ERROR)
+  end
+end
+
+---Toggle usage tracking on/off
+function Ssns.toggle_usage_tracking()
+  local Config = require('ssns.config')
+  local config = Config.get()
+
+  -- Toggle setting
+  config.completion.track_usage = not config.completion.track_usage
+
+  -- Notify user
+  local status = config.completion.track_usage and "enabled" or "disabled"
+  vim.notify(string.format("Usage tracking %s", status), vim.log.levels.INFO)
 end
 
 return Ssns

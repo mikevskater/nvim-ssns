@@ -3,6 +3,34 @@
 ---@class TablesProvider
 local TablesProvider = {}
 
+local UsageTracker = require('ssns.completion.usage_tracker')
+local Config = require('ssns.config')
+
+---Get usage weight for an item
+---@param connection table Connection context
+---@param item_type string Type ("table", "column", etc.)
+---@param item_path string Full path to item
+---@return number weight Usage weight (0 if not found or tracking disabled)
+local function get_usage_weight(connection, item_type, item_path)
+  local config = Config.get()
+
+  -- If tracking disabled, return 0 (no weight)
+  if not config.completion or not config.completion.track_usage then
+    return 0
+  end
+
+  -- Get weight from UsageTracker
+  local success, weight = pcall(function()
+    return UsageTracker.get_weight(connection, item_type, item_path)
+  end)
+
+  if success then
+    return weight or 0
+  else
+    return 0
+  end
+end
+
 ---Get table/view/synonym completions for the given context
 ---@param ctx table Context from source (has bufnr, connection info)
 ---@param callback function Callback(items)
@@ -102,10 +130,40 @@ function TablesProvider._get_completions_impl(ctx)
     end
   end
 
-  -- Sort items by label (case-insensitive)
-  table.sort(items, function(a, b)
-    return a.label:lower() < b.label:lower()
-  end)
+  -- Inject usage weights into sortText for all items
+  for idx, item in ipairs(items) do
+    local item_data = item.data
+    local item_path = nil
+
+    -- Build full path based on item type
+    if item_data.schema and item_data.name then
+      item_path = string.format("%s.%s", item_data.schema, item_data.name)
+    elseif item_data.name then
+      item_path = item_data.name
+    end
+
+    if item_path then
+      -- Get usage weight
+      local weight = get_usage_weight(connection_info, item_data.type, item_path)
+
+      -- Calculate priority (higher weight = lower sort value = sorts first)
+      -- Priority ranges:
+      --   0-4999: High usage items (weight-based)
+      --   5000-9999: Low/no usage items (original order)
+      local priority
+      if weight > 0 then
+        priority = math.max(0, 4999 - weight)  -- Higher weight = lower priority number
+      else
+        priority = 5000 + idx  -- No weight, use iteration order
+      end
+
+      -- Update sortText with new priority
+      item.sortText = string.format("%05d_%s", priority, item.label)
+
+      -- Store weight in data for debugging
+      item.data.weight = weight
+    end
+  end
 
   return items
 end

@@ -3,6 +3,34 @@
 ---@class DatabasesProvider
 local DatabasesProvider = {}
 
+local UsageTracker = require('ssns.completion.usage_tracker')
+local Config = require('ssns.config')
+
+---Get usage weight for an item
+---@param connection table Connection context
+---@param item_type string Type ("table", "column", etc.)
+---@param item_path string Full path to item
+---@return number weight Usage weight (0 if not found or tracking disabled)
+local function get_usage_weight(connection, item_type, item_path)
+  local config = Config.get()
+
+  -- If tracking disabled, return 0 (no weight)
+  if not config.completion or not config.completion.track_usage then
+    return 0
+  end
+
+  -- Get weight from UsageTracker
+  local success, weight = pcall(function()
+    return UsageTracker.get_weight(connection, item_type, item_path)
+  end)
+
+  if success then
+    return weight or 0
+  else
+    return 0
+  end
+end
+
 ---Get database completions for the given context
 ---@param ctx table Context from source (has bufnr, connection, sql_context)
 ---@param callback function Callback(items)
@@ -56,15 +84,33 @@ function DatabasesProvider._get_completions_impl(ctx)
   end
 
   -- Format each database as CompletionItem
-  for _, db in ipairs(databases) do
+  for idx, db in ipairs(databases) do
     local item = Utils.format_database(db, {})
+
+    -- Get database name for weight lookup
+    local db_name = db.name or db.db_name or db.database_name
+
+    if db_name then
+      -- Get weight for database
+      local weight = get_usage_weight(connection, "database", db_name)
+
+      -- Priority: 0-4999 (weighted), 5000+ (alphabetical)
+      local priority
+      if weight > 0 then
+        priority = math.max(0, 4999 - weight)
+      else
+        priority = 5000 + idx  -- idx from iteration
+      end
+
+      -- Update sortText with new priority
+      item.sortText = string.format("%05d_%s", priority, db_name)
+
+      -- Store weight in data for debugging
+      item.data.weight = weight
+    end
+
     table.insert(items, item)
   end
-
-  -- Sort by database name (case-insensitive)
-  table.sort(items, function(a, b)
-    return a.label:lower() < b.label:lower()
-  end)
 
   return items
 end
