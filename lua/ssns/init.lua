@@ -65,6 +65,23 @@ function Ssns.setup(user_config)
 
   -- Register commands
   Ssns._register_commands()
+
+  -- Setup expand asterisk keymap for SQL buffers
+  vim.api.nvim_create_autocmd("FileType", {
+    pattern = "sql",
+    callback = function(args)
+      local bufnr = args.buf
+      vim.keymap.set('n', '<Leader>ce', function()
+        local ExpandAsterisk = require('ssns.features.expand_asterisk')
+        ExpandAsterisk.expand_asterisk_at_cursor()
+      end, {
+        buffer = bufnr,
+        noremap = true,
+        silent = true,
+        desc = 'Expand asterisk (Columns Expand)'
+      })
+    end,
+  })
 end
 
 ---Register Neovim commands
@@ -170,6 +187,15 @@ function Ssns._register_commands()
     Ssns.reset_completion_stats()
   end, {
     desc = "Reset completion performance statistics",
+  })
+
+  -- :SSNSExpandAsterisk - Expand * or alias.* to column list
+  vim.api.nvim_create_user_command("SSNSExpandAsterisk", function()
+    local ExpandAsterisk = require('ssns.features.expand_asterisk')
+    ExpandAsterisk.expand_asterisk_at_cursor()
+  end, {
+    nargs = 0,
+    desc = "Expand * or alias.* to column list (like SSMS RedGate)",
   })
 end
 
