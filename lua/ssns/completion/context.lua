@@ -52,20 +52,7 @@ function Context.detect(bufnr, line_num, col)
 
   -- Priority order (most specific first)
 
-  -- 1. Qualified column reference: table.column| or alias.column|
-  --    Pattern: word followed by dot
-  if before_cursor:match("(%w+)%.$") then
-    local ref = before_cursor:match("(%w+)%.$")
-    return {
-      type = Context.Type.COLUMN,
-      prefix = before_cursor,
-      trigger = ".",
-      table_ref = ref,
-      mode = "qualified",
-    }
-  end
-
-  -- 2. Bracketed identifier: [schema].[table].| or [database].|
+  -- 1. Bracketed identifier: [schema].[table].| or [database].|
   --    Pattern: [word].[word].| or [word].|
   if before_cursor:match("%[([^%]]+)%]%.%[([^%]]+)%]%.$") then
     local part1, part2 = before_cursor:match("%[([^%]]+)%]%.%[([^%]]+)%]%.$")
@@ -94,8 +81,8 @@ function Context.detect(bufnr, line_num, col)
     }
   end
 
-  -- 3. USE statement: USE |
-  if before_cursor_lower:match("use%s+$") then
+  -- 2. USE statement: USE | or USE D| or USE Dev|
+  if before_cursor_lower:match("use%s+%w*$") then
     return {
       type = Context.Type.DATABASE,
       prefix = before_cursor,
@@ -104,8 +91,8 @@ function Context.detect(bufnr, line_num, col)
     }
   end
 
-  -- 4. FROM clause: FROM | or FROM schema.|
-  if before_cursor_lower:match("from%s+$") then
+  -- 3. FROM clause: FROM | or FROM E| or FROM Emp|
+  if before_cursor_lower:match("from%s+%w*$") then
     return {
       type = Context.Type.TABLE,
       prefix = before_cursor,
@@ -125,8 +112,8 @@ function Context.detect(bufnr, line_num, col)
     }
   end
 
-  -- 5. JOIN clause: JOIN | or INNER JOIN | etc.
-  if before_cursor_lower:match("join%s+$") then
+  -- 4. JOIN clause: JOIN | or JOIN D| or JOIN Dep|
+  if before_cursor_lower:match("join%s+%w*$") then
     return {
       type = Context.Type.TABLE,
       prefix = before_cursor,
@@ -146,8 +133,21 @@ function Context.detect(bufnr, line_num, col)
     }
   end
 
-  -- 6. INSERT INTO: INSERT INTO |
-  if before_cursor_lower:match("insert%s+into%s+$") then
+  -- 5. Qualified column reference: table.column| or alias.column|
+  --    Pattern: word followed by dot (AFTER FROM/JOIN patterns)
+  if before_cursor:match("(%w+)%.$") then
+    local ref = before_cursor:match("(%w+)%.$")
+    return {
+      type = Context.Type.COLUMN,
+      prefix = before_cursor,
+      trigger = ".",
+      table_ref = ref,
+      mode = "qualified",
+    }
+  end
+
+  -- 6. INSERT INTO: INSERT INTO | or INSERT INTO E| or INSERT INTO Emp|
+  if before_cursor_lower:match("insert%s+into%s+%w*$") then
     return {
       type = Context.Type.TABLE,
       prefix = before_cursor,
@@ -156,8 +156,8 @@ function Context.detect(bufnr, line_num, col)
     }
   end
 
-  -- 7. UPDATE: UPDATE |
-  if before_cursor_lower:match("update%s+$") then
+  -- 7. UPDATE: UPDATE | or UPDATE E| or UPDATE Emp|
+  if before_cursor_lower:match("update%s+%w*$") then
     return {
       type = Context.Type.TABLE,
       prefix = before_cursor,
@@ -166,8 +166,8 @@ function Context.detect(bufnr, line_num, col)
     }
   end
 
-  -- 8. DELETE FROM: DELETE FROM |
-  if before_cursor_lower:match("delete%s+from%s+$") then
+  -- 8. DELETE FROM: DELETE FROM | or DELETE FROM E| or DELETE FROM Emp|
+  if before_cursor_lower:match("delete%s+from%s+%w*$") then
     return {
       type = Context.Type.TABLE,
       prefix = before_cursor,
@@ -176,8 +176,8 @@ function Context.detect(bufnr, line_num, col)
     }
   end
 
-  -- 9. SELECT clause: SELECT | (column completion)
-  if before_cursor_lower:match("select%s+$") then
+  -- 9. SELECT clause: SELECT | or SELECT E| or SELECT Emp| (column completion)
+  if before_cursor_lower:match("select%s+%w*$") then
     return {
       type = Context.Type.COLUMN,
       prefix = before_cursor,
@@ -186,8 +186,8 @@ function Context.detect(bufnr, line_num, col)
     }
   end
 
-  -- 10. WHERE clause: WHERE | (column completion)
-  if before_cursor_lower:match("where%s+$") then
+  -- 10. WHERE clause: WHERE | or WHERE E| or WHERE Emp| (column completion)
+  if before_cursor_lower:match("where%s+%w*$") then
     return {
       type = Context.Type.COLUMN,
       prefix = before_cursor,
@@ -196,8 +196,8 @@ function Context.detect(bufnr, line_num, col)
     }
   end
 
-  -- 11. ORDER BY clause: ORDER BY |
-  if before_cursor_lower:match("order%s+by%s+$") then
+  -- 11. ORDER BY clause: ORDER BY | or ORDER BY E| or ORDER BY Emp|
+  if before_cursor_lower:match("order%s+by%s+%w*$") then
     return {
       type = Context.Type.COLUMN,
       prefix = before_cursor,
@@ -206,8 +206,8 @@ function Context.detect(bufnr, line_num, col)
     }
   end
 
-  -- 12. GROUP BY clause: GROUP BY |
-  if before_cursor_lower:match("group%s+by%s+$") then
+  -- 12. GROUP BY clause: GROUP BY | or GROUP BY E| or GROUP BY Emp|
+  if before_cursor_lower:match("group%s+by%s+%w*$") then
     return {
       type = Context.Type.COLUMN,
       prefix = before_cursor,
@@ -216,8 +216,8 @@ function Context.detect(bufnr, line_num, col)
     }
   end
 
-  -- 13. EXEC/EXECUTE: EXEC | (procedure completion)
-  if before_cursor_lower:match("exec%w*%s+$") then
+  -- 13. EXEC/EXECUTE: EXEC | or EXEC sp| or EXEC sp_Get| (procedure completion)
+  if before_cursor_lower:match("exec%w*%s+%w*$") then
     return {
       type = Context.Type.PROCEDURE,
       prefix = before_cursor,
@@ -238,12 +238,207 @@ function Context.detect(bufnr, line_num, col)
     }
   end
 
-  -- 15. Default: keyword completion
-  return {
+  -- 15. Default: keyword completion (but try tree-sitter first for multi-line support)
+  local regex_result = {
     type = Context.Type.KEYWORD,
     prefix = before_cursor,
+    trigger = nil,
     mode = "default",
   }
+
+  -- Try tree-sitter for better multi-line support
+  local ts_result = Context.detect_with_treesitter(bufnr, line_num, col)
+  if ts_result then
+    -- Tree-sitter found a more specific context
+    return ts_result
+  end
+
+  -- Fall back to keyword completion
+  return regex_result
+end
+
+--- Detect completion context using tree-sitter (for multi-line queries)
+---@param bufnr number Buffer number
+---@param row number Cursor row (1-indexed)
+---@param col number Cursor column (1-indexed)
+---@return table? Context information (nil if tree-sitter unavailable or no context found)
+function Context.detect_with_treesitter(bufnr, row, col)
+  local Debug = require('ssns.debug')
+  local Treesitter = require('ssns.completion.metadata.treesitter')
+
+  Debug.log("[CONTEXT] detect_with_treesitter called: bufnr=" .. bufnr .. ", row=" .. row .. ", col=" .. col)
+
+  -- Check if tree-sitter is available
+  if not Treesitter.is_available() then
+    Debug.log("[CONTEXT] Tree-sitter NOT available")
+    return nil
+  end
+
+  Debug.log("[CONTEXT] Tree-sitter IS available")
+
+  -- Get full buffer content
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local query_text = table.concat(lines, "\n")
+
+  Debug.log("[CONTEXT] Full query text: " .. query_text:sub(1, 200))  -- First 200 chars
+
+  -- Parse SQL
+  local root = Treesitter.parse_sql(query_text)
+  if not root then
+    Debug.log("[CONTEXT] Tree-sitter parse returned nil")
+    return nil
+  end
+
+  Debug.log("[CONTEXT] Tree-sitter parse successful")
+
+  -- Convert to 0-indexed for tree-sitter
+  local ts_row = row - 1
+  local ts_col = col - 1
+
+  -- Find node at cursor position
+  local node = root:descendant_for_range(ts_row, ts_col, ts_row, ts_col)
+  if not node then
+    Debug.log("[CONTEXT] No node found at cursor position")
+    return nil
+  end
+
+  Debug.log("[CONTEXT] Found node at cursor: type=" .. node:type())
+
+  -- Walk up parent chain to find statement context
+  local current = node
+  while current do
+    local node_type = current:type()
+
+    Debug.log("[CONTEXT] Checking parent node: type=" .. node_type)
+
+    -- Check for FROM clause context (table completion)
+    if node_type == "from_clause" or node_type == "from" then
+      return {
+        type = Context.Type.TABLE,
+        mode = "from",
+        trigger = nil,
+        prefix = lines[row]:sub(1, col),
+      }
+    end
+
+    -- Check for JOIN clause context (table completion)
+    if node_type:match("join") then  -- Matches inner_join, left_join, etc.
+      return {
+        type = Context.Type.TABLE,
+        mode = "join",
+        trigger = nil,
+        prefix = lines[row]:sub(1, col),
+      }
+    end
+
+    -- Check for WHERE clause context (column completion)
+    if node_type == "where_clause" or node_type == "where" then
+      return {
+        type = Context.Type.COLUMN,
+        mode = "where",
+        trigger = nil,
+        prefix = lines[row]:sub(1, col),
+      }
+    end
+
+    -- Check for SELECT clause context (column completion)
+    if node_type == "select_clause" or node_type == "select" then
+      return {
+        type = Context.Type.COLUMN,
+        mode = "select",
+        trigger = nil,
+        prefix = lines[row]:sub(1, col),
+      }
+    end
+
+    -- Check for ORDER BY clause context (column completion)
+    if node_type == "order_by_clause" or node_type == "order_by" then
+      return {
+        type = Context.Type.COLUMN,
+        mode = "order_by",
+        trigger = nil,
+        prefix = lines[row]:sub(1, col),
+      }
+    end
+
+    -- Check for GROUP BY clause context (column completion)
+    if node_type == "group_by_clause" or node_type == "group_by" then
+      return {
+        type = Context.Type.COLUMN,
+        mode = "group_by",
+        trigger = nil,
+        prefix = lines[row]:sub(1, col),
+      }
+    end
+
+    -- Check for EXEC/EXECUTE context (procedure completion)
+    if node_type == "execute_statement" or node_type == "exec_statement" then
+      return {
+        type = Context.Type.PROCEDURE,
+        mode = "exec",
+        trigger = nil,
+        prefix = lines[row]:sub(1, col),
+      }
+    end
+
+    -- Check for function call context (might be parameters)
+    if node_type == "function_call" then
+      -- Check if cursor is inside parentheses (parameters)
+      local parent = current:parent()
+      if parent and parent:type() == "arguments" then
+        return {
+          type = Context.Type.PARAMETER,
+          mode = "function",
+          trigger = nil,
+          prefix = lines[row]:sub(1, col),
+        }
+      end
+    end
+
+    -- Check for field reference (table.column or schema.table)
+    if node_type == "field_reference" or node_type == "object_reference" then
+      -- This handles qualified references like "dbo.table" or "e.column"
+      local text = vim.treesitter.get_node_text(current, query_text)
+
+      -- Check if ends with dot (waiting for next part)
+      if text:match("%.$") or col == current:end_() + 1 then
+        -- Count dots to determine if schema.table or table.column
+        local dots = 0
+        for _ in text:gmatch("%.") do dots = dots + 1 end
+
+        if dots == 1 then
+          -- Could be schema.table or table.column - need parent context
+          local parent = current:parent()
+          if parent and (parent:type():match("from") or parent:type():match("join")) then
+            -- In FROM/JOIN: schema.table context
+            return {
+              type = Context.Type.TABLE,
+              mode = "from_qualified",
+              trigger = ".",
+              prefix = lines[row]:sub(1, col),
+              schema = text:match("^([^%.]+)"),
+            }
+          else
+            -- In SELECT/WHERE: table.column context
+            return {
+              type = Context.Type.COLUMN,
+              mode = "qualified",
+              trigger = ".",
+              prefix = lines[row]:sub(1, col),
+              table_ref = text:match("^([^%.]+)"),
+            }
+          end
+        end
+      end
+    end
+
+    -- Move to parent
+    current = current:parent()
+  end
+
+  Debug.log("[CONTEXT] Tree-sitter: No specific context found, returning nil")
+  -- No specific context found, return nil to use fallback
+  return nil
 end
 
 ---Get statement type from line (SELECT, INSERT, UPDATE, DELETE, EXEC, etc.)
