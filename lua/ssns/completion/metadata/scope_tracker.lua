@@ -58,7 +58,7 @@ function ScopeTracker.build_scope_tree(query_text, bufnr, connection)
 
   local global_scope = {
     type = "global",
-    start_pos = { 1, 0 },
+    start_pos = { 1, 1 },  -- 1-indexed (Neovim convention)
     end_pos = { line_count, 999999 },
     aliases = {},
     ctes = {},
@@ -493,7 +493,7 @@ function ScopeTracker._extract_single_cte(cte_node, query_text, scope, bufnr, co
     scope.ctes[cte_name:lower()] = {
       name = cte_name,
       columns = cte_columns,
-      start_pos = { start_row + 1, start_col },
+      start_pos = { start_row + 1, start_col + 1 },  -- Convert to 1-indexed
     }
     debug_log(string.format("Registered CTE '%s' with %d columns", cte_name, #cte_columns))
   end
@@ -554,9 +554,12 @@ function ScopeTracker._extract_select_scope(node, query_text, parent_scope, bufn
   debug_log(string.format("Scope type: %s", scope_type))
 
   -- Create scope for this statement
+  -- Convert tree-sitter positions (0-indexed) to Neovim positions (1-indexed)
+  -- start_col: add +1 to convert 0-indexed to 1-indexed
+  -- end_col: keep as-is (tree-sitter's exclusive 0-indexed = inclusive 1-indexed)
   local select_scope = {
     type = scope_type,
-    start_pos = {start_row + 1, start_col},
+    start_pos = {start_row + 1, start_col + 1},
     end_pos = {end_row + 1, end_col},
     aliases = {},
     ctes = {},
@@ -622,9 +625,10 @@ function ScopeTracker._extract_set_operation_scopes(node, query_text, parent_sco
         local start_row, start_col = current_select:range()
         local _, _, end_row, end_col = current_from:range()
 
+        -- Convert tree-sitter positions to 1-indexed
         local select_scope = {
           type = "main",  -- Each part of UNION is a main-level scope
-          start_pos = {start_row + 1, start_col},
+          start_pos = {start_row + 1, start_col + 1},
           end_pos = {end_row + 1, end_col},
           aliases = {},
           ctes = {},
@@ -671,9 +675,10 @@ function ScopeTracker._extract_subquery_scope(node, query_text, parent_scope, bu
     start_row + 1, end_row + 1))
 
   -- Subqueries are always "subquery" type
+  -- Convert tree-sitter positions to 1-indexed
   local subquery_scope = {
     type = "subquery",
-    start_pos = {start_row + 1, start_col},
+    start_pos = {start_row + 1, start_col + 1},
     end_pos = {end_row + 1, end_col},
     aliases = {},
     ctes = {},
@@ -980,7 +985,7 @@ function ScopeTracker._create_fallback_scope(query_text)
 
   return {
     type = "global",
-    start_pos = { 1, 0 },
+    start_pos = { 1, 1 },  -- 1-indexed (Neovim convention)
     end_pos = { 9999, 999999 },
     aliases = aliases,
     ctes = {},
@@ -1007,8 +1012,11 @@ function ScopeTracker._is_position_in_scope(pos, scope)
     return false
   end
 
-  -- If same row as end, check column
-  if row == scope.end_pos[1] and col > scope.end_pos[2] then
+  -- If same row as end, check column with tolerance
+  -- Allow cursor to be past end position (for incomplete queries where user is typing)
+  -- Tolerance of 100 chars accounts for typing after keywords like WHERE, JOIN, etc.
+  local END_TOLERANCE = 100
+  if row == scope.end_pos[1] and col > scope.end_pos[2] + END_TOLERANCE then
     return false
   end
 

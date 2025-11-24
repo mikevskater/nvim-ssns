@@ -229,15 +229,18 @@ function Resolver.resolve_all_tables_in_query(connection, context)
   local seen_tables = {}  -- Deduplicate by name (case-insensitive)
 
   for _, table_info in ipairs(context.tables_in_scope) do
-    local table_name = table_info.name or table_info
-    local table_name_lower = table_name:lower()
+    -- table_info structure: {alias = "e", table = "dbo.EMPLOYEES", scope = "main"}
+    local table_name = table_info.table or table_info.alias or table_info
+    local table_name_lower = type(table_name) == "string" and table_name:lower() or ""
 
-    if not seen_tables[table_name_lower] then
+    if table_name and not seen_tables[table_name_lower] then
       local resolved_table = Resolver.resolve_table(table_name, connection, context)
       if resolved_table then
         table.insert(resolved_tables, resolved_table)
         seen_tables[table_name_lower] = true
         debug_log(string.format("[RESOLVER] Resolved table '%s'", table_name))
+      else
+        debug_log(string.format("[RESOLVER] Failed to resolve table '%s'", table_name))
       end
     end
   end
