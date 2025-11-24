@@ -43,23 +43,21 @@ function JoinsProvider._get_completions_impl(ctx)
     return {}
   end
 
-  local bufnr = ctx.bufnr
-  if not bufnr then
+  local sql_context = ctx.sql_context
+  if not sql_context then
     return {}
   end
 
-  -- Get existing tables in query using Resolver
-  local existing_tables = Resolver.resolve_all_tables_in_query(bufnr, connection_info)
+  -- Get existing tables in query using pre-built context
+  local existing_tables = Resolver.resolve_all_tables_in_query(connection_info, sql_context)
 
   if not existing_tables or #existing_tables == 0 then
     -- No tables in query - fall back to general table list
     return JoinsProvider._get_fallback_tables(connection_info, {})
   end
 
-  -- Extract existing aliases from query
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local query_text = table.concat(lines, "\n")
-  local alias_map = Context.parse_aliases(query_text)
+  -- Use pre-built aliases from context
+  local alias_map = sql_context.aliases or {}
 
   -- Build reverse map: table_name -> alias
   local existing_aliases = {}

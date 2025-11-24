@@ -34,10 +34,9 @@ end
 ---Resolve table reference to full path for weight lookup
 ---@param table_ref string Table reference (could be alias, name, etc.)
 ---@param connection table Connection context
----@param bufnr number Buffer number
----@param cursor_pos? table {row, col} Cursor position
+---@param context table Pre-built context with aliases
 ---@return string? path Full path (e.g., "dbo.Employees") or nil
-local function resolve_table_path(table_ref, connection, bufnr, cursor_pos)
+local function resolve_table_path(table_ref, connection, context)
   if not table_ref then
     return nil
   end
@@ -45,7 +44,7 @@ local function resolve_table_path(table_ref, connection, bufnr, cursor_pos)
   -- Try to resolve via Resolver
   local success, result = pcall(function()
     local Resolver = require('ssns.completion.metadata.resolver')
-    local table_obj = Resolver.resolve_table(table_ref, connection, bufnr, cursor_pos)
+    local table_obj = Resolver.resolve_table(table_ref, connection, context)
 
     if table_obj then
       local schema = table_obj.schema or table_obj.schema_name
@@ -67,54 +66,6 @@ local function resolve_table_path(table_ref, connection, bufnr, cursor_pos)
 
   -- Fallback: assume it's already a qualified name
   return table_ref
-end
-
----Get columns from CTE definition using ScopeTracker
----@param cte_name string CTE name
----@param bufnr number Buffer number
----@param cursor_pos table {row, col} Cursor position
----@param connection table? Optional connection context for CTE asterisk expansion
----@return table[]? items Completion items or nil
-local function _get_cte_columns(cte_name, bufnr, cursor_pos, connection)
-  -- Wrap in pcall for error handling
-  local success, result = pcall(function()
-    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    local query = table.concat(lines, "\n")
-
-    local ScopeTracker = require('ssns.completion.metadata.scope_tracker')
-    local scope_tree = ScopeTracker.build_scope_tree(query, bufnr, connection)
-
-    if not scope_tree then
-      return nil
-    end
-
-    local ctes = ScopeTracker.get_available_ctes(scope_tree, cursor_pos)
-    local cte_info = ctes[cte_name] or ctes[cte_name:lower()]
-
-    if not cte_info or not cte_info.columns or #cte_info.columns == 0 then
-      return nil
-    end
-
-    -- Build completion items from CTE columns
-    local items = {}
-    for _, col_name in ipairs(cte_info.columns) do
-      table.insert(items, {
-        label = col_name,
-        kind = vim.lsp.protocol.CompletionItemKind.Field,
-        detail = "CTE column",
-        insertText = col_name,
-      })
-    end
-
-    return items
-  end)
-
-  if success then
-    return result
-  end
-
-  -- On error, return nil to fall back to database lookup
-  return nil
 end
 
 ---Get column completions for the given context
@@ -158,16 +109,16 @@ function ColumnsProvider._get_completions_impl(ctx)
   -- Route based on context mode
   if sql_context.mode == "qualified" then
     -- Pattern: table.| or alias.|
-    return ColumnsProvider._get_qualified_columns(sql_context, connection, bufnr, ctx.cursor_pos)
+    return ColumnsProvider._get_qualified_columns(sql_context, connection, sql_context)
 
   elseif sql_context.mode == "select" or sql_context.mode == "where" or
          sql_context.mode == "order_by" or sql_context.mode == "group_by" then
     -- Pattern: SELECT | or WHERE | (show columns from all tables in query)
-    return ColumnsProvider._get_all_columns_from_query(connection, bufnr)
+    return ColumnsProvider._get_all_columns_from_query(connection, sql_context)
 
   elseif sql_context.mode == "qualified_bracket" then
     -- Pattern: [schema].[table].| or [database].|
-    return ColumnsProvider._get_qualified_bracket_columns(sql_context, connection, bufnr, ctx.cursor_pos)
+    return ColumnsProvider._get_qualified_bracket_columns(sql_context, connection, sql_context)
 
   else
     return {}
@@ -177,10 +128,9 @@ end
 ---Get columns for qualified reference (table.| or alias.|)
 ---@param sql_context table SQL context { table_ref: string, ... }
 ---@param connection table Connection context
----@param bufnr number Buffer number
----@param cursor_pos? table {row, col} Cursor position for scope filtering
+---@param context table Pre-built context with aliases
 ---@return table[] items CompletionItems
-function ColumnsProvider._get_qualified_columns(sql_context, connection, bufnr, cursor_pos)
+function ColumnsProvider._get_qualified_columns(sql_context, connection, context)
   local Resolver = require('ssns.completion.metadata.resolver')
   local Utils = require('ssns.completion.utils')
 
@@ -190,16 +140,25 @@ function ColumnsProvider._get_qualified_columns(sql_context, connection, bufnr, 
     return {}
   end
 
-  -- Try CTE columns first (if cursor position available)
-  if cursor_pos then
-    local cte_columns = _get_cte_columns(reference, bufnr, cursor_pos, connection)
-    if cte_columns then
-      return cte_columns
+  -- Try CTE columns first using pre-built context
+  if context and context.ctes then
+    local cte_info = context.ctes[reference] or context.ctes[reference:lower()]
+    if cte_info and cte_info.columns and #cte_info.columns > 0 then
+      local items = {}
+      for _, col_name in ipairs(cte_info.columns) do
+        table.insert(items, {
+          label = col_name,
+          kind = vim.lsp.protocol.CompletionItemKind.Field,
+          detail = "CTE column",
+          insertText = col_name,
+        })
+      end
+      return items
     end
   end
 
   -- Fall back to database table lookup
-  local table_obj = Resolver.resolve_table(reference, connection, bufnr, cursor_pos)
+  local table_obj = Resolver.resolve_table(reference, connection, context)
   if not table_obj then
     return {}
   end
@@ -214,7 +173,7 @@ function ColumnsProvider._get_qualified_columns(sql_context, connection, bufnr, 
   local items = {}
 
   -- Resolve table path for weight lookup
-  local table_path = resolve_table_path(reference, connection, bufnr, cursor_pos)
+  local table_path = resolve_table_path(reference, connection, context)
 
   for _, col in ipairs(columns) do
     local item = Utils.format_column(col, {
@@ -265,14 +224,14 @@ end
 
 ---Get columns from all tables in query (for SELECT, WHERE, ORDER BY, GROUP BY)
 ---@param connection table Connection context
----@param bufnr number Buffer number
+---@param context table Pre-built context with tables_in_scope
 ---@return table[] items CompletionItems
-function ColumnsProvider._get_all_columns_from_query(connection, bufnr)
+function ColumnsProvider._get_all_columns_from_query(connection, context)
   local Resolver = require('ssns.completion.metadata.resolver')
   local Utils = require('ssns.completion.utils')
 
-  -- Get all tables from query
-  local tables = Resolver.resolve_all_tables_in_query(bufnr, connection)
+  -- Get all tables from query using pre-built context
+  local tables = Resolver.resolve_all_tables_in_query(connection, context)
   if not tables or #tables == 0 then
     return {}
   end
@@ -357,10 +316,9 @@ end
 ---Get columns for bracketed qualified reference ([schema].[table].|)
 ---@param sql_context table SQL context { schema: string, table_ref: string, ... }
 ---@param connection table Connection context
----@param bufnr number Buffer number
----@param cursor_pos? table {row, col} Cursor position for scope filtering
+---@param context table Pre-built context with aliases
 ---@return table[] items CompletionItems
-function ColumnsProvider._get_qualified_bracket_columns(sql_context, connection, bufnr, cursor_pos)
+function ColumnsProvider._get_qualified_bracket_columns(sql_context, connection, context)
   local Resolver = require('ssns.completion.metadata.resolver')
   local Utils = require('ssns.completion.utils')
 
@@ -374,16 +332,25 @@ function ColumnsProvider._get_qualified_bracket_columns(sql_context, connection,
     return {}
   end
 
-  -- Try CTE columns first (if cursor position available)
-  if cursor_pos then
-    local cte_columns = _get_cte_columns(reference, bufnr, cursor_pos, connection)
-    if cte_columns then
-      return cte_columns
+  -- Try CTE columns first using pre-built context
+  if context and context.ctes then
+    local cte_info = context.ctes[reference] or context.ctes[reference:lower()]
+    if cte_info and cte_info.columns and #cte_info.columns > 0 then
+      local items = {}
+      for _, col_name in ipairs(cte_info.columns) do
+        table.insert(items, {
+          label = col_name,
+          kind = vim.lsp.protocol.CompletionItemKind.Field,
+          detail = "CTE column",
+          insertText = col_name,
+        })
+      end
+      return items
     end
   end
 
   -- Fall back to database table lookup
-  local table_obj = Resolver.resolve_table(reference, connection, bufnr, cursor_pos)
+  local table_obj = Resolver.resolve_table(reference, connection, context)
   if not table_obj then
     return {}
   end
@@ -398,7 +365,7 @@ function ColumnsProvider._get_qualified_bracket_columns(sql_context, connection,
   local items = {}
 
   -- Resolve table path for weight lookup
-  local table_path = resolve_table_path(reference, connection, bufnr, cursor_pos)
+  local table_path = resolve_table_path(reference, connection, context)
 
   for _, col in ipairs(columns) do
     local item = Utils.format_column(col, {

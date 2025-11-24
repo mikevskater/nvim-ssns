@@ -19,21 +19,28 @@ end
 ---Enhanced to check buffer cache for temp tables first
 ---@param reference string Table reference (could be alias, table name, temp table, or synonym)
 ---@param connection table Connection context { server: ServerClass, database: DbClass, connection_string: string }
----@param bufnr number Buffer number (for alias resolution)
----@param cursor_pos table? {row, col} Cursor position (optional)
+---@param context table Pre-built context with aliases
 ---@return table? table_obj Resolved TableClass/ViewClass/TempTableClass or nil if not found
-function Resolver.resolve_table(reference, connection, bufnr, cursor_pos)
+function Resolver.resolve_table(reference, connection, context)
   if not reference or not connection or not connection.database then
     return nil
   end
 
   -- Step 0: Check if reference is a temp table (#temp or ##temp)
   if reference:match("^#") then
-    return Resolver._resolve_temp_table(reference, bufnr, cursor_pos, connection)
+    -- Temp table resolution needs bufnr and cursor_pos, which we can extract from context if available
+    -- For now, we'll skip temp table cache lookup and only check tempdb
+    if reference:match("^##") then
+      return Resolver._find_in_tempdb(reference, connection)
+    end
+    -- Local temp tables require buffer cache, which requires bufnr
+    -- We'll need to pass bufnr through context or handle this differently
+    -- For now, return nil for local temp tables
+    return nil
   end
 
-  -- Step 1: Try to resolve as alias first (now FULLY scope-aware with ScopeTracker)
-  local resolved_name = Resolver.resolve_alias_with_scope(reference, bufnr, cursor_pos)
+  -- Step 1: Try to resolve as alias first using pre-built context
+  local resolved_name = Resolver.resolve_alias_with_scope(reference, context)
 
   if resolved_name then
     -- Alias was resolved, use the resolved table name
@@ -41,7 +48,10 @@ function Resolver.resolve_table(reference, connection, bufnr, cursor_pos)
 
     -- Check again if resolved name is a temp table
     if reference:match("^#") then
-      return Resolver._resolve_temp_table(reference, bufnr, cursor_pos, connection)
+      if reference:match("^##") then
+        return Resolver._find_in_tempdb(reference, connection)
+      end
+      return nil  -- Local temp tables not supported without buffer context
     end
   end
 
@@ -202,102 +212,61 @@ function Resolver.get_columns(table_obj, connection)
   return {}
 end
 
----Resolve multiple table references from query context
+---Resolve multiple table references from query context using pre-built scope
 ---Used for SELECT/WHERE/ORDER BY (columns from all tables in query)
----@param bufnr number Buffer number
 ---@param connection table Connection context
----@param cursor_pos table? Optional cursor position for scope-aware resolution
+---@param context table Pre-built context with tables_in_scope
 ---@return table[] tables Array of resolved TableClass/ViewClass objects
-function Resolver.resolve_all_tables_in_query(bufnr, connection, cursor_pos)
-  if not bufnr or not connection then
+function Resolver.resolve_all_tables_in_query(connection, context)
+  if not context or not context.tables_in_scope then
+    debug_log("[RESOLVER] No context or tables_in_scope provided to resolve_all_tables_in_query")
     return {}
   end
 
-  -- Get full buffer text
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local query_text = table.concat(lines, "\n")
+  debug_log(string.format("[RESOLVER] Using pre-built tables_in_scope from context: %d tables", #context.tables_in_scope))
 
-  -- Use Treesitter or Context to extract table references
-  local Treesitter = require('ssns.completion.metadata.treesitter')
-  local refs = {}
-
-  if Treesitter.is_available() then
-    refs = Treesitter.extract_table_references(query_text)
-  end
-
-  -- Fallback to Context.parse_aliases if tree-sitter didn't return results
-  if not refs or #refs == 0 then
-    local Context = require('ssns.completion.context')
-    local aliases = Context.parse_aliases(query_text)
-
-    -- Convert aliases map to refs array
-    for alias, table_name in pairs(aliases) do
-      table.insert(refs, { table = table_name, alias = alias })
-    end
-  end
-
-  -- Resolve each table reference
   local resolved_tables = {}
-  local seen = {} -- Deduplicate by table name
+  local seen_tables = {}  -- Deduplicate by name (case-insensitive)
 
-  for _, ref in ipairs(refs) do
-    local table_name = ref.table
-    if table_name and not seen[table_name:lower()] then
-      local table_obj = Resolver.resolve_table(table_name, connection, bufnr)
-      if table_obj then
-        table.insert(resolved_tables, table_obj)
-        seen[table_name:lower()] = true
+  for _, table_info in ipairs(context.tables_in_scope) do
+    local table_name = table_info.name or table_info
+    local table_name_lower = table_name:lower()
+
+    if not seen_tables[table_name_lower] then
+      local resolved_table = Resolver.resolve_table(table_name, connection, context)
+      if resolved_table then
+        table.insert(resolved_tables, resolved_table)
+        seen_tables[table_name_lower] = true
+        debug_log(string.format("[RESOLVER] Resolved table '%s'", table_name))
       end
     end
   end
 
+  debug_log(string.format("[RESOLVER] Resolved %d unique tables from context", #resolved_tables))
   return resolved_tables
 end
 
----Resolve alias to table using scope tracking (enhanced version)
----Uses ScopeTracker for nested query support
+---Resolve alias to table using pre-built context from completion system
 ---@param alias string Alias to resolve
----@param bufnr number Buffer number
----@param cursor_pos table? {row, col} Cursor position (optional)
----@return string? table_name Resolved table name
-function Resolver.resolve_alias_with_scope(alias, bufnr, cursor_pos)
-  debug_log(string.format("resolve_alias_with_scope: alias=%s, cursor_pos={%s,%s}",
-    alias,
-    cursor_pos and cursor_pos[1] or "nil",
-    cursor_pos and cursor_pos[2] or "nil"))
-
-  -- Get buffer text
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local query = table.concat(lines, '\n')
-
-  -- Try scope-based resolution with ScopeTracker
-  local success, result = pcall(function()
-    local ScopeTracker = require('ssns.completion.metadata.scope_tracker')
-    local scope_tree = ScopeTracker.build_scope_tree(query, bufnr)
-
-    -- Get available aliases at cursor position
-    cursor_pos = cursor_pos or vim.api.nvim_win_get_cursor(0)
-    local aliases = ScopeTracker.get_available_aliases(scope_tree, cursor_pos)
-
-    -- Resolve alias (case-insensitive)
-    return aliases[alias:lower()]
-  end)
-
-  debug_log(string.format("ScopeTracker result: success=%s, result=%s",
-    tostring(success), tostring(result)))
-
-  if success and result then
-    debug_log(string.format("Returning from ScopeTracker: %s", result))
-    return result
+---@param context table Pre-built context with aliases
+---@return string? table_name Resolved table name or nil
+function Resolver.resolve_alias_with_scope(alias, context)
+  if not context or not context.aliases then
+    debug_log("[RESOLVER] No context or aliases provided to resolve_alias_with_scope")
+    return nil
   end
 
-  -- Fallback: Use Context.resolve_alias (scope-aware with cursor_pos)
-  debug_log("Falling back to Context.resolve_alias")
-  local Context = require('ssns.completion.context')
-  local fallback_result = Context.resolve_alias(alias, bufnr, cursor_pos)
-  debug_log(string.format("Fallback result: %s", tostring(fallback_result)))
+  -- Use pre-built aliases from context (already case-insensitive)
+  local alias_lower = alias:lower()
+  local resolved = context.aliases[alias_lower]
 
-  return fallback_result
+  if resolved then
+    debug_log(string.format("[RESOLVER] Resolved alias '%s' to table '%s' via context", alias, resolved))
+  else
+    debug_log(string.format("[RESOLVER] Alias '%s' not found in context.aliases", alias))
+  end
+
+  return resolved
 end
 
 ---Helper: Strip brackets/quotes from identifier
