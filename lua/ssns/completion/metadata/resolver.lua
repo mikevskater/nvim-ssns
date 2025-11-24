@@ -159,8 +159,12 @@ end
 ---@return table[] columns Array of ColumnClass objects
 function Resolver.get_columns(table_obj, connection)
   if not table_obj then
+    debug_log("[RESOLVER] get_columns: table_obj is nil")
     return {}
   end
+
+  local table_name = table_obj.name or table_obj.table_name or table_obj.view_name or "unknown"
+  debug_log(string.format("[RESOLVER] get_columns: Getting columns for table '%s'", table_name))
 
   -- Try: table_obj:get_columns() (may lazy-load)
   local success, columns = pcall(function()
@@ -171,11 +175,19 @@ function Resolver.get_columns(table_obj, connection)
   end)
 
   if success and columns and #columns > 0 then
+    debug_log(string.format("[RESOLVER] get_columns: Got %d columns from table_obj:get_columns()", #columns))
     return columns
+  else
+    if not success then
+      debug_log(string.format("[RESOLVER] get_columns: table_obj:get_columns() failed: %s", tostring(columns)))
+    else
+      debug_log("[RESOLVER] get_columns: table_obj:get_columns() returned nil or empty")
+    end
   end
 
   -- Fallback: If get_columns() fails, try direct RPC
   if connection and connection.connection_string then
+    debug_log("[RESOLVER] get_columns: Trying RPC fallback")
     local obj_name = table_obj.name or table_obj.table_name or table_obj.view_name
     local obj_schema = table_obj.schema or table_obj.schema_name
 
@@ -204,11 +216,21 @@ function Resolver.get_columns(table_obj, connection)
           default_value = col_data.default_value,
         })
       end
+      debug_log(string.format("[RESOLVER] get_columns: Got %d columns from RPC", #cols))
       return cols
+    else
+      if not rpc_success then
+        debug_log(string.format("[RESOLVER] get_columns: RPC failed: %s", tostring(metadata)))
+      else
+        debug_log("[RESOLVER] get_columns: RPC returned nil or non-table")
+      end
     end
+  else
+    debug_log("[RESOLVER] get_columns: No connection or connection_string")
   end
 
   -- Return empty array on error (don't crash)
+  debug_log("[RESOLVER] get_columns: Returning empty array")
   return {}
 end
 
