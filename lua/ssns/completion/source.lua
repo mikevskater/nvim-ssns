@@ -21,6 +21,226 @@ local Debug = require('ssns.debug')
 -- Usage tracker for recording completion selections
 local UsageTracker = require('ssns.completion.usage_tracker')
 
+-- ============================================================================
+-- Helper Functions for Selection Tracking
+-- ============================================================================
+
+---Extract the last identifier from text (handles qualified names and brackets)
+---@param text string Text to extract identifier from
+---@return string? identifier The extracted identifier or nil
+local function extract_last_identifier(text)
+  -- Pattern matches:
+  -- - Simple: "Employees"
+  -- - Qualified: "dbo.Employees" or "schema.table.column"
+  -- - Bracketed: "[Employee Name]"
+  -- - Mixed: "dbo.[Employee Name]"
+
+  -- Try bracketed identifier first: [...]
+  local bracketed = text:match("%[([^%]]+)%]%s*$")
+  if bracketed then
+    return bracketed
+  end
+
+  -- Try qualified path: word.word.word or word
+  local qualified = text:match("([%w_%.]+)%s*$")
+  if qualified then
+    -- Return just the last part after final dot
+    local parts = vim.split(qualified, "%.", { plain = true })
+    return parts[#parts]
+  end
+
+  return nil
+end
+
+---Check if inserted text matches a completion item
+---@param inserted_text string Text that was inserted
+---@param item table Completion item
+---@return boolean matches True if it matches
+local function matches_completion_item(inserted_text, item)
+  -- Normalize for comparison (case-insensitive, trim whitespace)
+  local normalized_text = inserted_text:lower():gsub("^%s+", ""):gsub("%s+$", "")
+
+  -- Check against label (e.g., "Employees")
+  if item.label and item.label:lower() == normalized_text then
+    return true
+  end
+
+  -- Check against insertText (e.g., "dbo.Employees")
+  if item.insertText then
+    local insert_normalized = item.insertText:lower()
+
+    -- Match if inserted text equals insertText
+    if insert_normalized == normalized_text then
+      return true
+    end
+
+    -- Match if inserted text is the last part of insertText
+    -- e.g., insertText="dbo.Employees", inserted="Employees"
+    local insert_parts = vim.split(insert_normalized, "%.", { plain = true })
+    if insert_parts[#insert_parts] == normalized_text then
+      return true
+    end
+  end
+
+  -- Check against filterText
+  if item.filterText and item.filterText:lower() == normalized_text then
+    return true
+  end
+
+  return false
+end
+
+---Build full path for an item based on its data
+---@param item_data table Item data with type, name, schema, etc.
+---@param connection table Connection context
+---@return string? path Full qualified path or nil
+local function build_item_path(item_data, connection)
+  local item_type = item_data.type
+
+  if item_type == "database" then
+    -- Database: just the name
+    return item_data.name or item_data.label
+
+  elseif item_type == "schema" then
+    -- Schema: database.schema
+    local database = connection.database and connection.database.db_name or item_data.database
+    local schema = item_data.name or item_data.schema
+    if database and schema then
+      return string.format("%s.%s", database, schema)
+    end
+    return schema
+
+  elseif item_type == "table" or item_type == "view" then
+    -- Table/View: schema.table (or database.schema.table if available)
+    local schema = item_data.schema or "dbo"
+    local name = item_data.name or item_data.table_name
+    if schema and name then
+      return string.format("%s.%s", schema, name)
+    end
+    return name
+
+  elseif item_type == "column" then
+    -- Column: table.column (or schema.table.column)
+    local table_name = item_data.table_name or item_data.table
+    local column_name = item_data.name or item_data.column_name
+
+    if table_name and column_name then
+      -- Include schema if available
+      if item_data.schema then
+        return string.format("%s.%s.%s", item_data.schema, table_name, column_name)
+      else
+        return string.format("%s.%s", table_name, column_name)
+      end
+    end
+    return column_name
+
+  elseif item_type == "procedure" or item_type == "function" then
+    -- Procedure/Function: schema.name
+    local schema = item_data.schema or "dbo"
+    local name = item_data.name
+    if schema and name then
+      return string.format("%s.%s", schema, name)
+    end
+    return name
+
+  end
+
+  -- Fallback: just return name
+  return item_data.name or item_data.label
+end
+
+---Record item selection in UsageTracker
+---@param ctx table Completion context
+---@param item table Completion item that was selected
+local function record_item_selection(ctx, item)
+  -- Get connection from context
+  local connection = ctx.connection or ctx.provider_ctx.connection
+
+  if not connection or not connection.connection_string then
+    return  -- No connection available
+  end
+
+  -- Determine item type and path from item.data
+  local item_data = item.data
+  if not item_data or not item_data.type then
+    return  -- No type information
+  end
+
+  -- Build full path for the item
+  local item_path = build_item_path(item_data, connection)
+
+  if not item_path then
+    return  -- Could not build path
+  end
+
+  -- Record selection
+  UsageTracker.record_selection(connection, item_data.type, item_path)
+
+  -- Debug log
+  local Config = require('ssns.config')
+  local config = Config.get()
+  if config.completion and config.completion.debug then
+    Debug.log(string.format("[USAGE] Recorded selection: %s → %s",
+      item_data.type, item_path))
+  end
+end
+
+---Setup selection tracking for completion items
+---Defers execution to check what was inserted after completion
+---@param ctx table Completion context
+---@param items table[] Array of completion items
+local function setup_selection_tracker(ctx, items)
+  -- Wrap in pcall for error handling
+  local success, err = pcall(function()
+    -- Only track if enabled in config
+    local Config = require('ssns.config')
+    local config = Config.get()
+
+    if not config.completion or not config.completion.track_usage then
+      return
+    end
+
+    -- Defer to next tick (after completion inserts text)
+    vim.defer_fn(function()
+      -- Another pcall inside the deferred function
+      pcall(function()
+        -- Get cursor position
+        local cursor = vim.api.nvim_win_get_cursor(0)
+        local line = vim.api.nvim_get_current_line()
+        local col = cursor[2]
+
+        -- Extract text before cursor
+        local before_cursor = line:sub(1, col)
+
+        -- Extract the last identifier/object that was inserted
+        local inserted_text = extract_last_identifier(before_cursor)
+
+        if not inserted_text or inserted_text == "" then
+          return
+        end
+
+        -- Try to match against completion items
+        for _, item in ipairs(items) do
+          if matches_completion_item(inserted_text, item) then
+            -- Found matching item - record selection
+            record_item_selection(ctx, item)
+            break
+          end
+        end
+      end)
+    end, 10)  -- 10ms delay
+  end)
+
+  if not success then
+    -- Log error but don't notify user (silent failure for tracking)
+    Debug.log("[USAGE] Selection tracking error: " .. tostring(err))
+  end
+end
+
+-- ============================================================================
+-- Source Class Definition
+-- ============================================================================
+
 ---Constructor for the completion source
 ---@param opts table? User configuration options
 ---@return table source The source instance
@@ -478,219 +698,6 @@ function Source:reset_stats()
   stats.slow_requests = 0
   stats.requests_by_type = {}
   stats.avg_time_ms = 0
-end
-
----Extract the last identifier from text before cursor
----Handles qualified names, bracketed identifiers, etc.
----@param text string Text before cursor
----@return string? identifier Last identifier or nil
-local function extract_last_identifier(text)
-  -- Pattern matches:
-  -- - Simple: "Employees"
-  -- - Qualified: "dbo.Employees" or "schema.table.column"
-  -- - Bracketed: "[Employee Name]"
-  -- - Mixed: "dbo.[Employee Name]"
-
-  -- Try bracketed identifier first: [...]
-  local bracketed = text:match("%[([^%]]+)%]%s*$")
-  if bracketed then
-    return bracketed
-  end
-
-  -- Try qualified path: word.word.word or word
-  local qualified = text:match("([%w_%.]+)%s*$")
-  if qualified then
-    -- Return just the last part after final dot
-    local parts = vim.split(qualified, "%.", { plain = true })
-    return parts[#parts]
-  end
-
-  return nil
-end
-
----Check if inserted text matches a completion item
----@param inserted_text string Text that was inserted
----@param item table Completion item
----@return boolean matches True if it matches
-local function matches_completion_item(inserted_text, item)
-  -- Normalize for comparison (case-insensitive, trim whitespace)
-  local normalized_text = inserted_text:lower():gsub("^%s+", ""):gsub("%s+$", "")
-
-  -- Check against label (e.g., "Employees")
-  if item.label and item.label:lower() == normalized_text then
-    return true
-  end
-
-  -- Check against insertText (e.g., "dbo.Employees")
-  if item.insertText then
-    local insert_normalized = item.insertText:lower()
-
-    -- Match if inserted text equals insertText
-    if insert_normalized == normalized_text then
-      return true
-    end
-
-    -- Match if inserted text is the last part of insertText
-    -- e.g., insertText="dbo.Employees", inserted="Employees"
-    local insert_parts = vim.split(insert_normalized, "%.", { plain = true })
-    if insert_parts[#insert_parts] == normalized_text then
-      return true
-    end
-  end
-
-  -- Check against filterText
-  if item.filterText and item.filterText:lower() == normalized_text then
-    return true
-  end
-
-  return false
-end
-
----Build full path for an item based on its data
----@param item_data table Item data with type, name, schema, etc.
----@param connection table Connection context
----@return string? path Full qualified path or nil
-local function build_item_path(item_data, connection)
-  local item_type = item_data.type
-
-  if item_type == "database" then
-    -- Database: just the name
-    return item_data.name or item_data.label
-
-  elseif item_type == "schema" then
-    -- Schema: database.schema
-    local database = connection.database and connection.database.db_name or item_data.database
-    local schema = item_data.name or item_data.schema
-    if database and schema then
-      return string.format("%s.%s", database, schema)
-    end
-    return schema
-
-  elseif item_type == "table" or item_type == "view" then
-    -- Table/View: schema.table (or database.schema.table if available)
-    local schema = item_data.schema or "dbo"
-    local name = item_data.name or item_data.table_name
-    if schema and name then
-      return string.format("%s.%s", schema, name)
-    end
-    return name
-
-  elseif item_type == "column" then
-    -- Column: table.column (or schema.table.column)
-    local table_name = item_data.table_name or item_data.table
-    local column_name = item_data.name or item_data.column_name
-
-    if table_name and column_name then
-      -- Include schema if available
-      if item_data.schema then
-        return string.format("%s.%s.%s", item_data.schema, table_name, column_name)
-      else
-        return string.format("%s.%s", table_name, column_name)
-      end
-    end
-    return column_name
-
-  elseif item_type == "procedure" or item_type == "function" then
-    -- Procedure/Function: schema.name
-    local schema = item_data.schema or "dbo"
-    local name = item_data.name
-    if schema and name then
-      return string.format("%s.%s", schema, name)
-    end
-    return name
-
-  end
-
-  -- Fallback: just return name
-  return item_data.name or item_data.label
-end
-
----Record item selection in UsageTracker
----@param ctx table Completion context
----@param item table Completion item that was selected
-local function record_item_selection(ctx, item)
-  -- Get connection from context
-  local connection = ctx.connection or ctx.provider_ctx.connection
-
-  if not connection or not connection.connection_string then
-    return  -- No connection available
-  end
-
-  -- Determine item type and path from item.data
-  local item_data = item.data
-  if not item_data or not item_data.type then
-    return  -- No type information
-  end
-
-  -- Build full path for the item
-  local item_path = build_item_path(item_data, connection)
-
-  if not item_path then
-    return  -- Could not build path
-  end
-
-  -- Record selection
-  UsageTracker.record_selection(connection, item_data.type, item_path)
-
-  -- Debug log
-  local Config = require('ssns.config')
-  local config = Config.get()
-  if config.completion and config.completion.debug then
-    Debug.log(string.format("[USAGE] Recorded selection: %s → %s",
-      item_data.type, item_path))
-  end
-end
-
----Setup selection tracking for completion items
----Defers execution to check what was inserted after completion
----@param ctx table Completion context
----@param items table[] Array of completion items
-local function setup_selection_tracker(ctx, items)
-  -- Wrap in pcall for error handling
-  local success, err = pcall(function()
-    -- Only track if enabled in config
-    local Config = require('ssns.config')
-    local config = Config.get()
-
-    if not config.completion or not config.completion.track_usage then
-      return
-    end
-
-    -- Defer to next tick (after completion inserts text)
-    vim.defer_fn(function()
-      -- Another pcall inside the deferred function
-      pcall(function()
-        -- Get cursor position
-        local cursor = vim.api.nvim_win_get_cursor(0)
-        local line = vim.api.nvim_get_current_line()
-        local col = cursor[2]
-
-        -- Extract text before cursor
-        local before_cursor = line:sub(1, col)
-
-        -- Extract the last identifier/object that was inserted
-        local inserted_text = extract_last_identifier(before_cursor)
-
-        if not inserted_text or inserted_text == "" then
-          return
-        end
-
-        -- Try to match against completion items
-        for _, item in ipairs(items) do
-          if matches_completion_item(inserted_text, item) then
-            -- Found matching item - record selection
-            record_item_selection(ctx, item)
-            break
-          end
-        end
-      end)
-    end, 10)  -- 10ms delay
-  end)
-
-  if not success then
-    -- Log error but don't notify user (silent failure for tracking)
-    Debug.log("[USAGE] Selection tracking error: " .. tostring(err))
-  end
 end
 
 -- Create and return a singleton instance for blink.cmp

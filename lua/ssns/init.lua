@@ -247,6 +247,85 @@ function Ssns._register_commands()
     nargs = 0,
     desc = "Toggle usage tracking on/off",
   })
+
+  -- Testing Framework Commands
+
+  -- :SSNSRunTests - Run all IntelliSense tests
+  vim.api.nvim_create_user_command("SSNSRunTests", function()
+    Ssns.run_all_tests()
+  end, {
+    nargs = 0,
+    desc = "Run all SSNS IntelliSense tests",
+  })
+
+  -- :SSNSRunTest <number> - Run a specific test by number
+  vim.api.nvim_create_user_command("SSNSRunTest", function(opts)
+    local test_number = tonumber(opts.args)
+    if not test_number then
+      vim.notify("Invalid test number. Usage: :SSNSRunTest <number>", vim.log.levels.ERROR)
+      return
+    end
+    Ssns.run_test(test_number)
+  end, {
+    nargs = 1,
+    desc = "Run a specific SSNS test by number (1-40)",
+  })
+
+  -- :SSNSRunTestCategory <category> - Run tests in a specific category
+  vim.api.nvim_create_user_command("SSNSRunTestCategory", function(opts)
+    Ssns.run_category_tests(opts.args)
+  end, {
+    nargs = 1,
+    desc = "Run tests in a specific category folder",
+    complete = function()
+      -- Get list of category folders from the tests directory
+      local tests_path = vim.fn.stdpath("config") .. "/lua/ssns/testing/tests"
+      local categories = {}
+
+      local handle = vim.loop.fs_scandir(tests_path)
+      if handle then
+        while true do
+          local name, type = vim.loop.fs_scandir_next(handle)
+          if not name then break end
+          if type == "directory" then
+            table.insert(categories, name)
+          end
+        end
+      end
+
+      table.sort(categories)
+      return categories
+    end,
+  })
+
+  -- :SSNSRunTestsByType <type> - Run tests by completion type
+  vim.api.nvim_create_user_command("SSNSRunTestsByType", function(opts)
+    Ssns.run_tests_by_type(opts.args)
+  end, {
+    nargs = 1,
+    desc = "Run tests by completion type (table, column, schema, etc.)",
+    complete = function()
+      -- Return common completion types
+      return {
+        "table",
+        "column",
+        "schema",
+        "object",
+        "database",
+        "function",
+        "procedure",
+        "view",
+      }
+    end,
+  })
+
+  -- :SSNSViewTestResults - Open test results markdown file
+  vim.api.nvim_create_user_command("SSNSViewTestResults", function()
+    Ssns.view_test_results()
+  end, {
+    nargs = 0,
+    desc = "Open the test results markdown file",
+  })
 end
 
 ---Toggle the tree UI
@@ -884,6 +963,66 @@ function Ssns.toggle_usage_tracking()
   -- Notify user
   local status = config.completion.track_usage and "enabled" or "disabled"
   vim.notify(string.format("Usage tracking %s", status), vim.log.levels.INFO)
+end
+
+---Run all IntelliSense tests
+function Ssns.run_all_tests()
+  local Testing = require('ssns.testing')
+  Testing.run_all_tests()
+end
+
+---Run a specific test by number
+---@param test_number number The test number to run
+function Ssns.run_test(test_number)
+  local Testing = require('ssns.testing')
+  Testing.run_test(test_number)
+end
+
+---Run tests in a specific category folder
+---@param category string Category folder name
+function Ssns.run_category_tests(category)
+  local Testing = require('ssns.testing')
+  local results = Testing.runner.run_category_tests(category)
+
+  if #results == 0 then
+    vim.notify(string.format("No tests found in category: %s", category), vim.log.levels.WARN)
+    return
+  end
+
+  -- Display results
+  Testing.reporter.display_results(results)
+
+  -- Write markdown report
+  local output_path = vim.fn.stdpath("data") .. string.format("/ssns/test_results_%s.md", category)
+  local success = Testing.reporter.write_markdown(results, output_path)
+
+  if success then
+    vim.notify(string.format("Test results written to: %s", output_path), vim.log.levels.INFO)
+  else
+    vim.notify("Failed to write test results to file", vim.log.levels.ERROR)
+  end
+end
+
+---Run tests filtered by completion type
+---@param completion_type string The completion type (table, column, schema, etc.)
+function Ssns.run_tests_by_type(completion_type)
+  local Testing = require('ssns.testing')
+  Testing.run_tests_by_type(completion_type)
+end
+
+---Open the test results markdown file
+function Ssns.view_test_results()
+  local results_path = vim.fn.stdpath("data") .. "/ssns/test_results.md"
+
+  -- Check if file exists
+  if vim.fn.filereadable(results_path) ~= 1 then
+    vim.notify("Test results file not found. Run :SSNSRunTests first.", vim.log.levels.WARN)
+    return
+  end
+
+  -- Open file in a new buffer
+  vim.cmd("edit " .. vim.fn.fnameescape(results_path))
+  vim.notify("Opened test results: " .. results_path, vim.log.levels.INFO)
 end
 
 return Ssns
