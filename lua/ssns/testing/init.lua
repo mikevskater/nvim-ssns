@@ -11,6 +11,18 @@ local utils = require("ssns.testing.utils")
 M.config = {
   test_file = vim.fn.stdpath("data") .. "/ssns/roadmap/phase-10/test_queries.sql",
   output_dir = vim.fn.stdpath("data") .. "/ssns/test_results",
+
+  -- Connection strings by database type
+  connections = {
+    sqlserver = "sqlserver://.\\SQLEXPRESS",
+    -- Future: Add other database types
+    -- postgres = "postgres://localhost/test_db",
+    -- mysql = "mysql://localhost/test_db",
+    -- sqlite = "sqlite://./test.db",
+  },
+
+  -- Default connection type for tests
+  default_connection_type = "sqlserver",
 }
 
 --- Initialize the testing framework
@@ -108,6 +120,64 @@ function M.run_tests_by_type(completion_type, opts)
 
   -- Write markdown report
   local output_path = vim.fn.stdpath("data") .. string.format("/ssns/test_results_%s.md", completion_type)
+  local success = reporter.write_markdown(results, output_path)
+
+  if success then
+    vim.notify(string.format("Test results written to: %s", output_path), vim.log.levels.INFO)
+  else
+    vim.notify("Failed to write test results to file", vim.log.levels.ERROR)
+  end
+
+  return results
+end
+
+--- Run tests for a specific database type
+--- @param database_type string The database type (sqlserver, postgres, mysql, sqlite)
+--- @param opts table|nil Optional run configuration
+--- @return table Test results
+function M.run_tests_by_database(database_type, opts)
+  opts = opts or {}
+
+  vim.notify(string.format("Running tests for database type: %s", database_type), vim.log.levels.INFO)
+
+  -- Scan for all test files
+  local all_test_files = utils.scan_test_folders()
+
+  -- Filter by database type
+  local filtered_files = {}
+  for _, test_file in ipairs(all_test_files) do
+    if test_file.database_type == database_type then
+      table.insert(filtered_files, test_file)
+    end
+  end
+
+  if #filtered_files == 0 then
+    vim.notify(string.format("No tests found for database type: %s", database_type), vim.log.levels.WARN)
+    return {}
+  end
+
+  vim.notify(string.format("Found %d tests for %s", #filtered_files, database_type), vim.log.levels.INFO)
+
+  local results = {}
+
+  -- Run each test
+  for i, test_file in ipairs(filtered_files) do
+    if i % 10 == 0 or i == 1 then
+      vim.notify(string.format("Running test %d/%d...", i, #filtered_files), vim.log.levels.INFO)
+    end
+
+    local result = runner.run_single_test(test_file.path, vim.tbl_extend("force", opts, { database_type = test_file.database_type }))
+    result.category = test_file.category
+    result.name = test_file.name
+    result.database_type = test_file.database_type
+    table.insert(results, result)
+  end
+
+  -- Display results
+  reporter.display_results(results)
+
+  -- Write markdown report
+  local output_path = vim.fn.stdpath("data") .. string.format("/ssns/test_results_%s.md", database_type)
   local success = reporter.write_markdown(results, output_path)
 
   if success then

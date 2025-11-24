@@ -77,6 +77,32 @@ function Cache.find_server(server_name)
   return Cache.servers_by_name[server_name]
 end
 
+---Find or create a server
+---@param server_name string Server name
+---@param connection_string string Connection string
+---@return ServerClass? server The server or nil if creation failed
+---@return string? error_message Error message if creation failed
+function Cache.find_or_create_server(server_name, connection_string)
+  -- Check if server already exists
+  local existing = Cache.find_server(server_name)
+  if existing then
+    return existing, nil
+  end
+
+  -- Create new server
+  local Factory = require('ssns.factory')
+  local server, err = Factory.create_server(server_name, connection_string)
+
+  if not server then
+    return nil, err
+  end
+
+  -- Add to cache
+  Cache.add_server(server)
+
+  return server, nil
+end
+
 ---Find a database by server name and database name
 ---@param server_name string
 ---@param database_name string

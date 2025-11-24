@@ -47,7 +47,7 @@ end
 
 --- Recursively scan test folders and return all test files
 --- @param base_path string? Base path to scan (defaults to testing/tests)
---- @return table test_files Array of {path: string, category: string, name: string}
+--- @return table test_files Array of {path: string, category: string, database_type: string, name: string}
 function M.scan_test_folders(base_path)
   base_path = base_path or (vim.fn.stdpath("data") .. "/ssns/lua/ssns/testing/tests")
 
@@ -59,8 +59,8 @@ function M.scan_test_folders(base_path)
 
   local test_files = {}
 
-  -- Scan directory recursively
-  local function scan_dir(dir_path, category)
+  -- Scan directory recursively with three levels: database_type / category / test_file
+  local function scan_dir(dir_path, database_type, category)
     local handle = vim.loop.fs_scandir(dir_path)
     if not handle then
       return
@@ -75,21 +75,26 @@ function M.scan_test_folders(base_path)
       local full_path = dir_path .. "/" .. name
 
       if type == "directory" then
-        -- Recursively scan subdirectory
-        -- Category is the directory name (e.g., "01_schema_table_qualification")
-        scan_dir(full_path, name)
+        if not database_type then
+          -- First level: database type folder (sqlserver, postgres, mysql, sqlite)
+          scan_dir(full_path, name, nil)
+        elseif not category then
+          -- Second level: category folder (e.g., "01_schema_table_qualification")
+          scan_dir(full_path, database_type, name)
+        end
       elseif type == "file" and name:match("%.lua$") then
         -- Found a test file
         table.insert(test_files, {
           path = full_path,
           category = category or "uncategorized",
+          database_type = database_type or "sqlserver", -- Default to sqlserver for backward compat
           name = name:gsub("%.lua$", ""),
         })
       end
     end
   end
 
-  scan_dir(base_path, nil)
+  scan_dir(base_path, nil, nil)
 
   -- Sort by path for consistent ordering
   table.sort(test_files, function(a, b)
@@ -132,8 +137,9 @@ end
 --- Create mock buffer with test data
 --- Sets up a real buffer with the query text and database context
 --- @param test_data table Test data from test file
+--- @param connection_info table? Connection info { server, database, connection_string }
 --- @return number bufnr The created buffer number
-function M.create_mock_buffer(test_data)
+function M.create_mock_buffer(test_data, connection_info)
   -- Create a new buffer
   local bufnr = vim.api.nvim_create_buf(false, true) -- Not listed, scratch buffer
 
@@ -144,10 +150,15 @@ function M.create_mock_buffer(test_data)
   local lines = vim.split(test_data.query, "\n", { plain = true })
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
 
-  -- Set database context (db_key format: "server_name:database_name")
-  -- We'll use a fake server name for testing
-  local db_key = string.format("test_server:%s", test_data.database)
-  vim.api.nvim_buf_set_var(bufnr, "ssns_db_key", db_key)
+  -- Set database context using REAL connection
+  if connection_info then
+    local db_key = string.format("%s:%s", connection_info.server.name, connection_info.database.db_name)
+    vim.api.nvim_buf_set_var(bufnr, "ssns_db_key", db_key)
+  else
+    -- Fallback to fake server name if no connection info provided
+    local db_key = string.format("test_server:%s", test_data.database)
+    vim.api.nvim_buf_set_var(bufnr, "ssns_db_key", db_key)
+  end
 
   return bufnr
 end

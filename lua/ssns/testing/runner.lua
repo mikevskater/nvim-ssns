@@ -3,10 +3,63 @@
 local M = {}
 
 local utils = require("ssns.testing.utils")
+local Cache = require("ssns.cache")
+
+--- Setup test connection for a specific database
+--- @param test_data table Test data with database field
+--- @param database_type string? Database type from folder structure (sqlserver, postgres, mysql, sqlite)
+--- @return table? connection_info { server, database, connection_string } or nil on error
+--- @return string? error_message Error message if setup failed
+local function setup_test_connection(test_data, database_type)
+  -- Get testing config
+  local testing = require("ssns.testing")
+  local config = testing.config
+
+  -- Determine database type: use folder structure > test_data.db_type > default
+  local db_type = database_type or test_data.db_type or config.default_connection_type
+
+  -- Get base connection string
+  local base_connection = config.connections[db_type]
+  if not base_connection then
+    return nil, string.format("No connection string configured for database type: %s", db_type)
+  end
+
+  -- Build full connection string with database
+  local connection_string = string.format("%s/%s", base_connection, test_data.database)
+
+  -- Server name for cache
+  local server_name = string.format("test_%s", db_type)
+
+  -- Get or create server
+  local server, err = Cache.find_or_create_server(server_name, connection_string)
+  if not server then
+    return nil, string.format("Failed to create server: %s", err or "unknown error")
+  end
+
+  -- Connect to server if not already connected
+  if not server:is_connected() then
+    local connect_success, connect_err = server:connect()
+    if not connect_success then
+      return nil, string.format("Failed to connect to server: %s", connect_err or "unknown error")
+    end
+  end
+
+  -- Get database (load if needed)
+  local database = server:get_database(test_data.database)
+  if not database then
+    return nil, string.format("Database not found: %s", test_data.database)
+  end
+
+  return {
+    server = server,
+    database = database,
+    connection_string = connection_string,
+  }, nil
+end
 
 --- Run a single test file
 --- @param test_file_path string Absolute path to test file
---- @param opts table? Optional configuration { timeout_ms: number }
+--- @param opts table? Optional configuration { timeout_ms: number, database_type: string }
 --- @return table result Test result object
 function M.run_single_test(test_file_path, opts)
   opts = opts or {}
@@ -37,13 +90,24 @@ function M.run_single_test(test_file_path, opts)
   result.database = test_data.database
   result.expected_type = test_data.expected.type
 
+  -- Extract database_type from path (e.g., tests/sqlserver/01_category/test.lua -> sqlserver)
+  local database_type = opts.database_type or test_file_path:match("/tests/([^/]+)/")
+
   -- Start timer
   local start_time = vim.loop.hrtime()
 
-  -- Create mock buffer with test data
+  -- Setup test connection with database_type
+  local connection_info, conn_err = setup_test_connection(test_data, database_type)
+  if not connection_info then
+    result.error = string.format("Failed to setup connection: %s", conn_err or "unknown error")
+    result.duration_ms = (vim.loop.hrtime() - start_time) / 1e6
+    return result
+  end
+
+  -- Create mock buffer with test data and connection info
   local bufnr
   local success, create_err = pcall(function()
-    bufnr = utils.create_mock_buffer(test_data)
+    bufnr = utils.create_mock_buffer(test_data, connection_info)
   end)
 
   if not success then
@@ -113,6 +177,47 @@ function M.run_single_test(test_file_path, opts)
   return result
 end
 
+--- Ensure connection to database is established
+--- @param connection_type string? Database type (default: from config)
+--- @return boolean success True if connection established
+--- @return string? error_message Error message if connection failed
+local function ensure_connection(connection_type)
+  -- Get testing config
+  local testing = require("ssns.testing")
+  local config = testing.config
+
+  -- Use default if not specified
+  connection_type = connection_type or config.default_connection_type
+
+  -- Get connection string
+  local base_connection = config.connections[connection_type]
+  if not base_connection then
+    return false, string.format("No connection string configured for database type: %s", connection_type)
+  end
+
+  -- Server name for cache
+  local server_name = string.format("test_%s", connection_type)
+
+  -- Get or create server (without database)
+  local server, err = Cache.find_or_create_server(server_name, base_connection)
+  if not server then
+    return false, string.format("Failed to create server: %s", err or "unknown error")
+  end
+
+  -- Connect to server if not already connected
+  if not server:is_connected() then
+    local connect_success, connect_err = server:connect()
+    if not connect_success then
+      return false, string.format("Failed to connect to server: %s", connect_err or "unknown error")
+    end
+    vim.notify(string.format("Connected to %s test database", connection_type), vim.log.levels.INFO)
+  else
+    vim.notify(string.format("Already connected to %s test database", connection_type), vim.log.levels.INFO)
+  end
+
+  return true, nil
+end
+
 --- Run all tests in the test directory
 --- @param opts table? Optional configuration
 --- @return table results Array of test results
@@ -127,21 +232,54 @@ function M.run_all_tests(opts)
     return {}
   end
 
-  vim.notify(string.format("Running %d tests...", #test_files), vim.log.levels.INFO)
+  -- Group tests by database type
+  local tests_by_db = {}
+  for _, test_file in ipairs(test_files) do
+    local db_type = test_file.database_type
+    if not tests_by_db[db_type] then
+      tests_by_db[db_type] = {}
+    end
+    table.insert(tests_by_db[db_type], test_file)
+  end
+
+  vim.notify(string.format("Running %d tests across %d database types...", #test_files, vim.tbl_count(tests_by_db)), vim.log.levels.INFO)
 
   local results = {}
 
-  -- Run each test
-  for i, test_file in ipairs(test_files) do
-    -- Show progress
-    if i % 10 == 0 or i == 1 then
-      vim.notify(string.format("Running test %d/%d...", i, #test_files), vim.log.levels.INFO)
-    end
+  -- Run tests for each database type
+  for db_type, db_test_files in pairs(tests_by_db) do
+    vim.notify(string.format("Testing %s (%d tests)...", db_type, #db_test_files), vim.log.levels.INFO)
 
-    local result = M.run_single_test(test_file.path, opts)
-    result.category = test_file.category
-    result.name = test_file.name
-    table.insert(results, result)
+    -- Ensure connection for this database type
+    local conn_success, conn_err = ensure_connection(db_type)
+    if not conn_success then
+      vim.notify(string.format("Failed to connect to %s: %s", db_type, conn_err), vim.log.levels.ERROR)
+      -- Skip tests for this database type
+      for _, test_file in ipairs(db_test_files) do
+        table.insert(results, {
+          path = test_file.path,
+          category = test_file.category,
+          name = test_file.name,
+          database_type = test_file.database_type,
+          passed = false,
+          error = string.format("Database connection failed: %s", conn_err),
+        })
+      end
+    else
+      -- Run tests for this database type
+      for i, test_file in ipairs(db_test_files) do
+        -- Show progress
+        if i % 10 == 0 or i == 1 then
+          vim.notify(string.format("[%s] Running test %d/%d...", db_type, i, #db_test_files), vim.log.levels.INFO)
+        end
+
+        local result = M.run_single_test(test_file.path, vim.tbl_extend("force", opts, { database_type = test_file.database_type }))
+        result.category = test_file.category
+        result.name = test_file.name
+        result.database_type = test_file.database_type
+        table.insert(results, result)
+      end
+    end
   end
 
   vim.notify(string.format("Completed %d tests", #results), vim.log.levels.INFO)
@@ -181,9 +319,10 @@ function M.run_category_tests(category_folder, opts)
   for i, test_file in ipairs(category_tests) do
     vim.notify(string.format("Running test %d/%d: %s", i, #category_tests, test_file.name), vim.log.levels.INFO)
 
-    local result = M.run_single_test(test_file.path, opts)
+    local result = M.run_single_test(test_file.path, vim.tbl_extend("force", opts, { database_type = test_file.database_type }))
     result.category = test_file.category
     result.name = test_file.name
+    result.database_type = test_file.database_type
     table.insert(results, result)
   end
 
@@ -212,9 +351,10 @@ function M.run_tests_by_type(completion_type, opts)
     if test_data and test_data.expected.type == completion_type then
       vim.notify(string.format("Running test %s (%s)", test_file.name, completion_type), vim.log.levels.INFO)
 
-      local result = M.run_single_test(test_file.path, opts)
+      local result = M.run_single_test(test_file.path, vim.tbl_extend("force", opts, { database_type = test_file.database_type }))
       result.category = test_file.category
       result.name = test_file.name
+      result.database_type = test_file.database_type
       table.insert(filtered_results, result)
     end
   end
