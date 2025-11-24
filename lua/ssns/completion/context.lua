@@ -104,6 +104,74 @@ function Context.detect_with_treesitter(bufnr, row, col)
 
   Debug.log(string.format("[CONTEXT] Node at cursor: type='%s'", cursor_node:type()))
 
+  -- NEW: Build scope tree for alias/CTE/table resolution (Phase 2.1)
+  local scope_tree = nil
+  local cursor_scope = nil
+  local aliases = {}
+  local ctes = {}
+  local tables_in_scope = nil
+
+  -- Try to build scope tree (graceful failure if not available)
+  local success, result = pcall(function()
+    local ScopeTracker = require('ssns.completion.metadata.scope_tracker')
+    return ScopeTracker.build_scope_tree(text, bufnr, nil) -- connection optional
+  end)
+
+  if success and result then
+    scope_tree = result
+    Debug.log("[CONTEXT] Scope tree built successfully")
+
+    -- Get scope at cursor position
+    local cursor_pos = {row, col}
+    local ScopeTracker = require('ssns.completion.metadata.scope_tracker')
+    cursor_scope = ScopeTracker.get_scope_at_cursor(scope_tree, cursor_pos)
+
+    if cursor_scope then
+      Debug.log(string.format("[CONTEXT] Cursor scope type: %s", cursor_scope.type))
+    end
+
+    -- Extract aliases at cursor position
+    local alias_success, alias_result = pcall(function()
+      return ScopeTracker.get_available_aliases(scope_tree, cursor_pos)
+    end)
+
+    if alias_success and alias_result then
+      aliases = alias_result
+      Debug.log(string.format("[CONTEXT] Aliases at cursor: %d", vim.tbl_count(aliases)))
+    end
+
+    -- Extract CTEs at cursor position
+    local cte_success, cte_result = pcall(function()
+      return ScopeTracker.get_available_ctes(scope_tree, cursor_pos)
+    end)
+
+    if cte_success and cte_result then
+      ctes = cte_result
+      Debug.log(string.format("[CONTEXT] CTEs at cursor: %d", vim.tbl_count(ctes)))
+    end
+
+    -- Extract table references in current scope
+    if cursor_scope and cursor_scope.aliases then
+      tables_in_scope = {}
+      for alias, table_name in pairs(cursor_scope.aliases) do
+        table.insert(tables_in_scope, {
+          alias = alias,
+          table = table_name,
+          scope = cursor_scope.type
+        })
+      end
+      Debug.log(string.format("[CONTEXT] Tables in scope: %d", #tables_in_scope))
+    end
+  else
+    Debug.log("[CONTEXT] Scope tree building failed or unavailable, continuing without scope info")
+  end
+
+  -- Store scope info for handlers to access
+  Context._current_scope_tree = scope_tree
+  Context._current_aliases = aliases
+  Context._current_ctes = ctes
+  Context._current_tables_in_scope = tables_in_scope
+
   -- Check if we're in an ERROR node or child of ERROR node (incomplete SQL)
   local error_node = nil
   if cursor_node:type() == "ERROR" then
@@ -139,7 +207,13 @@ function Context.detect_with_treesitter(bufnr, row, col)
   local statement_node = Context._find_containing_statement(cursor_node)
   if not statement_node then
     Debug.log("[CONTEXT] No containing statement found")
-    return { type = Context.Type.UNKNOWN, prefix = before_cursor }
+    local context = { type = Context.Type.UNKNOWN, prefix = before_cursor }
+    -- Inject scope information (Phase 2.1)
+    context.scope_tree = scope_tree
+    context.tables_in_scope = tables_in_scope
+    context.aliases = aliases
+    context.ctes = ctes
+    return context
   end
 
   -- Step 3: Extract keywords recursively from parent chain (NEW)
@@ -156,10 +230,16 @@ function Context.detect_with_treesitter(bufnr, row, col)
 
   -- Step 5: Fallback to unknown context
   Debug.log("[CONTEXT] No valid context determined, returning UNKNOWN")
-  return {
+  local context = {
     type = Context.Type.UNKNOWN,
     prefix = before_cursor,
   }
+  -- Inject scope information (Phase 2.1)
+  context.scope_tree = scope_tree
+  context.tables_in_scope = tables_in_scope
+  context.aliases = aliases
+  context.ctes = ctes
+  return context
 end
 
 ---Handle FROM clause context
@@ -180,7 +260,7 @@ function Context._handle_from_context(node, lines, row, col)
   local db, schema = before_cursor_lower:match("(%w+)%.(%w+)%.$")
   if db and schema then
     Debug.log(string.format("[CONTEXT] FROM with cross-db qualifier: database='%s', schema='%s'", db, schema))
-    return {
+    local context = {
       type = Context.Type.TABLE,
       mode = "from_cross_db_qualified",
       trigger = ".",
@@ -191,6 +271,12 @@ function Context._handle_from_context(node, lines, row, col)
       filter_schema = schema,
       omit_schema = true,
     }
+    -- Inject scope information (Phase 2.1)
+    context.scope_tree = Context._current_scope_tree
+    context.tables_in_scope = Context._current_tables_in_scope
+    context.aliases = Context._current_aliases
+    context.ctes = Context._current_ctes
+    return context
   end
 
   -- Check for 2-part name: qualifier. (could be database. OR schema.)
@@ -209,7 +295,7 @@ function Context._handle_from_context(node, lines, row, col)
     if is_schema then
       -- It's a schema - return TABLE context
       Debug.log(string.format("[CONTEXT] FROM with schema qualifier: '%s'", qualifier))
-      return {
+      local context = {
         type = Context.Type.TABLE,
         mode = "from_qualified",
         trigger = ".",
@@ -218,10 +304,16 @@ function Context._handle_from_context(node, lines, row, col)
         filter_schema = qualifier,
         omit_schema = true,
       }
+      -- Inject scope information (Phase 2.1)
+      context.scope_tree = Context._current_scope_tree
+      context.tables_in_scope = Context._current_tables_in_scope
+      context.aliases = Context._current_aliases
+      context.ctes = Context._current_ctes
+      return context
     else
       -- Assume it's a database - return SCHEMA context
       Debug.log(string.format("[CONTEXT] FROM with database qualifier: '%s'", qualifier))
-      return {
+      local context = {
         type = Context.Type.SCHEMA,
         mode = "from_cross_db",
         trigger = ".",
@@ -229,16 +321,28 @@ function Context._handle_from_context(node, lines, row, col)
         database = qualifier,
         filter_database = qualifier,
       }
+      -- Inject scope information (Phase 2.1)
+      context.scope_tree = Context._current_scope_tree
+      context.tables_in_scope = Context._current_tables_in_scope
+      context.aliases = Context._current_aliases
+      context.ctes = Context._current_ctes
+      return context
     end
   else
     -- No qualifier - return TABLE context
     Debug.log("[CONTEXT] FROM without qualifier")
-    return {
+    local context = {
       type = Context.Type.TABLE,
       mode = "from",
       trigger = nil,
       prefix = before_cursor,
     }
+    -- Inject scope information (Phase 2.1)
+    context.scope_tree = Context._current_scope_tree
+    context.tables_in_scope = Context._current_tables_in_scope
+    context.aliases = Context._current_aliases
+    context.ctes = Context._current_ctes
+    return context
   end
 end
 
@@ -260,7 +364,7 @@ function Context._handle_join_context(node, lines, row, col)
   local db, schema = before_cursor_lower:match("(%w+)%.(%w+)%.$")
   if db and schema then
     Debug.log(string.format("[CONTEXT] JOIN with cross-db qualifier: database='%s', schema='%s'", db, schema))
-    return {
+    local context = {
       type = Context.Type.TABLE,
       mode = "join_cross_db_qualified",
       trigger = ".",
@@ -271,6 +375,12 @@ function Context._handle_join_context(node, lines, row, col)
       filter_schema = schema,
       omit_schema = true,
     }
+    -- Inject scope information (Phase 2.1)
+    context.scope_tree = Context._current_scope_tree
+    context.tables_in_scope = Context._current_tables_in_scope
+    context.aliases = Context._current_aliases
+    context.ctes = Context._current_ctes
+    return context
   end
 
   -- Check for 2-part name: qualifier.
@@ -287,7 +397,7 @@ function Context._handle_join_context(node, lines, row, col)
 
     if is_schema then
       Debug.log(string.format("[CONTEXT] JOIN with schema qualifier: '%s'", qualifier))
-      return {
+      local context = {
         type = Context.Type.TABLE,
         mode = "join_qualified",
         trigger = ".",
@@ -296,9 +406,15 @@ function Context._handle_join_context(node, lines, row, col)
         filter_schema = qualifier,
         omit_schema = true,
       }
+      -- Inject scope information (Phase 2.1)
+      context.scope_tree = Context._current_scope_tree
+      context.tables_in_scope = Context._current_tables_in_scope
+      context.aliases = Context._current_aliases
+      context.ctes = Context._current_ctes
+      return context
     else
       Debug.log(string.format("[CONTEXT] JOIN with database qualifier: '%s'", qualifier))
-      return {
+      local context = {
         type = Context.Type.SCHEMA,
         mode = "join_cross_db",
         trigger = ".",
@@ -306,15 +422,27 @@ function Context._handle_join_context(node, lines, row, col)
         database = qualifier,
         filter_database = qualifier,
       }
+      -- Inject scope information (Phase 2.1)
+      context.scope_tree = Context._current_scope_tree
+      context.tables_in_scope = Context._current_tables_in_scope
+      context.aliases = Context._current_aliases
+      context.ctes = Context._current_ctes
+      return context
     end
   else
     Debug.log("[CONTEXT] JOIN without qualifier")
-    return {
+    local context = {
       type = Context.Type.TABLE,
       mode = "join",
       trigger = nil,
       prefix = before_cursor,
     }
+    -- Inject scope information (Phase 2.1)
+    context.scope_tree = Context._current_scope_tree
+    context.tables_in_scope = Context._current_tables_in_scope
+    context.aliases = Context._current_aliases
+    context.ctes = Context._current_ctes
+    return context
   end
 end
 
@@ -332,12 +460,18 @@ function Context._handle_where_context(node, lines, row, col)
   local before_cursor = current_line:sub(1, col)
 
   -- WHERE context is always column completion
-  return {
+  local context = {
     type = Context.Type.COLUMN,
     mode = "where",
     trigger = nil,
     prefix = before_cursor,
   }
+  -- Inject scope information (Phase 2.1)
+  context.scope_tree = Context._current_scope_tree
+  context.tables_in_scope = Context._current_tables_in_scope
+  context.aliases = Context._current_aliases
+  context.ctes = Context._current_ctes
+  return context
 end
 
 ---Handle SELECT clause context
@@ -359,7 +493,7 @@ function Context._handle_select_context(select_node, cursor_node, lines, row, co
   local schema, table_name = before_cursor_lower:match("(%w+)%.(%w+)%.$")
   if schema and table_name then
     Debug.log(string.format("[CONTEXT] SELECT with qualified table: schema='%s', table='%s'", schema, table_name))
-    return {
+    local context = {
       type = Context.Type.COLUMN,
       mode = "select_qualified",
       trigger = ".",
@@ -369,13 +503,19 @@ function Context._handle_select_context(select_node, cursor_node, lines, row, co
       filter_table = table_name,
       omit_table = true,
     }
+    -- Inject scope information (Phase 2.1)
+    context.scope_tree = Context._current_scope_tree
+    context.tables_in_scope = Context._current_tables_in_scope
+    context.aliases = Context._current_aliases
+    context.ctes = Context._current_ctes
+    return context
   end
 
   -- NEW: Check for unqualified table/alias reference: table. or alias.
   local table_or_alias = before_cursor_lower:match("(%w+)%.$")
   if table_or_alias then
     Debug.log(string.format("[CONTEXT] SELECT with table/alias reference: '%s'", table_or_alias))
-    return {
+    local context = {
       type = Context.Type.COLUMN,
       mode = "select_qualified",
       trigger = ".",
@@ -384,6 +524,12 @@ function Context._handle_select_context(select_node, cursor_node, lines, row, co
       filter_table = table_or_alias,
       omit_table = true,
     }
+    -- Inject scope information (Phase 2.1)
+    context.scope_tree = Context._current_scope_tree
+    context.tables_in_scope = Context._current_tables_in_scope
+    context.aliases = Context._current_aliases
+    context.ctes = Context._current_ctes
+    return context
   end
 
   -- EXISTING: Check if we're after FROM (which means we're in FROM clause, not SELECT list)
@@ -402,12 +548,18 @@ function Context._handle_select_context(select_node, cursor_node, lines, row, co
   end
 
   -- In SELECT list - column completion
-  return {
+  local context = {
     type = Context.Type.COLUMN,
     mode = "select",
     trigger = nil,
     prefix = before_cursor,
   }
+  -- Inject scope information (Phase 2.1)
+  context.scope_tree = Context._current_scope_tree
+  context.tables_in_scope = Context._current_tables_in_scope
+  context.aliases = Context._current_aliases
+  context.ctes = Context._current_ctes
+  return context
 end
 
 ---Handle INSERT context
@@ -424,7 +576,7 @@ function Context._handle_insert_context(node, lines, row, col)
   local schema = before_cursor_lower:match("into%s+(%w+)%.$")
 
   if schema then
-    return {
+    local context = {
       type = Context.Type.TABLE,
       mode = "insert_qualified",
       trigger = ".",
@@ -433,13 +585,25 @@ function Context._handle_insert_context(node, lines, row, col)
       filter_schema = schema,
       omit_schema = true,
     }
+    -- Inject scope information (Phase 2.1)
+    context.scope_tree = Context._current_scope_tree
+    context.tables_in_scope = Context._current_tables_in_scope
+    context.aliases = Context._current_aliases
+    context.ctes = Context._current_ctes
+    return context
   else
-    return {
+    local context = {
       type = Context.Type.TABLE,
       mode = "insert",
       trigger = nil,
       prefix = before_cursor,
     }
+    -- Inject scope information (Phase 2.1)
+    context.scope_tree = Context._current_scope_tree
+    context.tables_in_scope = Context._current_tables_in_scope
+    context.aliases = Context._current_aliases
+    context.ctes = Context._current_ctes
+    return context
   end
 end
 
@@ -457,7 +621,7 @@ function Context._handle_update_context(node, lines, row, col)
   local schema = before_cursor_lower:match("update%s+(%w+)%.$")
 
   if schema then
-    return {
+    local context = {
       type = Context.Type.TABLE,
       mode = "update_qualified",
       trigger = ".",
@@ -466,13 +630,25 @@ function Context._handle_update_context(node, lines, row, col)
       filter_schema = schema,
       omit_schema = true,
     }
+    -- Inject scope information (Phase 2.1)
+    context.scope_tree = Context._current_scope_tree
+    context.tables_in_scope = Context._current_tables_in_scope
+    context.aliases = Context._current_aliases
+    context.ctes = Context._current_ctes
+    return context
   else
-    return {
+    local context = {
       type = Context.Type.TABLE,
       mode = "update",
       trigger = nil,
       prefix = before_cursor,
     }
+    -- Inject scope information (Phase 2.1)
+    context.scope_tree = Context._current_scope_tree
+    context.tables_in_scope = Context._current_tables_in_scope
+    context.aliases = Context._current_aliases
+    context.ctes = Context._current_ctes
+    return context
   end
 end
 
@@ -490,7 +666,7 @@ function Context._handle_delete_context(node, lines, row, col)
   local schema = before_cursor_lower:match("from%s+(%w+)%.$")
 
   if schema then
-    return {
+    local context = {
       type = Context.Type.TABLE,
       mode = "delete_qualified",
       trigger = ".",
@@ -499,13 +675,25 @@ function Context._handle_delete_context(node, lines, row, col)
       filter_schema = schema,
       omit_schema = true,
     }
+    -- Inject scope information (Phase 2.1)
+    context.scope_tree = Context._current_scope_tree
+    context.tables_in_scope = Context._current_tables_in_scope
+    context.aliases = Context._current_aliases
+    context.ctes = Context._current_ctes
+    return context
   else
-    return {
+    local context = {
       type = Context.Type.TABLE,
       mode = "delete",
       trigger = nil,
       prefix = before_cursor,
     }
+    -- Inject scope information (Phase 2.1)
+    context.scope_tree = Context._current_scope_tree
+    context.tables_in_scope = Context._current_tables_in_scope
+    context.aliases = Context._current_aliases
+    context.ctes = Context._current_ctes
+    return context
   end
 end
 
@@ -690,13 +878,19 @@ function Context._detect_function_parameter_context(cursor_node, lines, row, col
             local current_line = lines[row] or ""
             local before_cursor = current_line:sub(1, col)
 
-            return {
+            local context = {
               type = Context.Type.COLUMN,
               mode = "function_parameter",
               function_name = func_name,
               trigger = nil,
               prefix = before_cursor,
             }
+            -- Inject scope information (Phase 2.1)
+            context.scope_tree = Context._current_scope_tree
+            context.tables_in_scope = Context._current_tables_in_scope
+            context.aliases = Context._current_aliases
+            context.ctes = Context._current_ctes
+            return context
           end
         end
       end
