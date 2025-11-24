@@ -100,35 +100,59 @@ function TablesProvider._get_completions_impl(ctx)
   local omit_schema = sql_context.omit_schema or false -- Don't include schema in insertText if already typed
   local filter_schema = sql_context.filter_schema -- Only show objects from this schema
 
+  -- Determine what types to include based on context mode
+  local mode = sql_context.mode or "unknown"
+  local include_tables = true
+  local include_views = true
+  local include_synonyms = true
+  local include_functions = false  -- DEFAULT: Don't include functions in FROM/JOIN
+
+  -- Adjust based on context mode
+  if mode:match("^insert") or mode:match("^update") or mode:match("^delete") then
+    -- DML statements: only tables (views/synonyms are read-only)
+    include_views = false
+    include_synonyms = false
+    include_functions = false
+  elseif mode:match("^from") or mode:match("^join") then
+    -- FROM/JOIN: tables, views, synonyms - NOT functions
+    -- (Functions can't be selected from unless they're table-valued, which is rare)
+    include_functions = false
+  elseif mode == "qualified_partial" or mode == "qualified_bracket" then
+    -- Qualified context (schema.): include all queryable types
+    include_functions = false  -- Still no scalar functions in FROM context
+  end
+
   local items = {}
 
   -- Get database adapter to check features
   local adapter = database:get_adapter()
 
-  -- Collect tables
-  local tables = TablesProvider._collect_tables(database, show_schema_prefix, omit_schema, filter_schema)
-  for _, item in ipairs(tables) do
-    table.insert(items, item)
+  -- Collect tables (if enabled)
+  if include_tables then
+    local tables = TablesProvider._collect_tables(database, show_schema_prefix, omit_schema, filter_schema)
+    for _, item in ipairs(tables) do
+      table.insert(items, item)
+    end
   end
 
-  -- Collect views (if database supports them)
-  if adapter.features and adapter.features.views then
+  -- Collect views (if enabled and supported)
+  if include_views and adapter.features and adapter.features.views then
     local views = TablesProvider._collect_views(database, show_schema_prefix, omit_schema, filter_schema)
     for _, item in ipairs(views) do
       table.insert(items, item)
     end
   end
 
-  -- Collect synonyms (if database supports them)
-  if adapter.features and adapter.features.synonyms then
+  -- Collect synonyms (if enabled and supported)
+  if include_synonyms and adapter.features and adapter.features.synonyms then
     local synonyms = TablesProvider._collect_synonyms(database, show_schema_prefix, omit_schema, filter_schema)
     for _, item in ipairs(synonyms) do
       table.insert(items, item)
     end
   end
 
-  -- Collect functions (if supported and they can be selected from)
-  if adapter.features and adapter.features.functions then
+  -- Collect functions (if enabled and supported)
+  if include_functions and adapter.features and adapter.features.functions then
     local functions = TablesProvider._collect_functions(database, show_schema_prefix, omit_schema, filter_schema)
     for _, item in ipairs(functions) do
       table.insert(items, item)
