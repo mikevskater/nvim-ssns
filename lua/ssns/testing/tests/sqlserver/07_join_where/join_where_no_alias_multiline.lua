@@ -10,7 +10,7 @@ JOIN
     dbo.DEPARTMENTS ON EMPLOYEES.DepartmentID = DEPARTMENTS.DepartmentID
 WHERE]],
   cursor = {
-    line = 7,
+    line = 6,
     col = 4
   },
   expected = {

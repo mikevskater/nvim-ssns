@@ -5,7 +5,7 @@ return {
   query = [[SELECT * FROM dbo.EMPLOYEES 
 WHERE]],
   cursor = {
-    line = 2,
+    line = 1,
     col = 4
   },
   expected = {
