@@ -45,10 +45,12 @@ local SQL_KEYWORDS = {
   MERGE = true, VALUES = true, OUTPUT = true, RETURNS = true, RETURN = true,
 }
 
--- Multi-character operators
-local MULTI_CHAR_OPERATORS = {
-  ">=", "<=", "<>", "!=", "!<", "!>",
-  "+=", "-=", "*=", "/=", "%=", "::"
+-- Single-character operators (parser combines if needed)
+local SINGLE_CHAR_OPERATORS = {
+  ['='] = true, ['<'] = true, ['>'] = true,
+  ['+'] = true, ['-'] = true, ['/'] = true, ['%'] = true,
+  ['!'] = true, [':'] = true,
+  ['&'] = true, ['|'] = true, ['^'] = true, ['~'] = true,
 }
 
 local Tokenizer = {}
@@ -100,19 +102,6 @@ local function peek(text, pos, offset)
     return nil
   end
   return text:sub(new_pos, new_pos)
-end
-
----Peek ahead multiple characters
----@param text string
----@param pos number
----@param length number
----@return string
-local function peek_substr(text, pos, length)
-  local new_pos = pos + 1
-  if new_pos > #text then
-    return ""
-  end
-  return text:sub(new_pos, new_pos + length - 1)
 end
 
 ---Tokenize SQL text into a token stream
@@ -242,32 +231,17 @@ function Tokenizer.tokenize(text)
         col = col + 2
         i = i + 2
 
-      -- Check for multi-character operators
-      elseif char == '>' or char == '<' or char == '!' or char == '+' or
-             char == '-' or char == '*' or char == '/' or char == '%' or char == ':' then
-        local found_multi = false
-        for _, op in ipairs(MULTI_CHAR_OPERATORS) do
-          if peek_substr(text, i - 1, #op) == op then
-            emit_token()
-            start_token()
-            current_token = op
-            emit_token(TOKEN_TYPE.OPERATOR)
-            col = col + #op
-            i = i + #op
-            found_multi = true
-            break
-          end
-        end
-        if not found_multi then
-          -- Single character operator
-          if char == '*' then
-            emit_single_char_token(char, TOKEN_TYPE.STAR)
-          else
-            emit_single_char_token(char, TOKEN_TYPE.OPERATOR)
-          end
-          col = col + 1
-          i = i + 1
-        end
+      -- Check for star (special - used for SELECT *)
+      elseif char == '*' then
+        emit_single_char_token(char, TOKEN_TYPE.STAR)
+        col = col + 1
+        i = i + 1
+
+      -- Check for single-character operators
+      elseif SINGLE_CHAR_OPERATORS[char] then
+        emit_single_char_token(char, TOKEN_TYPE.OPERATOR)
+        col = col + 1
+        i = i + 1
 
       -- Check for single-character special tokens
       elseif char == '(' then
@@ -292,11 +266,6 @@ function Tokenizer.tokenize(text)
 
       elseif char == ';' then
         emit_single_char_token(char, TOKEN_TYPE.SEMICOLON)
-        col = col + 1
-        i = i + 1
-
-      elseif char == '=' then
-        emit_single_char_token(char, TOKEN_TYPE.OPERATOR)
         col = col + 1
         i = i + 1
 
