@@ -717,6 +717,39 @@ function ScopeTracker._extract_select_scope(node, query_text, parent_scope, bufn
     temp_tables = {},
   }
 
+  -- Extend scope bounds to include following ERROR siblings that contain SQL clause keywords
+  -- This handles multi-line queries where WHERE/GROUP/ORDER/HAVING are on separate lines
+  local sibling = node:next_sibling()
+  while sibling do
+    local sibling_type = sibling:type()
+    if sibling_type == "ERROR" then
+      local error_text = vim.treesitter.get_node_text(sibling, query_text)
+      local error_text_lower = error_text:lower()
+      -- Check if ERROR contains SQL clause keywords that belong to this statement
+      if error_text_lower:match("^%s*where") or
+         error_text_lower:match("^%s*group") or
+         error_text_lower:match("^%s*order") or
+         error_text_lower:match("^%s*having") or
+         error_text_lower:match("^%s*limit") then
+        local _, _, sib_end_row, sib_end_col = sibling:range()
+        select_scope.end_pos = {sib_end_row + 1, sib_end_col}
+        debug_log(string.format("[SCOPE] Extended scope to include ERROR sibling (WHERE/GROUP/ORDER/HAVING): end={%d,%d}",
+          select_scope.end_pos[1], select_scope.end_pos[2]))
+      else
+        break  -- Stop if ERROR doesn't contain expected clause keywords
+      end
+    elseif sibling_type:match("^keyword_") then
+      -- Keywords like keyword_where might be siblings too
+      local _, _, sib_end_row, sib_end_col = sibling:range()
+      select_scope.end_pos = {sib_end_row + 1, sib_end_col}
+      debug_log(string.format("[SCOPE] Extended scope to include keyword sibling: end={%d,%d}",
+        select_scope.end_pos[1], select_scope.end_pos[2]))
+    else
+      break  -- Stop at first non-ERROR, non-keyword sibling
+    end
+    sibling = sibling:next_sibling()
+  end
+
   debug_log(string.format("Created scope: start={%d,%d}, end={%d,%d}",
     select_scope.start_pos[1], select_scope.start_pos[2],
     select_scope.end_pos[1], select_scope.end_pos[2]))
@@ -977,6 +1010,23 @@ function ScopeTracker._extract_aliases_from_statement(node, query_text, scope, b
       for _, found_node in ipairs(found_nodes) do
         local found_type = found_node:type()
         debug_log(string.format("[SCOPE] Found %s inside ERROR node", found_type))
+
+        if found_type == "from" then
+          ScopeTracker._extract_from_aliases(found_node, query_text, scope, bufnr, connection)
+        elseif found_type:match("join") then
+          ScopeTracker._extract_join_aliases(found_node, query_text, scope, bufnr, connection)
+        end
+      end
+      goto continue
+    end
+
+    if child_type == "select" then
+      -- FROM is inside SELECT in tree-sitter SQL grammar
+      debug_log("[SCOPE] Found select node, searching inside for FROM/JOIN")
+      local found_nodes = ScopeTracker._find_nodes_recursive(child, {"from", "join"}, {})
+      for _, found_node in ipairs(found_nodes) do
+        local found_type = found_node:type()
+        debug_log(string.format("[SCOPE] Found %s inside select node", found_type))
 
         if found_type == "from" then
           ScopeTracker._extract_from_aliases(found_node, query_text, scope, bufnr, connection)
@@ -1498,6 +1548,26 @@ function ScopeTracker._extract_aliases_regex_fallback(query_text, scope)
     if not sql_keywords[alias] and not scope.aliases[alias] then
       debug_log(string.format("[SCOPE] Regex fallback found JOIN: %s -> %s (without AS)", alias, schema_table))
       scope.aliases[alias] = schema_table
+    end
+  end
+
+  -- Pattern 5: FROM [schema.]table (no alias - followed by JOIN/WHERE/GROUP/ORDER/ON or end)
+  -- This handles non-aliased FROM tables like: FROM dbo.EMPLOYEES JOIN ...
+  for schema_table in query_lower:gmatch("from%s+([%w%[%]%.]+)%s+[jwgoh]") do
+    local table_name = schema_table:match("%.([^%.]+)$") or schema_table
+    if not scope.aliases[table_name] then
+      debug_log(string.format("[SCOPE] Regex fallback found non-aliased FROM: %s -> %s", table_name, schema_table))
+      scope.aliases[table_name] = schema_table
+    end
+  end
+
+  -- Pattern 6: JOIN [schema.]table ON (no alias)
+  -- This handles non-aliased JOIN tables like: JOIN dbo.DEPARTMENTS ON ...
+  for schema_table in query_lower:gmatch("join%s+([%w%[%]%.]+)%s+on") do
+    local table_name = schema_table:match("%.([^%.]+)$") or schema_table
+    if not scope.aliases[table_name] then
+      debug_log(string.format("[SCOPE] Regex fallback found non-aliased JOIN: %s -> %s", table_name, schema_table))
+      scope.aliases[table_name] = schema_table
     end
   end
 
