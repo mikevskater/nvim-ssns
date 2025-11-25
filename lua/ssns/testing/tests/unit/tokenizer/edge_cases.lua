@@ -314,7 +314,8 @@ return {
             {type = "star", text = "*", line = 1, col = 3},
             {type = "operator", text = "/", line = 1, col = 4},
             {type = "operator", text = "%", line = 1, col = 5},
-            {type = "operator", text = "=<", line = 1, col = 6},
+            {type = "operator", text = "=", line = 1, col = 6},
+            {type = "operator", text = "<", line = 1, col = 7},
             {type = "operator", text = ">", line = 1, col = 8}
         }
     },
@@ -613,11 +614,13 @@ return {
             {type = "bracket_id", text = "[Table]", line = 3, col = 51},
             {type = "keyword", text = "WHERE", line = 4, col = 1},
             {type = "identifier", text = "id", line = 4, col = 7},
-            {type = "operator", text = ">=", line = 4, col = 10},
+            {type = "operator", text = ">", line = 4, col = 10},
+            {type = "operator", text = "=", line = 4, col = 11},
             {type = "number", text = "1", line = 4, col = 13},
             {type = "keyword", text = "AND", line = 4, col = 15},
             {type = "identifier", text = "name", line = 4, col = 19},
-            {type = "operator", text = "<>", line = 4, col = 24},
+            {type = "operator", text = "<", line = 4, col = 24},
+            {type = "operator", text = ">", line = 4, col = 25},
             {type = "string", text = "'test'", line = 4, col = 27},
             {type = "semicolon", text = ";", line = 4, col = 33}
         }
