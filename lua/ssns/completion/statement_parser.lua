@@ -1,0 +1,862 @@
+---@class TableReference
+---@field database string? Database name (cross-db reference)
+---@field schema string? Schema name
+---@field name string Table/view/synonym name
+---@field alias string? Alias if any
+---@field is_temp boolean Whether it's a temp table (#temp or ##temp)
+---@field is_cte boolean Whether it references a CTE
+
+---@class ColumnInfo
+---@field name string Column name or alias
+---@field source_table string? Table/alias it came from (for qualified refs)
+---@field is_star boolean Whether this is a * or alias.*
+
+---@class SubqueryInfo
+---@field alias string? The alias after closing paren
+---@field columns ColumnInfo[] Columns from SELECT list
+---@field tables TableReference[] Tables in FROM clause
+---@field subqueries SubqueryInfo[] Nested subqueries (recursive)
+---@field start_pos {line: number, col: number}
+---@field end_pos {line: number, col: number}
+
+---@class CTEInfo
+---@field name string CTE name
+---@field columns ColumnInfo[] Columns from SELECT list
+---@field tables TableReference[] Tables referenced
+---@field subqueries SubqueryInfo[] Any nested subqueries
+
+---@class StatementChunk
+---@field statement_type string "SELECT"|"SELECT_INTO"|"INSERT"|"UPDATE"|"DELETE"|"WITH"|"EXEC"|"OTHER"
+---@field tables TableReference[] Tables from FROM/JOIN clauses
+---@field aliases table<string, TableReference> Alias -> table mapping
+---@field columns ColumnInfo[]? For SELECT - columns in SELECT list
+---@field subqueries SubqueryInfo[] Subqueries with aliases (recursive)
+---@field ctes CTEInfo[] CTEs defined in WITH clause
+---@field temp_table_name string? For SELECT INTO / CREATE TABLE #temp
+---@field start_line number 1-indexed start line
+---@field end_line number 1-indexed end line
+---@field start_col number 1-indexed start column
+---@field end_col number 1-indexed end column
+---@field go_batch_index number Which GO batch this belongs to (1-indexed)
+
+---@class TempTableInfo
+---@field name string Temp table name
+---@field columns ColumnInfo[] Columns in the temp table
+---@field created_in_batch number GO batch index where it was created
+
+local StatementParser = {}
+
+-- Statement-starting keywords
+local STATEMENT_STARTERS = {
+  SELECT = true,
+  INSERT = true,
+  UPDATE = true,
+  DELETE = true,
+  MERGE = true,
+  CREATE = true,
+  ALTER = true,
+  DROP = true,
+  TRUNCATE = true,
+  WITH = true,
+  EXEC = true,
+  EXECUTE = true,
+  DECLARE = true,
+  SET = true,
+}
+
+-- Keywords that indicate we're in a FROM/JOIN context
+local FROM_KEYWORDS = {
+  FROM = true,
+  JOIN = true,
+  INNER = true,
+  LEFT = true,
+  RIGHT = true,
+  FULL = true,
+  CROSS = true,
+  OUTER = true,
+}
+
+-- Keywords that can appear after JOIN
+local JOIN_MODIFIERS = {
+  INNER = true,
+  LEFT = true,
+  RIGHT = true,
+  FULL = true,
+  CROSS = true,
+  OUTER = true,
+}
+
+---Check if keyword starts a new statement at statement position
+---@param keyword string
+---@return boolean
+local function is_statement_starter(keyword)
+  return STATEMENT_STARTERS[keyword:upper()] == true
+end
+
+---Check if keyword is FROM or JOIN related
+---@param keyword string
+---@return boolean
+local function is_from_keyword(keyword)
+  return FROM_KEYWORDS[keyword:upper()] == true
+end
+
+---Strip brackets from identifier
+---@param text string
+---@return string
+local function strip_brackets(text)
+  if text:sub(1, 1) == '[' and text:sub(-1) == ']' then
+    return text:sub(2, -2)
+  end
+  return text
+end
+
+---Check if identifier is a temp table
+---@param name string
+---@return boolean
+local function is_temp_table(name)
+  return name:sub(1, 1) == '#'
+end
+
+---Parser state
+---@class ParserState
+---@field tokens table[] Token array
+---@field pos number Current token position (1-indexed)
+---@field go_batch_index number Current GO batch (1-indexed)
+local ParserState = {}
+ParserState.__index = ParserState
+
+---Create new parser state
+---@param tokens table[]
+---@return ParserState
+function ParserState.new(tokens)
+  return setmetatable({
+    tokens = tokens,
+    pos = 1,
+    go_batch_index = 1,
+  }, ParserState)
+end
+
+---Get current token
+---@return table?
+function ParserState:current()
+  if self.pos > #self.tokens then
+    return nil
+  end
+  return self.tokens[self.pos]
+end
+
+---Peek ahead n tokens
+---@param offset number
+---@return table?
+function ParserState:peek(offset)
+  offset = offset or 1
+  local new_pos = self.pos + offset
+  if new_pos > #self.tokens then
+    return nil
+  end
+  return self.tokens[new_pos]
+end
+
+---Advance to next token
+function ParserState:advance()
+  self.pos = self.pos + 1
+end
+
+---Check if current token matches type
+---@param token_type string
+---@return boolean
+function ParserState:is_type(token_type)
+  local token = self:current()
+  return token and token.type == token_type
+end
+
+---Check if current token is keyword (case-insensitive)
+---@param keyword string
+---@return boolean
+function ParserState:is_keyword(keyword)
+  local token = self:current()
+  return token and token.type == "keyword" and token.text:upper() == keyword:upper()
+end
+
+---Check if current token is any of the given keywords
+---@param keywords string[]
+---@return boolean
+function ParserState:is_any_keyword(keywords)
+  for _, kw in ipairs(keywords) do
+    if self:is_keyword(kw) then
+      return true
+    end
+  end
+  return false
+end
+
+---Consume token if it matches keyword
+---@param keyword string
+---@return boolean
+function ParserState:consume_keyword(keyword)
+  if self:is_keyword(keyword) then
+    self:advance()
+    return true
+  end
+  return false
+end
+
+---Skip tokens until we find a keyword or reach end
+---@param keyword string
+function ParserState:skip_until_keyword(keyword)
+  while self:current() and not self:is_keyword(keyword) do
+    self:advance()
+  end
+end
+
+---Parse qualified identifier (db.schema.table or schema.table or table)
+---@return {database: string?, schema: string?, name: string}?
+function ParserState:parse_qualified_identifier()
+  local parts = {}
+
+  -- Read first part
+  local token = self:current()
+  if not token then
+    return nil
+  end
+
+  if token.type == "identifier" or token.type == "bracket_id" then
+    table.insert(parts, strip_brackets(token.text))
+    self:advance()
+  else
+    return nil
+  end
+
+  -- Read additional parts separated by dots
+  while self:is_type("dot") do
+    self:advance()
+    token = self:current()
+    if token and (token.type == "identifier" or token.type == "bracket_id") then
+      table.insert(parts, strip_brackets(token.text))
+      self:advance()
+    else
+      break
+    end
+  end
+
+  -- Map parts to database.schema.name
+  if #parts == 1 then
+    return { database = nil, schema = nil, name = parts[1] }
+  elseif #parts == 2 then
+    return { database = nil, schema = parts[1], name = parts[2] }
+  elseif #parts == 3 then
+    return { database = parts[1], schema = parts[2], name = parts[3] }
+  else
+    return { database = nil, schema = nil, name = parts[1] }
+  end
+end
+
+---Try to parse an alias (AS alias or just alias)
+---@return string?
+function ParserState:parse_alias()
+  -- Check for AS keyword
+  local has_as = self:consume_keyword("AS")
+
+  -- Next token should be identifier
+  local token = self:current()
+  if token and (token.type == "identifier" or token.type == "bracket_id") then
+    local alias = strip_brackets(token.text)
+    self:advance()
+    return alias
+  end
+
+  return nil
+end
+
+---Parse a table reference with optional alias
+---@param known_ctes table<string, boolean>
+---@return TableReference?
+function ParserState:parse_table_reference(known_ctes)
+  local qualified = self:parse_qualified_identifier()
+  if not qualified then
+    return nil
+  end
+
+  local alias = self:parse_alias()
+
+  return {
+    database = qualified.database,
+    schema = qualified.schema,
+    name = qualified.name,
+    alias = alias,
+    is_temp = is_temp_table(qualified.name),
+    is_cte = known_ctes[qualified.name] == true,
+  }
+end
+
+---Parse columns in SELECT list (between SELECT and FROM)
+---@param paren_depth number
+---@return ColumnInfo[]
+function ParserState:parse_select_columns(paren_depth)
+  local columns = {}
+  local current_col = nil
+  local current_source_table = nil
+
+  while self:current() do
+    local token = self:current()
+
+    -- Stop at FROM keyword at same paren depth
+    if paren_depth == 0 and self:is_keyword("FROM") then
+      break
+    end
+
+    -- Handle nested parens
+    if token.type == "paren_open" then
+      paren_depth = paren_depth + 1
+      self:advance()
+    elseif token.type == "paren_close" then
+      paren_depth = paren_depth - 1
+      if paren_depth < 0 then
+        break
+      end
+      self:advance()
+    elseif token.type == "star" then
+      -- Handle * or alias.*
+      if current_source_table then
+        table.insert(columns, {
+          name = "*",
+          source_table = current_source_table,
+          is_star = true,
+        })
+        current_source_table = nil
+      else
+        table.insert(columns, {
+          name = "*",
+          source_table = nil,
+          is_star = true,
+        })
+      end
+      self:advance()
+    elseif token.type == "dot" then
+      -- Previous identifier is a table qualifier
+      if current_col then
+        current_source_table = current_col
+        current_col = nil
+      end
+      self:advance()
+    elseif token.type == "identifier" or token.type == "bracket_id" then
+      current_col = strip_brackets(token.text)
+      self:advance()
+
+      -- Check for AS keyword for alias
+      if self:is_keyword("AS") then
+        self:advance()
+        local alias_token = self:current()
+        if alias_token and (alias_token.type == "identifier" or alias_token.type == "bracket_id") then
+          current_col = strip_brackets(alias_token.text)
+          current_source_table = nil
+          self:advance()
+        end
+      end
+    elseif token.type == "comma" then
+      -- End of current column
+      if current_col then
+        table.insert(columns, {
+          name = current_col,
+          source_table = current_source_table,
+          is_star = false,
+        })
+        current_col = nil
+        current_source_table = nil
+      end
+      self:advance()
+    else
+      -- Other tokens (keywords, operators, etc.) - keep parsing
+      self:advance()
+    end
+  end
+
+  -- Add last column if any
+  if current_col then
+    table.insert(columns, {
+      name = current_col,
+      source_table = current_source_table,
+      is_star = false,
+    })
+  end
+
+  return columns
+end
+
+---Parse FROM/JOIN clauses to extract tables
+---@param known_ctes table<string, boolean>
+---@param paren_depth number
+---@return TableReference[]
+function ParserState:parse_from_clause(known_ctes, paren_depth)
+  local tables = {}
+
+  while self:current() do
+    local token = self:current()
+
+    -- Handle parens
+    if token.type == "paren_open" then
+      paren_depth = paren_depth + 1
+      self:advance()
+
+      -- Check for subquery
+      if self:is_keyword("SELECT") then
+        -- This is a subquery - skip it (caller will handle it)
+        return tables
+      end
+    elseif token.type == "paren_close" then
+      paren_depth = paren_depth - 1
+      if paren_depth < 0 then
+        break
+      end
+      self:advance()
+    elseif is_from_keyword(token.text) then
+      self:advance()
+
+      -- Skip JOIN modifiers
+      while self:current() and JOIN_MODIFIERS[self:current().text:upper()] do
+        self:advance()
+      end
+
+      -- Parse table reference
+      local table_ref = self:parse_table_reference(known_ctes)
+      if table_ref then
+        table.insert(tables, table_ref)
+      end
+    elseif paren_depth == 0 and is_statement_starter(token.text) then
+      -- New statement starting
+      break
+    else
+      self:advance()
+    end
+  end
+
+  return tables
+end
+
+---Parse a subquery recursively
+---@param known_ctes table<string, boolean>
+---@return SubqueryInfo?
+function ParserState:parse_subquery(known_ctes)
+  local start_token = self:current()
+  if not start_token then
+    return nil
+  end
+
+  local subquery = {
+    alias = nil,
+    columns = {},
+    tables = {},
+    subqueries = {},
+    start_pos = { line = start_token.line, col = start_token.col },
+    end_pos = { line = start_token.line, col = start_token.col },
+  }
+
+  -- We're at SELECT keyword
+  self:advance()
+
+  local paren_depth = 0
+
+  -- Parse SELECT list
+  subquery.columns = self:parse_select_columns(paren_depth)
+
+  -- Parse FROM clause
+  if self:is_keyword("FROM") then
+    subquery.tables = self:parse_from_clause(known_ctes, paren_depth)
+  end
+
+  -- Parse nested subqueries (look for "( SELECT")
+  local saved_pos = self.pos
+  while self:current() do
+    if self:is_type("paren_open") then
+      self:advance()
+      if self:is_keyword("SELECT") then
+        local nested = self:parse_subquery(known_ctes)
+        if nested then
+          table.insert(subquery.subqueries, nested)
+        end
+      end
+    elseif self:is_type("paren_close") then
+      -- End of subquery
+      break
+    else
+      self:advance()
+    end
+  end
+
+  -- Record end position
+  local end_token = self:current()
+  if end_token then
+    subquery.end_pos = { line = end_token.line, col = end_token.col }
+  end
+
+  return subquery
+end
+
+---Parse a WITH (CTE) clause
+---@return CTEInfo[], table<string, boolean>
+function ParserState:parse_with_clause()
+  local ctes = {}
+  local cte_names = {}
+
+  -- Skip WITH keyword
+  self:advance()
+
+  while self:current() do
+    -- Parse CTE name
+    local cte_name_token = self:current()
+    if not cte_name_token or (cte_name_token.type ~= "identifier" and cte_name_token.type ~= "bracket_id") then
+      break
+    end
+
+    local cte_name = strip_brackets(cte_name_token.text)
+    self:advance()
+
+    -- Expect AS
+    if not self:consume_keyword("AS") then
+      break
+    end
+
+    -- Expect (
+    if not self:is_type("paren_open") then
+      break
+    end
+    self:advance()
+
+    -- Parse CTE query
+    local cte = {
+      name = cte_name,
+      columns = {},
+      tables = {},
+      subqueries = {},
+    }
+
+    if self:is_keyword("SELECT") then
+      local subquery = self:parse_subquery(cte_names)
+      if subquery then
+        cte.columns = subquery.columns
+        cte.tables = subquery.tables
+        cte.subqueries = subquery.subqueries
+      end
+    end
+
+    -- Expect )
+    if self:is_type("paren_close") then
+      self:advance()
+    end
+
+    table.insert(ctes, cte)
+    cte_names[cte_name] = true
+
+    -- Check for comma (multiple CTEs)
+    if self:is_type("comma") then
+      self:advance()
+    else
+      break
+    end
+  end
+
+  return ctes, cte_names
+end
+
+---Parse a single statement chunk
+---@param known_ctes table<string, boolean>
+---@param temp_tables table<string, TempTableInfo>
+---@return StatementChunk?
+function ParserState:parse_statement(known_ctes, temp_tables)
+  local start_token = self:current()
+  if not start_token then
+    return nil
+  end
+
+  local chunk = {
+    statement_type = "OTHER",
+    tables = {},
+    aliases = {},
+    columns = nil,
+    subqueries = {},
+    ctes = {},
+    temp_table_name = nil,
+    start_line = start_token.line,
+    end_line = start_token.line,
+    start_col = start_token.col,
+    end_col = start_token.col,
+    go_batch_index = self.go_batch_index,
+  }
+
+  local paren_depth = 0
+  local in_select = false
+  local in_from = false
+  local in_insert = false
+
+  -- Check for WITH clause
+  if self:is_keyword("WITH") then
+    chunk.statement_type = "WITH"
+    local ctes, cte_names_map = self:parse_with_clause()
+    chunk.ctes = ctes
+
+    -- Merge CTE names into known_ctes
+    for name, _ in pairs(cte_names_map) do
+      known_ctes[name] = true
+    end
+  end
+
+  -- Detect statement type
+  if self:is_keyword("SELECT") then
+    chunk.statement_type = "SELECT"
+    in_select = true
+    self:advance()
+
+    -- Parse SELECT list
+    chunk.columns = self:parse_select_columns(paren_depth)
+
+    -- Check for INTO
+    if self:is_keyword("INTO") then
+      chunk.statement_type = "SELECT_INTO"
+      self:advance()
+
+      local qualified = self:parse_qualified_identifier()
+      if qualified then
+        chunk.temp_table_name = qualified.name
+
+        -- Store temp table info
+        if is_temp_table(qualified.name) and chunk.columns then
+          temp_tables[qualified.name] = {
+            name = qualified.name,
+            columns = chunk.columns,
+            created_in_batch = self.go_batch_index,
+          }
+        end
+      end
+    end
+
+    -- Parse FROM clause
+    if self:is_keyword("FROM") then
+      in_from = true
+      chunk.tables = self:parse_from_clause(known_ctes, paren_depth)
+    end
+  elseif self:is_keyword("INSERT") then
+    chunk.statement_type = "INSERT"
+    in_insert = true
+    self:advance()
+
+    -- Skip until we find SELECT or VALUES
+    while self:current() and not self:is_keyword("SELECT") and not self:is_keyword("VALUES") do
+      self:advance()
+    end
+
+    -- If INSERT...SELECT, parse the SELECT
+    if self:is_keyword("SELECT") then
+      in_select = true
+      self:advance()
+
+      chunk.columns = self:parse_select_columns(paren_depth)
+
+      if self:is_keyword("FROM") then
+        in_from = true
+        chunk.tables = self:parse_from_clause(known_ctes, paren_depth)
+      end
+    end
+  elseif self:is_keyword("UPDATE") then
+    chunk.statement_type = "UPDATE"
+    self:advance()
+  elseif self:is_keyword("DELETE") then
+    chunk.statement_type = "DELETE"
+    self:advance()
+  elseif self:is_keyword("EXEC") or self:is_keyword("EXECUTE") then
+    chunk.statement_type = "EXEC"
+    self:advance()
+  else
+    -- OTHER statement type
+    self:advance()
+  end
+
+  -- Build alias mapping
+  for _, table_ref in ipairs(chunk.tables) do
+    if table_ref.alias then
+      chunk.aliases[table_ref.alias] = table_ref
+    end
+  end
+
+  -- Find subqueries in the rest of the statement
+  while self:current() do
+    local token = self:current()
+
+    -- Check for GO or new statement
+    if token.type == "go" then
+      break
+    end
+
+    if paren_depth == 0 and is_statement_starter(token.text) and token.text:upper() ~= "SELECT" then
+      -- New statement starting
+      break
+    end
+
+    if token.type == "paren_open" then
+      paren_depth = paren_depth + 1
+      self:advance()
+
+      -- Check for subquery
+      if self:is_keyword("SELECT") then
+        local subquery = self:parse_subquery(known_ctes)
+        if subquery then
+          -- Try to find alias after closing paren
+          if self:is_type("paren_close") then
+            self:advance()
+            subquery.alias = self:parse_alias()
+          end
+          table.insert(chunk.subqueries, subquery)
+        end
+      end
+    elseif token.type == "paren_close" then
+      paren_depth = paren_depth - 1
+      self:advance()
+    else
+      self:advance()
+    end
+  end
+
+  -- Record end position
+  local end_token = self:current()
+  if end_token then
+    chunk.end_line = end_token.line
+    chunk.end_col = end_token.col
+  else
+    local last_token = self.tokens[#self.tokens]
+    if last_token then
+      chunk.end_line = last_token.line
+      chunk.end_col = last_token.col
+    end
+  end
+
+  return chunk
+end
+
+---Parse SQL text into statement chunks
+---@param text string The SQL text to parse
+---@return StatementChunk[] chunks Array of statement chunks
+---@return table<string, TempTableInfo> temp_tables Temp tables found (keyed by name)
+function StatementParser.parse(text)
+  local Tokenizer = require('ssns.completion.tokenizer')
+  local tokens = Tokenizer.tokenize(text)
+
+  local state = ParserState.new(tokens)
+  local chunks = {}
+  local temp_tables = {}
+  local known_ctes = {} -- Reset per statement
+
+  while state:current() do
+    local token = state:current()
+
+    -- Handle GO batch separator
+    if token.type == "go" then
+      state.go_batch_index = state.go_batch_index + 1
+      known_ctes = {} -- Reset CTEs after GO
+      state:advance()
+      goto continue
+    end
+
+    -- Skip semicolons (they don't start statements)
+    if token.type == "semicolon" then
+      state:advance()
+      goto continue
+    end
+
+    -- Check for statement starter
+    if is_statement_starter(token.text) then
+      local chunk = state:parse_statement(known_ctes, temp_tables)
+      if chunk then
+        table.insert(chunks, chunk)
+      end
+    else
+      -- Unknown token at statement position, skip it
+      state:advance()
+    end
+
+    ::continue::
+  end
+
+  return chunks, temp_tables
+end
+
+---Find which chunk contains the given position
+---@param chunks StatementChunk[] The parsed chunks
+---@param line number 1-indexed line
+---@param col number 1-indexed column
+---@return StatementChunk? chunk The chunk at position, or nil
+function StatementParser.get_chunk_at_position(chunks, line, col)
+  for _, chunk in ipairs(chunks) do
+    if line >= chunk.start_line and line <= chunk.end_line then
+      -- Check column boundaries for first/last line
+      if line == chunk.start_line and col < chunk.start_col then
+        goto continue
+      end
+      if line == chunk.end_line and col > chunk.end_col then
+        goto continue
+      end
+      return chunk
+    end
+    ::continue::
+  end
+  return nil
+end
+
+---Check if position is within bounds
+---@param line number
+---@param col number
+---@param start_pos {line: number, col: number}
+---@param end_pos {line: number, col: number}
+---@return boolean
+local function is_position_in_bounds(line, col, start_pos, end_pos)
+  if line < start_pos.line or line > end_pos.line then
+    return false
+  end
+  if line == start_pos.line and col < start_pos.col then
+    return false
+  end
+  if line == end_pos.line and col > end_pos.col then
+    return false
+  end
+  return true
+end
+
+---Recursively search for subquery containing position
+---@param subquery SubqueryInfo
+---@param line number
+---@param col number
+---@return SubqueryInfo?
+local function find_subquery_recursive(subquery, line, col)
+  -- Check nested subqueries first (innermost wins)
+  for _, nested in ipairs(subquery.subqueries) do
+    if is_position_in_bounds(line, col, nested.start_pos, nested.end_pos) then
+      local result = find_subquery_recursive(nested, line, col)
+      if result then
+        return result
+      end
+      return nested
+    end
+  end
+
+  -- Check if position is in this subquery
+  if is_position_in_bounds(line, col, subquery.start_pos, subquery.end_pos) then
+    return subquery
+  end
+
+  return nil
+end
+
+---Find if position is inside a subquery (recursive search)
+---@param chunk StatementChunk The chunk to search
+---@param line number 1-indexed line
+---@param col number 1-indexed column
+---@return SubqueryInfo? subquery The innermost subquery containing position, or nil
+function StatementParser.get_subquery_at_position(chunk, line, col)
+  for _, subquery in ipairs(chunk.subqueries) do
+    local result = find_subquery_recursive(subquery, line, col)
+    if result then
+      return result
+    end
+  end
+  return nil
+end
+
+return StatementParser
