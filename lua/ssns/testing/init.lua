@@ -6,6 +6,7 @@ local M = {}
 local runner = require("ssns.testing.runner")
 local reporter = require("ssns.testing.reporter")
 local utils = require("ssns.testing.utils")
+local unit_runner = require("ssns.testing.unit_runner")
 
 --- Default configuration
 M.config = {
@@ -189,9 +190,89 @@ function M.run_tests_by_database(database_type, opts)
   return results
 end
 
+--- Run all unit tests (tokenizer + parser)
+--- @param opts table|nil Optional configuration {type?: string}
+--- @return table results {total, passed, failed, results: table[]}
+function M.run_unit_tests(opts)
+  opts = opts or {}
+
+  vim.notify("Running unit tests...", vim.log.levels.INFO)
+
+  local results = unit_runner.run_all(opts)
+
+  if results.total == 0 then
+    vim.notify("No unit tests found", vim.log.levels.WARN)
+    return results
+  end
+
+  -- Display results
+  reporter.display_unit_results(results)
+
+  -- Write markdown report
+  local output_path = vim.fn.stdpath("data") .. "/ssns/unit_test_results.md"
+  local success = reporter.write_unit_markdown(results, output_path)
+
+  if success then
+    vim.notify(string.format("Unit test results written to: %s", output_path), vim.log.levels.INFO)
+  end
+
+  return results
+end
+
+--- Run only tokenizer tests
+--- @param opts table|nil Optional configuration
+--- @return table results
+function M.run_tokenizer_tests(opts)
+  opts = opts or {}
+  opts.type = "tokenizer"
+
+  vim.notify("Running tokenizer tests...", vim.log.levels.INFO)
+  return M.run_unit_tests(opts)
+end
+
+--- Run only parser tests
+--- @param opts table|nil Optional configuration
+--- @return table results
+function M.run_parser_tests(opts)
+  opts = opts or {}
+  opts.type = "parser"
+
+  vim.notify("Running parser tests...", vim.log.levels.INFO)
+  return M.run_unit_tests(opts)
+end
+
+--- Run a specific unit test by ID
+--- @param test_id number The test ID (e.g., 1001 for tokenizer, 2001 for parser)
+--- @param opts table|nil Optional configuration
+--- @return table|nil result Test result or nil if not found
+function M.run_unit_test(test_id, opts)
+  opts = opts or {}
+
+  vim.notify(string.format("Running unit test #%d...", test_id), vim.log.levels.INFO)
+
+  local result = unit_runner.run_by_id(test_id)
+
+  if not result then
+    vim.notify(string.format("Unit test #%d not found", test_id), vim.log.levels.ERROR)
+    return nil
+  end
+
+  -- Display result
+  local status = result.passed and "PASS" or "FAIL"
+  vim.notify(string.format("[%s] #%d: %s (%.2fms)", status, result.id, result.name, result.duration_ms),
+    result.passed and vim.log.levels.INFO or vim.log.levels.WARN)
+
+  if not result.passed and result.error then
+    vim.notify(string.format("  Error: %s", result.error), vim.log.levels.ERROR)
+  end
+
+  return result
+end
+
 --- Expose submodules for direct access
 M.runner = runner
 M.reporter = reporter
 M.utils = utils
+M.unit_runner = unit_runner
 
 return M

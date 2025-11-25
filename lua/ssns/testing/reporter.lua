@@ -327,4 +327,226 @@ function M.create_summary(results)
     total, passed, failed, pass_rate)
 end
 
+--- Format a single unit test result
+--- @param result table Unit test result
+--- @return string formatted Formatted result as markdown
+function M.format_unit_result(result)
+  local lines = {}
+  local status = result.passed and "✓" or "✗"
+  local status_text = result.passed and "PASS" or "FAIL"
+
+  table.insert(lines, string.format("### %s Test #%d: %s", status, result.id, result.name))
+  table.insert(lines, string.format("- **Status**: %s", status_text))
+  table.insert(lines, string.format("- **Type**: %s", result.type))
+  table.insert(lines, string.format("- **Duration**: %.2fms", result.duration_ms or 0))
+
+  -- Show input SQL
+  table.insert(lines, "")
+  table.insert(lines, "**Input:**")
+  table.insert(lines, "```sql")
+  table.insert(lines, result.input or "")
+  table.insert(lines, "```")
+
+  -- Show error if failed
+  if not result.passed and result.error then
+    table.insert(lines, "")
+    table.insert(lines, "**Error:**")
+    table.insert(lines, "```")
+    table.insert(lines, result.error)
+    table.insert(lines, "```")
+  end
+
+  table.insert(lines, "")
+  return table.concat(lines, "\n")
+end
+
+--- Create summary table for unit tests by type (tokenizer/parser)
+--- @param results table[] Array of unit test results
+--- @return string markdown Markdown table
+function M.create_unit_summary_table(results)
+  -- Group by type (tokenizer, parser)
+  local by_type = {}
+  for _, result in ipairs(results) do
+    local test_type = result.type or "unknown"
+    if not by_type[test_type] then
+      by_type[test_type] = { total = 0, passed = 0, failed = 0 }
+    end
+    by_type[test_type].total = by_type[test_type].total + 1
+    if result.passed then
+      by_type[test_type].passed = by_type[test_type].passed + 1
+    else
+      by_type[test_type].failed = by_type[test_type].failed + 1
+    end
+  end
+
+  local lines = {}
+  table.insert(lines, "| Type | Total | Passed | Failed | Pass Rate |")
+  table.insert(lines, "|------|-------|--------|--------|-----------|")
+
+  for test_type, stats in pairs(by_type) do
+    local pass_rate = stats.total > 0 and (stats.passed / stats.total * 100) or 0
+    table.insert(lines, string.format("| %s | %d | %d | %d | %.1f%% |",
+      test_type, stats.total, stats.passed, stats.failed, pass_rate))
+  end
+
+  return table.concat(lines, "\n")
+end
+
+--- Write unit test results to markdown file
+--- @param results table Unit test results {total, passed, failed, results: table[]}
+--- @param output_path string Output file path
+--- @return boolean success
+function M.write_unit_markdown(results, output_path)
+  -- Ensure output directory exists
+  local output_dir = vim.fn.fnamemodify(output_path, ":h")
+  vim.fn.mkdir(output_dir, "p")
+
+  -- Extract results array
+  local test_results = results.results or {}
+  local total = results.total or #test_results
+  local passed = results.passed or 0
+  local failed = results.failed or 0
+  local total_duration = 0
+
+  for _, result in ipairs(test_results) do
+    total_duration = total_duration + (result.duration_ms or 0)
+  end
+
+  local pass_rate = total > 0 and (passed / total * 100) or 0
+
+  -- Build markdown content
+  local lines = {}
+
+  -- Header
+  table.insert(lines, "# SSNS Unit Test Results")
+  table.insert(lines, "")
+  table.insert(lines, string.format("**Generated**: %s", os.date("%Y-%m-%d %H:%M:%S")))
+  table.insert(lines, "")
+
+  -- Summary section
+  table.insert(lines, "## Summary")
+  table.insert(lines, "")
+  table.insert(lines, string.format("- **Total Tests**: %d", total))
+  table.insert(lines, string.format("- **Passed**: %d", passed))
+  table.insert(lines, string.format("- **Failed**: %d", failed))
+  table.insert(lines, string.format("- **Pass Rate**: %.1f%%", pass_rate))
+  table.insert(lines, string.format("- **Total Duration**: %.2fms", total_duration))
+  table.insert(lines, string.format("- **Average Duration**: %.2fms", total > 0 and (total_duration / total) or 0))
+  table.insert(lines, "")
+
+  -- Results by type
+  table.insert(lines, "## Results by Type")
+  table.insert(lines, "")
+  table.insert(lines, M.create_unit_summary_table(test_results))
+  table.insert(lines, "")
+
+  -- Detailed results
+  table.insert(lines, "## Detailed Results")
+  table.insert(lines, "")
+
+  -- Group by type for organized output
+  local by_type = {}
+  for _, result in ipairs(test_results) do
+    local test_type = result.type or "unknown"
+    if not by_type[test_type] then
+      by_type[test_type] = {}
+    end
+    table.insert(by_type[test_type], result)
+  end
+
+  -- Sort types
+  local types = {}
+  for test_type, _ in pairs(by_type) do
+    table.insert(types, test_type)
+  end
+  table.sort(types)
+
+  -- Output results by type
+  for _, test_type in ipairs(types) do
+    table.insert(lines, string.format("### %s Tests", test_type:gsub("^%l", string.upper)))
+    table.insert(lines, "")
+
+    local type_results = by_type[test_type]
+    -- Sort by test ID
+    table.sort(type_results, function(a, b)
+      return (a.id or 0) < (b.id or 0)
+    end)
+
+    for _, result in ipairs(type_results) do
+      table.insert(lines, M.format_unit_result(result))
+    end
+  end
+
+  -- Failed tests summary (if any)
+  if failed > 0 then
+    table.insert(lines, "")
+    table.insert(lines, "## Failed Tests Summary")
+    table.insert(lines, "")
+
+    local failed_tests = {}
+    for _, result in ipairs(test_results) do
+      if not result.passed then
+        table.insert(failed_tests, result)
+      end
+    end
+
+    -- Sort by test ID
+    table.sort(failed_tests, function(a, b)
+      return (a.id or 0) < (b.id or 0)
+    end)
+
+    for _, result in ipairs(failed_tests) do
+      table.insert(lines, string.format("- **Test #%d**: %s (Type: %s)",
+        result.id or "?",
+        result.name or "Unknown",
+        result.type or "unknown"))
+
+      if result.error then
+        table.insert(lines, string.format("  - Error: %s", result.error:gsub("\n", " ")))
+      end
+    end
+  end
+
+  -- Write to file
+  local content = table.concat(lines, "\n")
+  local file = io.open(output_path, "w")
+  if not file then
+    vim.notify(string.format("Failed to open file for writing: %s", output_path), vim.log.levels.ERROR)
+    return false
+  end
+
+  file:write(content)
+  file:close()
+
+  return true
+end
+
+--- Display unit test results in Neovim messages
+--- @param results table Unit test results
+function M.display_unit_results(results)
+  local total = results.total or #(results.results or {})
+  local passed = results.passed or 0
+  local failed = results.failed or 0
+  local pass_rate = total > 0 and (passed / total * 100) or 0
+
+  vim.notify("===== Unit Test Results =====", vim.log.levels.INFO)
+  vim.notify(string.format("Total: %d | Passed: %d | Failed: %d | Pass Rate: %.1f%%",
+    total, passed, failed, pass_rate), vim.log.levels.INFO)
+
+  -- Show failed tests
+  if failed > 0 and results.results then
+    vim.notify("\nFailed Tests:", vim.log.levels.WARN)
+    for _, result in ipairs(results.results) do
+      if not result.passed then
+        vim.notify(string.format("  #%d: %s (%s)", result.id, result.name, result.type), vim.log.levels.WARN)
+        if result.error then
+          vim.notify(string.format("    Error: %s", result.error:gsub("\n", " "):sub(1, 100)), vim.log.levels.WARN)
+        end
+      end
+    end
+  end
+
+  vim.notify("==============================", vim.log.levels.INFO)
+end
+
 return M
