@@ -121,7 +121,11 @@ return {
                     ctes = {
                         {
                             name = "EmployeeCTE",
-                            columns = { "Id", "Name", "Department" },
+                            columns = {
+                                { name = "Id", is_star = false },
+                                { name = "Name", is_star = false },
+                                { name = "Department", is_star = false }
+                            },
                             tables = {{ name = "Employees" }}
                         }
                     }
@@ -141,12 +145,18 @@ return {
                     ctes = {
                         {
                             name = "cte1",
-                            columns = { "Id", "Name" },
+                            columns = {
+                                { name = "Id", is_star = false },
+                                { name = "Name", is_star = false }
+                            },
                             tables = {{ name = "Employees" }}
                         },
                         {
                             name = "cte2",
-                            columns = { "DeptId", "DeptName" },
+                            columns = {
+                                { name = "DeptId", is_star = false },
+                                { name = "DeptName", is_star = false }
+                            },
                             tables = {{ name = "Departments" }}
                         }
                     }
@@ -190,7 +200,11 @@ return {
                     ctes = {
                         {
                             name = "OrgChart",
-                            columns = { "EmpId", "EmpName", "Level" },
+                            columns = {
+                                { name = "EmpId", is_star = false },
+                                { name = "EmpName", is_star = false },
+                                { name = "Level", is_star = false }
+                            },
                             tables = {
                                 { name = "Employees" },
                                 { name = "Employees", alias = "e" }

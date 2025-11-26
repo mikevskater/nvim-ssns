@@ -18,7 +18,9 @@
 
 ---@class ColumnInfo
 ---@field name string Column name or alias
----@field source_table string? Table/alias it came from (for qualified refs)
+---@field source_table string? Table/alias prefix used in the query
+---@field parent_table string? Actual base table name (resolved from alias)
+---@field parent_schema string? Schema of the parent table
 ---@field is_star boolean Whether this is a * or alias.*
 
 ---@class SubqueryInfo
@@ -58,6 +60,39 @@
 ---@field is_global boolean Whether it's a global temp table (##)
 
 local StatementParser = {}
+
+--- Resolve parent_table for columns using the aliases map
+---@param columns ColumnInfo[]? The columns to resolve
+---@param aliases table<string, TableReference> The alias mapping
+---@param tables TableReference[] The tables in the FROM clause
+local function resolve_column_parents(columns, aliases, tables)
+    if not columns then return end
+
+    for _, col in ipairs(columns) do
+        if col.source_table then
+            -- Try to resolve from aliases (case-insensitive)
+            local source_lower = col.source_table:lower()
+            local table_ref = aliases[source_lower]
+            if table_ref then
+                col.parent_table = table_ref.name
+                col.parent_schema = table_ref.schema
+            else
+                -- Check if source_table is an actual table name (not alias)
+                for _, tbl in ipairs(tables) do
+                    if tbl.name:lower() == source_lower then
+                        col.parent_table = tbl.name
+                        col.parent_schema = tbl.schema
+                        break
+                    end
+                end
+            end
+        elseif not col.is_star and #tables == 1 then
+            -- Unqualified column with single table - can infer parent
+            col.parent_table = tables[1].name
+            col.parent_schema = tables[1].schema
+        end
+    end
+end
 
 -- Statement-starting keywords
 local STATEMENT_STARTERS = {
@@ -889,6 +924,17 @@ function ParserState:parse_subquery(known_ctes)
     subquery.end_pos = { line = end_token.line, col = end_token.col }
   end
 
+  -- Build alias mapping for this subquery
+  local subquery_aliases = {}
+  for _, table_ref in ipairs(subquery.tables) do
+    if table_ref.alias then
+      subquery_aliases[table_ref.alias:lower()] = table_ref
+    end
+  end
+
+  -- Resolve parent_table for columns using aliases
+  resolve_column_parents(subquery.columns, subquery_aliases, subquery.tables)
+
   return subquery
 end
 
@@ -953,7 +999,7 @@ function ParserState:parse_with_clause()
     -- Parse CTE query
     local cte = {
       name = cte_name,
-      columns = column_list,  -- Use column list if provided
+      columns = {},
       tables = {},
       subqueries = {},
     }
@@ -964,12 +1010,41 @@ function ParserState:parse_with_clause()
     if self:is_keyword("SELECT") then
       local subquery = self:parse_subquery(cte_names)
       if subquery then
-        -- Only use subquery columns if we don't have explicit column list
         if #column_list == 0 then
+          -- No explicit column list - use subquery columns directly
           cte.columns = subquery.columns
+        else
+          -- Convert explicit column list to ColumnInfo array
+          for i, col_name in ipairs(column_list) do
+            local col_info = {
+              name = col_name,
+              source_table = nil,
+              parent_table = nil,
+              parent_schema = nil,
+              is_star = false,
+            }
+            -- If subquery has matching column, inherit parent info
+            if subquery.columns and subquery.columns[i] then
+              col_info.parent_table = subquery.columns[i].parent_table
+              col_info.parent_schema = subquery.columns[i].parent_schema
+              col_info.source_table = subquery.columns[i].source_table
+            end
+            table.insert(cte.columns, col_info)
+          end
         end
         cte.tables = subquery.tables
         cte.subqueries = subquery.subqueries
+      end
+    elseif #column_list > 0 then
+      -- No SELECT subquery but we have explicit column list - convert to ColumnInfo
+      for _, col_name in ipairs(column_list) do
+        table.insert(cte.columns, {
+          name = col_name,
+          source_table = nil,
+          parent_table = nil,
+          parent_schema = nil,
+          is_star = false,
+        })
       end
     end
 
@@ -1264,9 +1339,12 @@ function ParserState:parse_statement(known_ctes, temp_tables)
   -- Build alias mapping
   for _, table_ref in ipairs(chunk.tables) do
     if table_ref.alias then
-      chunk.aliases[table_ref.alias] = table_ref
+      chunk.aliases[table_ref.alias:lower()] = table_ref
     end
   end
+
+  -- Resolve parent_table for columns using aliases
+  resolve_column_parents(chunk.columns, chunk.aliases, chunk.tables)
 
   -- Find subqueries in the rest of the statement
   -- Track the last token that belongs to this statement for end position

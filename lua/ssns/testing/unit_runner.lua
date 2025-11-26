@@ -285,6 +285,12 @@ function UnitRunner._compare_chunk(actual, expected, chunk_index)
       if not ok then
         return false, err
       end
+    elseif key == "columns" then
+      -- Compare columns array
+      local ok, err = UnitRunner._compare_columns(act_value, exp_value, chunk_index)
+      if not ok then
+        return false, err
+      end
     elseif key == "subqueries" then
       -- Compare subqueries recursively
       local ok, err = UnitRunner._compare_subqueries(act_value, exp_value, chunk_index)
@@ -370,6 +376,51 @@ function UnitRunner._compare_tables(actual, expected, chunk_index)
   end
 
   return true, nil
+end
+
+---Compare columns arrays
+---@param actual ColumnInfo[]?
+---@param expected ColumnInfo[]?
+---@param chunk_index number
+---@return boolean success
+---@return string? error_message
+function UnitRunner._compare_columns(actual, expected, chunk_index)
+  if not expected then
+    return true
+  end
+  if not actual then
+    return false, string.format("Chunk %d: expected columns but got nil", chunk_index)
+  end
+
+  if #actual < #expected then
+    return false,
+      string.format("Chunk %d: expected at least %d columns, got %d", chunk_index, #expected, #actual)
+  end
+
+  for i, exp_col in ipairs(expected) do
+    local act_col = actual[i]
+    if not act_col then
+      return false, string.format("Chunk %d: missing column at index %d", chunk_index, i)
+    end
+
+    -- Compare each expected field
+    for field, exp_value in pairs(exp_col) do
+      local act_value = act_col[field]
+      if act_value ~= exp_value then
+        return false,
+          string.format(
+            "Chunk %d column %d field '%s': expected %s, got %s",
+            chunk_index,
+            i,
+            field,
+            tostring(exp_value),
+            tostring(act_value)
+          )
+      end
+    end
+  end
+
+  return true
 end
 
 ---Compare subqueries recursively
