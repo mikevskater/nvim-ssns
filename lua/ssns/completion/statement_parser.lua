@@ -524,6 +524,52 @@ function ParserState:parse_subquery(known_ctes)
     subquery.tables = self:parse_from_clause(known_ctes, paren_depth, subquery.subqueries)
   end
 
+  -- Handle set operations (UNION, INTERSECT, EXCEPT) to capture tables from all members
+  while self:current() do
+    local is_set_op = self:is_keyword("UNION") or self:is_keyword("INTERSECT") or self:is_keyword("EXCEPT")
+    if not is_set_op then
+      break
+    end
+
+    self:advance()  -- consume UNION/INTERSECT/EXCEPT
+
+    -- Handle ALL or DISTINCT modifier
+    if self:is_keyword("ALL") or self:is_keyword("DISTINCT") then
+      self:advance()
+    end
+
+    -- Expect SELECT
+    if not self:is_keyword("SELECT") then
+      break
+    end
+    self:advance()  -- consume SELECT
+
+    -- Skip SELECT list until FROM (handle nested parens for expressions)
+    local select_paren_depth = 0
+    while self:current() do
+      if self:is_type("paren_open") then
+        select_paren_depth = select_paren_depth + 1
+      elseif self:is_type("paren_close") then
+        if select_paren_depth > 0 then
+          select_paren_depth = select_paren_depth - 1
+        else
+          break  -- End of subquery
+        end
+      elseif select_paren_depth == 0 and self:is_keyword("FROM") then
+        break  -- Found FROM clause
+      end
+      self:advance()
+    end
+
+    -- Parse FROM clause if found
+    if self:is_keyword("FROM") then
+      local union_tables = self:parse_from_clause(known_ctes, paren_depth, subquery.subqueries)
+      for _, tbl in ipairs(union_tables) do
+        table.insert(subquery.tables, tbl)
+      end
+    end
+  end
+
   -- Parse nested subqueries (look for "( SELECT")
   local saved_pos = self.pos
   while self:current() do
