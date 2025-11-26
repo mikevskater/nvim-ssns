@@ -789,7 +789,10 @@ function ParserState:parse_subquery(known_ctes)
           if nested then
             table.insert(subquery.subqueries, nested)
           end
-          -- After parse_subquery, we should be at or past closing )
+          -- After parse_subquery, parser is AT the closing ) - consume it and decrement depth
+          if self:is_type("paren_close") then
+            self:advance()
+          end
           set_op_paren_depth = set_op_paren_depth - 1
         end
       elseif token.type == "paren_close" then
@@ -897,6 +900,13 @@ function ParserState:parse_with_clause()
 
   -- Skip WITH keyword
   self:advance()
+
+  -- Skip optional RECURSIVE keyword (PostgreSQL syntax)
+  -- Note: RECURSIVE may be tokenized as identifier, not keyword
+  local token = self:current()
+  if token and token.text:upper() == "RECURSIVE" then
+    self:advance()
+  end
 
   while self:current() do
     -- Parse CTE name

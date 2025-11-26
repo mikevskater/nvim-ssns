@@ -835,7 +835,18 @@ SELECT * FROM ProductSales WHERE TotalRevenue > 10000]],
 SELECT * FROM CategoryHierarchy]],
         expected = {
             chunks = {
-                { statement_type = "WITH" }
+                {
+                    statement_type = "SELECT",  -- WITH RECURSIVE...SELECT sets type to SELECT
+                    ctes = {
+                        {
+                            name = "CategoryHierarchy",
+                            tables = {
+                                { name = "Categories" },
+                                { name = "Categories", alias = "c" }
+                            }
+                        }
+                    }
+                }
             }
         }
     },
