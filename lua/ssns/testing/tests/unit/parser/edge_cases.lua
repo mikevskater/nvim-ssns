@@ -496,7 +496,7 @@ return {
         id = 2630,
         type = "parser",
         name = "Hash in permanent table name",
-        input = "SELECT * FROM Test#Table",
+        input = "SELECT * FROM [Test#Table]",
         expected = {
             chunks = {
                 {
