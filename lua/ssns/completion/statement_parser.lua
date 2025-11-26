@@ -551,6 +551,27 @@ function ParserState:parse_with_clause()
     local cte_name = strip_brackets(cte_name_token.text)
     self:advance()
 
+    -- Parse optional column list: WITH cte (col1, col2) AS (...)
+    local column_list = {}
+    if self:is_type("paren_open") then
+      self:advance()
+      -- Parse column names
+      while self:current() do
+        local col_token = self:current()
+        if col_token.type == "paren_close" then
+          self:advance()
+          break
+        elseif col_token.type == "comma" then
+          self:advance()
+        elseif col_token.type == "identifier" or col_token.type == "bracket_id" then
+          table.insert(column_list, strip_brackets(col_token.text))
+          self:advance()
+        else
+          self:advance()
+        end
+      end
+    end
+
     -- Expect AS
     if not self:consume_keyword("AS") then
       break
@@ -565,7 +586,7 @@ function ParserState:parse_with_clause()
     -- Parse CTE query
     local cte = {
       name = cte_name,
-      columns = {},
+      columns = column_list,  -- Use column list if provided
       tables = {},
       subqueries = {},
     }
@@ -573,7 +594,10 @@ function ParserState:parse_with_clause()
     if self:is_keyword("SELECT") then
       local subquery = self:parse_subquery(cte_names)
       if subquery then
+        -- Only use subquery columns if we don't have explicit column list
+        if #column_list == 0 then
         cte.columns = subquery.columns
+        end
         cte.tables = subquery.tables
         cte.subqueries = subquery.subqueries
       end
