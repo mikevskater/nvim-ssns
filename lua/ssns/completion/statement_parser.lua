@@ -738,7 +738,11 @@ function ParserState:parse_statement(known_ctes, temp_tables)
       break
     end
 
-    if paren_depth == 0 and is_statement_starter(token.text) and token.text:upper() ~= "SELECT" then
+    -- SET is part of UPDATE syntax, not a new statement when in UPDATE context
+    local upper_text = token.text:upper()
+    if paren_depth == 0 and is_statement_starter(token.text)
+       and upper_text ~= "SELECT"
+       and not (upper_text == "SET" and chunk.statement_type == "UPDATE") then
       -- New statement starting
       break
     end
