@@ -549,7 +549,11 @@ ORDER BY e.Name]],
                 {
                     statement_type = "SELECT",
                     temp_table_name = "#TempEmployees",
-                    columns = { "Id", "Name", "Email" },
+                    columns = {
+                        { name = "Id", source_table = nil, is_star = false },
+                        { name = "Name", source_table = nil, is_star = false },
+                        { name = "Email", source_table = nil, is_star = false }
+                    },
                     tables = {
                         { name = "Employees" }
                     }

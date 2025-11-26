@@ -521,7 +521,7 @@ SELECT * FROM EmployeeCTE e JOIN DeptCTE d ON e.DeptId = d.Id]],
         expected = {
             chunks = {
                 {
-                    statement_type = "SELECT",
+                    statement_type = "UPDATE",
                     ctes = {
                         {
                             name = "InactiveDepts",

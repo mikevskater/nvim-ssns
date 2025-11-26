@@ -321,8 +321,10 @@ end
 
 ---Parse columns in SELECT list (between SELECT and FROM)
 ---@param paren_depth number
+---@param known_ctes table<string, boolean>?
+---@param subqueries SubqueryInfo[]?
 ---@return ColumnInfo[]
-function ParserState:parse_select_columns(paren_depth)
+function ParserState:parse_select_columns(paren_depth, known_ctes, subqueries)
   local columns = {}
   local current_col = nil
   local current_source_table = nil
@@ -338,8 +340,36 @@ function ParserState:parse_select_columns(paren_depth)
 
     -- Handle nested parens
     if token.type == "paren_open" then
-      paren_depth = paren_depth + 1
-      self:advance()
+      -- Check for subquery: (SELECT ...)
+      local next_pos = self.pos + 1
+      local next_token = self.tokens[next_pos]
+      if next_token and next_token.type == "keyword" and next_token.text:upper() == "SELECT" then
+        -- This is a subquery in SELECT list
+        self:advance()  -- consume (
+        if subqueries then
+          local subquery = self:parse_subquery(known_ctes or {})
+          if subquery then
+            table.insert(subqueries, subquery)
+            -- Expect closing paren
+            if self:is_type("paren_close") then
+              self:advance()  -- consume )
+            end
+          end
+        else
+          -- Skip if no subqueries table
+          local depth = 1
+          while self:current() and depth > 0 do
+            if self:is_type("paren_open") then depth = depth + 1
+            elseif self:is_type("paren_close") then depth = depth - 1
+            end
+            self:advance()
+          end
+        end
+      else
+        -- Regular parenthesized expression
+        paren_depth = paren_depth + 1
+        self:advance()
+      end
     elseif token.type == "paren_close" then
       paren_depth = paren_depth - 1
       if paren_depth < 0 then
@@ -569,7 +599,7 @@ function ParserState:parse_subquery(known_ctes)
   local paren_depth = 0
 
   -- Parse SELECT list
-  subquery.columns = self:parse_select_columns(paren_depth)
+  subquery.columns = self:parse_select_columns(paren_depth, known_ctes, subquery.subqueries)
 
   -- Parse FROM clause
   if self:is_keyword("FROM") then
@@ -789,7 +819,7 @@ function ParserState:parse_statement(known_ctes, temp_tables)
     self:advance()
 
     -- Parse SELECT list
-    chunk.columns = self:parse_select_columns(paren_depth)
+    chunk.columns = self:parse_select_columns(paren_depth, known_ctes, chunk.subqueries)
 
     -- Check for INTO
     if self:is_keyword("INTO") then
@@ -863,7 +893,7 @@ function ParserState:parse_statement(known_ctes, temp_tables)
       in_select = true
       self:advance()
 
-      chunk.columns = self:parse_select_columns(paren_depth)
+      chunk.columns = self:parse_select_columns(paren_depth, known_ctes, chunk.subqueries)
 
       if self:is_keyword("FROM") then
         in_from = true

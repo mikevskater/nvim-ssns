@@ -627,8 +627,8 @@ FROM (
                     subqueries = {
                         {
                             alias = "e",
-                            start_pos = 15,  -- Position of opening (
-                            end_pos = 42     -- Position of closing )
+                            start_pos = { line = 1, col = 16 },  -- Position of opening (
+                            end_pos = { line = 1, col = 40 }     -- Position of closing )
                         }
                     }
                 }
