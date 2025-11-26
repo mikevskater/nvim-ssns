@@ -387,8 +387,9 @@ end
 ---Parse FROM/JOIN clauses to extract tables
 ---@param known_ctes table<string, boolean>
 ---@param paren_depth number
+---@param subqueries? SubqueryInfo[] Optional collection to add subqueries to
 ---@return TableReference[]
-function ParserState:parse_from_clause(known_ctes, paren_depth)
+function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries)
   local tables = {}
 
   while self:current() do
@@ -401,8 +402,21 @@ function ParserState:parse_from_clause(known_ctes, paren_depth)
 
       -- Check for subquery
       if self:is_keyword("SELECT") then
-        -- This is a subquery - skip it (caller will handle it)
-        return tables
+        -- Parse the subquery
+        local subquery = self:parse_subquery(known_ctes)
+        if subquery then
+          -- Find closing paren and alias
+          if self:is_type("paren_close") then
+            paren_depth = paren_depth - 1
+            self:advance()
+            subquery.alias = self:parse_alias()
+          end
+          -- Add to subqueries collection if provided
+          if subqueries then
+            table.insert(subqueries, subquery)
+          end
+        end
+        -- Continue parsing FROM clause (may have more tables/subqueries)
       end
     elseif token.type == "paren_close" then
       paren_depth = paren_depth - 1
@@ -462,7 +476,7 @@ function ParserState:parse_subquery(known_ctes)
 
   -- Parse FROM clause
   if self:is_keyword("FROM") then
-    subquery.tables = self:parse_from_clause(known_ctes, paren_depth)
+    subquery.tables = self:parse_from_clause(known_ctes, paren_depth, subquery.subqueries)
   end
 
   -- Parse nested subqueries (look for "( SELECT")
@@ -642,7 +656,7 @@ function ParserState:parse_statement(known_ctes, temp_tables)
     -- Parse FROM clause
     if self:is_keyword("FROM") then
       in_from = true
-      chunk.tables = self:parse_from_clause(known_ctes, paren_depth)
+      chunk.tables = self:parse_from_clause(known_ctes, paren_depth, chunk.subqueries)
     end
   elseif self:is_keyword("INSERT") then
     chunk.statement_type = "INSERT"
@@ -687,7 +701,7 @@ function ParserState:parse_statement(known_ctes, temp_tables)
       if self:is_keyword("FROM") then
         in_from = true
         -- Add FROM clause tables to existing tables (preserve INSERT target)
-        local from_tables = self:parse_from_clause(known_ctes, paren_depth)
+        local from_tables = self:parse_from_clause(known_ctes, paren_depth, chunk.subqueries)
         for _, t in ipairs(from_tables) do
           table.insert(chunk.tables, t)
         end
@@ -738,13 +752,45 @@ function ParserState:parse_statement(known_ctes, temp_tables)
       break
     end
 
-    -- SET is part of UPDATE syntax, not a new statement when in UPDATE context
+    -- Check for new statement starting
     local upper_text = token.text:upper()
-    if paren_depth == 0 and is_statement_starter(token.text)
-       and upper_text ~= "SELECT"
-       and not (upper_text == "SET" and chunk.statement_type == "UPDATE") then
-      -- New statement starting
-      break
+    if paren_depth == 0 and is_statement_starter(token.text) then
+      -- SET is part of UPDATE syntax, not a new statement
+      if upper_text == "SET" and chunk.statement_type == "UPDATE" then
+        -- Continue parsing UPDATE
+      -- SELECT is part of INSERT ... SELECT syntax, not a new statement
+      elseif upper_text == "SELECT" and in_insert then
+        -- Continue parsing INSERT ... SELECT
+      -- WITH can be table hints (WITH NOLOCK), not a new CTE statement
+      -- Only treat WITH as new statement if NOT in a SELECT/INSERT/UPDATE/DELETE
+      elseif upper_text == "WITH" and (in_select or in_insert or in_from or chunk.statement_type == "UPDATE" or chunk.statement_type == "DELETE") then
+        -- Table hint WITH (NOLOCK), skip the hint
+        self:advance()
+        if self:is_type("paren_open") then
+          -- Skip parenthesized hints like (NOLOCK, INDEX(...))
+          local hint_depth = 1
+          self:advance() -- consume (
+          while self:current() and hint_depth > 0 do
+            if self:is_type("paren_open") then
+              hint_depth = hint_depth + 1
+            elseif self:is_type("paren_close") then
+              hint_depth = hint_depth - 1
+            end
+            self:advance()
+          end
+        end
+      -- UNION/INTERSECT/EXCEPT are part of the same SELECT statement
+      elseif upper_text == "UNION" or upper_text == "INTERSECT" or upper_text == "EXCEPT" then
+        -- Continue parsing as part of same statement
+        self:advance()
+        -- Skip optional ALL keyword after UNION
+        if self:is_keyword("ALL") then
+          self:advance()
+        end
+      else
+        -- New statement starting
+        break
+      end
     end
 
     if token.type == "paren_open" then
