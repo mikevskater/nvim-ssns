@@ -1,4 +1,5 @@
 ---@class TableReference
+---@field server string? Linked server name (four-part name)
 ---@field database string? Database name (cross-db reference)
 ---@field schema string? Schema name
 ---@field name string Table/view/synonym name
@@ -209,8 +210,8 @@ function ParserState:skip_until_keyword(keyword)
   end
 end
 
----Parse qualified identifier (db.schema.table or schema.table or table)
----@return {database: string?, schema: string?, name: string}?
+---Parse qualified identifier (server.db.schema.table or db.schema.table or schema.table or table)
+---@return {server: string?, database: string?, schema: string?, name: string}?
 function ParserState:parse_qualified_identifier()
   local parts = {}
 
@@ -239,15 +240,19 @@ function ParserState:parse_qualified_identifier()
     end
   end
 
-  -- Map parts to database.schema.name
+  -- Map parts to server.database.schema.name
   if #parts == 1 then
-    return { database = nil, schema = nil, name = parts[1] }
+    return { server = nil, database = nil, schema = nil, name = parts[1] }
   elseif #parts == 2 then
-    return { database = nil, schema = parts[1], name = parts[2] }
+    return { server = nil, database = nil, schema = parts[1], name = parts[2] }
   elseif #parts == 3 then
-    return { database = parts[1], schema = parts[2], name = parts[3] }
+    return { server = nil, database = parts[1], schema = parts[2], name = parts[3] }
+  elseif #parts == 4 then
+    return { server = parts[1], database = parts[2], schema = parts[3], name = parts[4] }
   else
-    return { database = nil, schema = nil, name = parts[1] }
+    -- More than 4 parts - use last 4
+    local n = #parts
+    return { server = parts[n-3], database = parts[n-2], schema = parts[n-1], name = parts[n] }
   end
 end
 
@@ -280,6 +285,7 @@ function ParserState:parse_table_reference(known_ctes)
   local alias = self:parse_alias()
 
   return {
+    server = qualified.server,
     database = qualified.database,
     schema = qualified.schema,
     name = qualified.name,
