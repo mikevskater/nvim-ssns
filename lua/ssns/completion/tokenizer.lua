@@ -18,6 +18,8 @@ local TOKEN_TYPE = {
   SEMICOLON = "semicolon",     -- ; (emitted but ignored by parser)
   STAR = "star",               -- * (wildcard or multiply)
   GO = "go",                   -- GO batch separator
+  AT = "at",                   -- @ for variables/parameters (@UserId, @@ROWCOUNT)
+  HASH = "hash",               -- # for temp tables (#temp, ##global)
 }
 
 local STATE = {
@@ -308,6 +310,18 @@ function Tokenizer.tokenize(text)
 
       elseif char == ';' then
         emit_single_char_token(char, TOKEN_TYPE.SEMICOLON)
+        col = col + 1
+        i = i + 1
+
+      -- Check for @ (variables/parameters)
+      elseif char == '@' then
+        emit_single_char_token(char, TOKEN_TYPE.AT)
+        col = col + 1
+        i = i + 1
+
+      -- Check for # (temp tables)
+      elseif char == '#' then
+        emit_single_char_token(char, TOKEN_TYPE.HASH)
         col = col + 1
         i = i + 1
 
