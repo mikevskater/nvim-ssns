@@ -314,12 +314,16 @@ function Tokenizer.tokenize(text)
         i = i + 1
 
       -- Check for @ (variables/parameters)
+      -- @ is only valid at start of identifier for variables (@var, @@system_var)
+      -- If @ appears mid-identifier, it must be bracketed [col@name]
       elseif char == '@' then
         emit_single_char_token(char, TOKEN_TYPE.AT)
         col = col + 1
         i = i + 1
 
       -- Check for # (temp tables)
+      -- # is only valid at start of identifier for temp tables (#temp, ##global)
+      -- If # appears mid-identifier, it must be bracketed [Test#Table]
       elseif char == '#' then
         emit_single_char_token(char, TOKEN_TYPE.HASH)
         col = col + 1

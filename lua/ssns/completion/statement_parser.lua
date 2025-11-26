@@ -5,7 +5,16 @@
 ---@field name string Table/view/synonym name
 ---@field alias string? Alias if any
 ---@field is_temp boolean Whether it's a temp table (#temp or ##temp)
+---@field is_global_temp boolean Whether it's a global temp table (##temp)
+---@field is_table_variable boolean Whether it's a table variable (@TableVar)
 ---@field is_cte boolean Whether it references a CTE
+
+---@class ParameterInfo
+---@field name string Parameter name (without @)
+---@field full_name string Full parameter name (with @)
+---@field line number Line where parameter appears
+---@field col number Column where parameter appears
+---@field is_system boolean Whether it's a system variable (@@)
 
 ---@class ColumnInfo
 ---@field name string Column name or alias
@@ -33,7 +42,9 @@
 ---@field columns ColumnInfo[]? For SELECT - columns in SELECT list
 ---@field subqueries SubqueryInfo[] Subqueries with aliases (recursive)
 ---@field ctes CTEInfo[] CTEs defined in WITH clause
+---@field parameters ParameterInfo[] Parameters/variables used in this chunk
 ---@field temp_table_name string? For SELECT INTO / CREATE TABLE #temp
+---@field is_global_temp boolean? Whether temp_table_name is a global temp (##)
 ---@field start_line number 1-indexed start line
 ---@field end_line number 1-indexed end line
 ---@field start_col number 1-indexed start column
@@ -44,6 +55,7 @@
 ---@field name string Temp table name
 ---@field columns ColumnInfo[] Columns in the temp table
 ---@field created_in_batch number GO batch index where it was created
+---@field is_global boolean Whether it's a global temp table (##)
 
 local StatementParser = {}
 
@@ -87,6 +99,19 @@ local JOIN_MODIFIERS = {
   OUTER = true,
 }
 
+-- Keywords that terminate FROM/JOIN clause parsing
+local FROM_TERMINATORS = {
+  WHERE = true,
+  GROUP = true,
+  HAVING = true,
+  ORDER = true,
+  LIMIT = true,
+  OFFSET = true,
+  FETCH = true,
+  FOR = true,       -- FOR UPDATE, FOR XML, etc.
+  OPTION = true,    -- Query hints
+}
+
 ---Check if keyword starts a new statement at statement position
 ---@param keyword string
 ---@return boolean
@@ -116,6 +141,20 @@ end
 ---@return boolean
 local function is_temp_table(name)
   return name:sub(1, 1) == '#'
+end
+
+---Check if identifier is a global temp table (##)
+---@param name string
+---@return boolean
+local function is_global_temp_table(name)
+  return name:sub(1, 2) == '##'
+end
+
+---Check if identifier is a table variable (@TableVar)
+---@param name string
+---@return boolean
+local function is_table_variable(name)
+  return name:sub(1, 1) == '@'
 end
 
 ---Parser state
@@ -210,10 +249,65 @@ function ParserState:skip_until_keyword(keyword)
   end
 end
 
+---Parse a parameter/variable (@name or @@system_var)
+---@return ParameterInfo?
+function ParserState:parse_parameter()
+  if not self:is_type("at") then
+    return nil
+  end
+
+  local at_token = self:current()
+  local at_line = at_token.line
+  local at_col = at_token.col
+  local is_system = false
+
+  self:advance()  -- consume first @
+
+  -- Check for second @ (system variable like @@ROWCOUNT)
+  if self:is_type("at") then
+    is_system = true
+    self:advance()  -- consume second @
+  end
+
+  -- Next should be identifier
+  local token = self:current()
+  if not token or token.type ~= "identifier" then
+    return nil
+  end
+
+  local name = token.text
+  local full_name = (is_system and "@@" or "@") .. name
+  self:advance()
+
+  return {
+    name = name,
+    full_name = full_name,
+    line = at_line,
+    col = at_col,
+    is_system = is_system,
+  }
+end
+
 ---Parse qualified identifier (server.db.schema.table or db.schema.table or schema.table or table)
 ---@return {server: string?, database: string?, schema: string?, name: string}?
 function ParserState:parse_qualified_identifier()
   local parts = {}
+  local prefix = ""  -- For # or ## temp table prefixes, or @ for table variables
+
+  -- Check for temp table prefix (# or ##)
+  if self:is_type("hash") then
+    prefix = "#"
+    self:advance()
+    -- Check for second # (global temp table)
+    if self:is_type("hash") then
+      prefix = "##"
+      self:advance()
+    end
+  -- Check for table variable prefix (@)
+  elseif self:is_type("at") then
+    prefix = "@"
+    self:advance()
+  end
 
   -- Read first part
   local token = self:current()
@@ -222,9 +316,18 @@ function ParserState:parse_qualified_identifier()
   end
 
   if token.type == "identifier" or token.type == "bracket_id" then
-    table.insert(parts, strip_brackets(token.text))
+    local name = strip_brackets(token.text)
+    -- Prepend prefix if present (temp table or table variable)
+    if prefix ~= "" then
+      name = prefix .. name
+    end
+    table.insert(parts, name)
     self:advance()
   else
+    -- If we consumed a prefix but no identifier follows, return nil
+    if prefix ~= "" then
+      return nil
+    end
     return nil
   end
 
@@ -315,6 +418,8 @@ function ParserState:parse_table_reference(known_ctes)
     name = qualified.name,
     alias = alias,
     is_temp = is_temp_table(qualified.name),
+    is_global_temp = is_global_temp_table(qualified.name),
+    is_table_variable = is_table_variable(qualified.name),
     is_cte = known_ctes[qualified.name] == true,
   }
 end
@@ -592,6 +697,10 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries)
     elseif paren_depth == 0 and (token.text:upper() == "UNION" or token.text:upper() == "INTERSECT" or token.text:upper() == "EXCEPT") then
       -- Set operations - stop parsing FROM clause, let caller handle
       break
+    elseif paren_depth == 0 and token.type == "keyword" and FROM_TERMINATORS[token.text:upper()] then
+      -- FROM clause terminators (WHERE, GROUP BY, ORDER BY, etc.)
+      -- Stop parsing FROM clause, let caller handle the rest of the statement
+      break
     else
       self:advance()
     end
@@ -812,7 +921,9 @@ function ParserState:parse_statement(known_ctes, temp_tables)
     columns = nil,
     subqueries = {},
     ctes = {},
+    parameters = {},
     temp_table_name = nil,
+    is_global_temp = nil,
     start_line = start_token.line,
     end_line = start_token.line,
     start_col = start_token.col,
@@ -863,6 +974,7 @@ function ParserState:parse_statement(known_ctes, temp_tables)
           full_name = qualified.database .. "." .. full_name
         end
         chunk.temp_table_name = full_name
+        chunk.is_global_temp = is_global_temp_table(qualified.name)
 
         -- Store temp table info
         if is_temp_table(qualified.name) and chunk.columns then
@@ -870,6 +982,7 @@ function ParserState:parse_statement(known_ctes, temp_tables)
             name = qualified.name,
             columns = chunk.columns,
             created_in_batch = self.go_batch_index,
+            is_global = is_global_temp_table(qualified.name),
           }
         end
       end
@@ -1147,6 +1260,12 @@ function ParserState:parse_statement(known_ctes, temp_tables)
     elseif token.type == "paren_close" then
       paren_depth = paren_depth - 1
       self:advance()
+    elseif token.type == "at" then
+      -- Parse parameter/variable (@name or @@system_var)
+      local param = self:parse_parameter()
+      if param then
+        table.insert(chunk.parameters, param)
+      end
     else
       self:advance()
     end
