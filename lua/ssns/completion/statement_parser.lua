@@ -774,7 +774,39 @@ function ParserState:parse_subquery(known_ctes)
   end
 
   -- Handle set operations (UNION, INTERSECT, EXCEPT) to capture tables from all members
+  -- Also capture nested subqueries in WHERE/HAVING clauses along the way
   while self:current() do
+    -- Skip until we hit UNION/INTERSECT/EXCEPT or end of subquery, parsing nested subqueries
+    local set_op_paren_depth = 0
+    while self:current() do
+      local token = self:current()
+      if token.type == "paren_open" then
+        set_op_paren_depth = set_op_paren_depth + 1
+        self:advance()
+        -- Check for nested subquery: (SELECT ...
+        if self:is_keyword("SELECT") then
+          local nested = self:parse_subquery(known_ctes)
+          if nested then
+            table.insert(subquery.subqueries, nested)
+          end
+          -- After parse_subquery, we should be at or past closing )
+          set_op_paren_depth = set_op_paren_depth - 1
+        end
+      elseif token.type == "paren_close" then
+        if set_op_paren_depth == 0 then
+          -- End of subquery
+          break
+        end
+        set_op_paren_depth = set_op_paren_depth - 1
+        self:advance()
+      elseif set_op_paren_depth == 0 and (self:is_keyword("UNION") or self:is_keyword("INTERSECT") or self:is_keyword("EXCEPT")) then
+        -- Found set operation
+        break
+      else
+        self:advance()
+      end
+    end
+
     local is_set_op = self:is_keyword("UNION") or self:is_keyword("INTERSECT") or self:is_keyword("EXCEPT")
     if not is_set_op then
       break
