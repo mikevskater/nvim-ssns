@@ -28,6 +28,7 @@
 ---@field columns ColumnInfo[] Columns from SELECT list
 ---@field tables TableReference[] Tables in FROM clause
 ---@field subqueries SubqueryInfo[] Nested subqueries (recursive)
+---@field parameters ParameterInfo[] Parameters used in this subquery
 ---@field start_pos {line: number, col: number}
 ---@field end_pos {line: number, col: number}
 
@@ -36,6 +37,7 @@
 ---@field columns ColumnInfo[] Columns from SELECT list
 ---@field tables TableReference[] Tables referenced
 ---@field subqueries SubqueryInfo[] Any nested subqueries
+---@field parameters ParameterInfo[] Parameters used in this CTE
 
 ---@class StatementChunk
 ---@field statement_type string "SELECT"|"SELECT_INTO"|"INSERT"|"UPDATE"|"DELETE"|"WITH"|"EXEC"|"OTHER"
@@ -354,6 +356,79 @@ function ParserState:parse_parameter()
     col = at_col,
     is_system = is_system,
   }
+end
+
+---Post-parse parameter extraction from token range
+---Scans all tokens in range for @ symbols and extracts parameter info
+---@param start_idx number Starting token index (1-indexed, inclusive)
+---@param end_idx number Ending token index (1-indexed, inclusive)
+---@param target_array ParameterInfo[] Array to append parameters to
+function ParserState:extract_all_parameters_from_tokens(start_idx, end_idx, target_array)
+  local seen = {}
+  local i = start_idx
+  while i <= end_idx and i <= #self.tokens do
+    local token = self.tokens[i]
+    if token.type == "at" then
+      -- Look at next token(s) to build parameter
+      local is_system = false
+      local name_idx = i + 1
+
+      -- Check for @@ (system variable)
+      if self.tokens[name_idx] and self.tokens[name_idx].type == "at" then
+        is_system = true
+        name_idx = name_idx + 1
+      end
+
+      -- Get parameter name
+      if self.tokens[name_idx] and self.tokens[name_idx].type == "identifier" then
+        local name = self.tokens[name_idx].text
+        local full_name = (is_system and "@@" or "@") .. name
+        local key = full_name:lower()
+
+        -- Check if this is a table variable (in FROM/JOIN context)
+        -- We need to skip @TableVar used as table references
+        -- Simple heuristic: if previous token is FROM/JOIN or comma in FROM context, it's a table variable
+        local is_table_ref = false
+        if i > 1 then
+          local prev_idx = i - 1
+          -- Skip whitespace/comments backward if needed
+          while prev_idx > 0 and self.tokens[prev_idx].type == "whitespace" do
+            prev_idx = prev_idx - 1
+          end
+          if prev_idx > 0 then
+            local prev = self.tokens[prev_idx]
+            if prev.type == "keyword" then
+              local kw = prev.text:upper()
+              if kw == "FROM" or kw == "JOIN" or kw == "INTO" then
+                is_table_ref = true
+              end
+            elseif prev.type == "comma" then
+              -- Could be comma-separated FROM list, check further back
+              -- This is a simple heuristic, may need refinement
+              -- For now, we'll let table variables through and rely on existing logic
+            end
+          end
+        end
+
+        if not seen[key] and not is_table_ref then
+          seen[key] = true
+          table.insert(target_array, {
+            name = name,
+            full_name = full_name,
+            is_system = is_system,
+            line = token.line,
+            col = token.col,
+          })
+        end
+
+        i = name_idx + 1
+      else
+        i = i + 1
+      end
+    else
+      i = i + 1
+    end
+  end
 end
 
 ---Parse qualified identifier (server.db.schema.table or db.schema.table or schema.table or table)
@@ -813,11 +888,15 @@ function ParserState:parse_subquery(known_ctes)
     return nil
   end
 
+  -- Track token range for parameter extraction
+  local start_token_idx = self.pos
+
   local subquery = {
     alias = nil,
     columns = {},
     tables = {},
     subqueries = {},
+    parameters = {},
     start_pos = { line = start_token.line, col = start_token.col },
     end_pos = { line = start_token.line, col = start_token.col },
   }
@@ -962,6 +1041,12 @@ function ParserState:parse_subquery(known_ctes)
   -- Resolve parent_table for columns using aliases
   resolve_column_parents(subquery.columns, subquery_aliases, subquery.tables)
 
+  -- Post-parse parameter extraction: scan all tokens in subquery for @ symbols
+  local end_token_idx = self.pos - 1
+  if end_token_idx >= start_token_idx then
+    self:extract_all_parameters_from_tokens(start_token_idx, end_token_idx, subquery.parameters)
+  end
+
   return subquery
 end
 
@@ -1029,6 +1114,7 @@ function ParserState:parse_with_clause()
       columns = {},
       tables = {},
       subqueries = {},
+      parameters = {},
     }
 
     -- Register CTE name BEFORE parsing body so recursive self-references are filtered
@@ -1061,6 +1147,7 @@ function ParserState:parse_with_clause()
         end
         cte.tables = subquery.tables
         cte.subqueries = subquery.subqueries
+        cte.parameters = subquery.parameters
       end
     elseif #column_list > 0 then
       -- No SELECT subquery but we have explicit column list - convert to ColumnInfo
@@ -1102,6 +1189,9 @@ function ParserState:parse_statement(known_ctes, temp_tables)
   if not start_token then
     return nil
   end
+
+  -- Track token range for parameter extraction
+  local start_token_idx = self.pos
 
   local chunk = {
     statement_type = "OTHER",
@@ -1460,12 +1550,6 @@ function ParserState:parse_statement(known_ctes, temp_tables)
     elseif token.type == "paren_close" then
       paren_depth = paren_depth - 1
       self:advance()
-    elseif token.type == "at" then
-      -- Parse parameter/variable (@name or @@system_var)
-      local param = self:parse_parameter()
-      if param then
-        table.insert(chunk.parameters, param)
-      end
     else
       self:advance()
     end
@@ -1482,6 +1566,13 @@ function ParserState:parse_statement(known_ctes, temp_tables)
   if last_statement_token then
     chunk.end_line = last_statement_token.line
     chunk.end_col = last_statement_token.col + #last_statement_token.text - 1
+  end
+
+  -- Post-parse parameter extraction: scan all tokens in statement for @ symbols
+  -- This catches parameters in SELECT clause, DECLARE/SET, subqueries, functions, CASE, etc.
+  local end_token_idx = self.pos - 1
+  if end_token_idx >= start_token_idx then
+    self:extract_all_parameters_from_tokens(start_token_idx, end_token_idx, chunk.parameters)
   end
 
   return chunk
