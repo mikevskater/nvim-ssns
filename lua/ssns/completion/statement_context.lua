@@ -355,8 +355,68 @@ function Context.detect(bufnr, line_num, col)
   -- Extract prefix and trigger
   local prefix, trigger = Context._extract_prefix_and_trigger(line, col)
 
-  -- Detect type from line text
-  local ctx_type, mode, extra = Context._detect_type_from_line(before_cursor, cache_ctx and cache_ctx.chunk)
+  -- Detect type using clause positions first, fallback to line-based detection
+  local ctx_type, mode, extra
+  local chunk = cache_ctx and cache_ctx.chunk
+
+  if chunk then
+    local StatementParser = require('ssns.completion.statement_parser')
+    local clause = StatementParser.get_clause_at_position(chunk, line_num, col)
+
+    if clause then
+      -- Use clause position to determine context
+      extra = {}
+      if clause == "select" then
+        ctx_type = Context.Type.COLUMN
+        mode = "select"
+      elseif clause == "from" then
+        ctx_type = Context.Type.TABLE
+        mode = "from"
+      elseif clause == "join" then
+        ctx_type = Context.Type.TABLE
+        mode = "join"
+      elseif clause == "on" then
+        ctx_type = Context.Type.COLUMN
+        mode = "on"
+      elseif clause == "where" then
+        ctx_type = Context.Type.COLUMN
+        mode = "where"
+      elseif clause == "group_by" then
+        ctx_type = Context.Type.COLUMN
+        mode = "group_by"
+      elseif clause == "having" then
+        ctx_type = Context.Type.COLUMN
+        mode = "having"
+      elseif clause == "order_by" then
+        ctx_type = Context.Type.COLUMN
+        mode = "order_by"
+      elseif clause == "set" then
+        ctx_type = Context.Type.COLUMN
+        mode = "set"
+      elseif clause == "into" then
+        ctx_type = Context.Type.TABLE
+        mode = "into"
+      end
+
+      -- Check for qualified column reference (alias.column, table.column)
+      if before_cursor:match("%.%s*$") or before_cursor:match("%.[%w_]*$") then
+        local ref = Context._get_reference_before_dot(before_cursor)
+        if ref then
+          extra.table_ref = ref
+          extra.filter_table = ref
+          extra.omit_table = true
+          ctx_type = Context.Type.COLUMN
+          mode = "qualified"
+        end
+      end
+    else
+      -- Fallback to line-based detection
+      ctx_type, mode, extra = Context._detect_type_from_line(before_cursor, chunk)
+    end
+  else
+    -- No chunk, use line-based detection
+    ctx_type, mode, extra = Context._detect_type_from_line(before_cursor, chunk)
+  end
 
   -- Build context result
   local context = {

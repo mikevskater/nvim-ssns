@@ -23,6 +23,12 @@
 ---@field parent_schema string? Schema of the parent table
 ---@field is_star boolean Whether this is a * or alias.*
 
+---@class ClausePosition
+---@field start_line number 1-indexed start line
+---@field start_col number 1-indexed start column
+---@field end_line number 1-indexed end line
+---@field end_col number 1-indexed end column
+
 ---@class SubqueryInfo
 ---@field alias string? The alias after closing paren
 ---@field columns ColumnInfo[] Columns from SELECT list
@@ -54,6 +60,7 @@
 ---@field start_col number 1-indexed start column
 ---@field end_col number 1-indexed end column
 ---@field go_batch_index number Which GO batch this belongs to (1-indexed)
+---@field clause_positions table<string, ClausePosition>? Positions of each clause (select, from, where, etc.)
 
 ---@class TempTableInfo
 ---@field name string Temp table name
@@ -571,11 +578,23 @@ end
 ---@param paren_depth number
 ---@param known_ctes table<string, boolean>?
 ---@param subqueries SubqueryInfo[]?
----@return ColumnInfo[]
-function ParserState:parse_select_columns(paren_depth, known_ctes, subqueries)
+---@param select_start_token table? The SELECT keyword token (for position tracking)
+---@return ColumnInfo[], ClausePosition?
+function ParserState:parse_select_columns(paren_depth, known_ctes, subqueries, select_start_token)
   local columns = {}
   local current_col = nil
   local current_source_table = nil
+
+  -- Track SELECT clause position
+  local clause_pos = nil
+  if select_start_token then
+    clause_pos = {
+      start_line = select_start_token.line,
+      start_col = select_start_token.col,
+      end_line = select_start_token.line,
+      end_col = select_start_token.col,
+    }
+  end
 
   while self:current() do
     local token = self:current()
@@ -716,16 +735,44 @@ function ParserState:parse_select_columns(paren_depth, known_ctes, subqueries)
     })
   end
 
-  return columns
+  -- Update clause end position to the last token processed (before FROM/INTO)
+  if clause_pos then
+    local last_token = self.pos > 1 and self.tokens[self.pos - 1] or select_start_token
+    if last_token then
+      clause_pos.end_line = last_token.line
+      clause_pos.end_col = last_token.col + #last_token.text - 1
+    end
+  end
+
+  return columns, clause_pos
 end
 
 ---Parse FROM/JOIN clauses to extract tables
 ---@param known_ctes table<string, boolean>
 ---@param paren_depth number
 ---@param subqueries? SubqueryInfo[] Optional collection to add subqueries to
----@return TableReference[]
-function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries)
+---@param from_start_token table? The FROM keyword token (for position tracking)
+---@return TableReference[], ClausePosition?, table, table
+function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries, from_start_token)
   local tables = {}
+
+  -- Track FROM clause position
+  local clause_pos = nil
+  if from_start_token then
+    clause_pos = {
+      start_line = from_start_token.line,
+      start_col = from_start_token.col,
+      end_line = from_start_token.line,
+      end_col = from_start_token.col,
+    }
+  end
+
+  -- Track individual JOIN and ON positions
+  local join_positions = {}  -- Array of {start_line, start_col, end_line, end_col}
+  local on_positions = {}    -- Array of {start_line, start_col, end_line, end_col}
+  local current_join_start = nil
+  local current_on_start = nil
+  local join_count = 0
 
   while self:current() do
     local token = self:current()
@@ -760,6 +807,31 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries)
       end
       self:advance()
     elseif is_from_keyword(token.text) then
+      local upper_text = token.text:upper()
+
+      -- Track JOIN/ON positions
+      -- When we detect a JOIN keyword (not FROM), track its position
+      if upper_text ~= "FROM" then
+        -- If there was a previous ON clause, end it here
+        if current_on_start then
+          local prev_token = self.tokens[self.pos - 1]
+          if prev_token then
+            table.insert(on_positions, {
+              start_line = current_on_start.line,
+              start_col = current_on_start.col,
+              end_line = prev_token.line,
+              end_col = prev_token.col + #prev_token.text - 1,
+            })
+          end
+          current_on_start = nil
+        end
+
+        -- Track new JOIN start (use the first modifier token as start)
+        if upper_text ~= "JOIN" and JOIN_MODIFIERS[upper_text] then
+          current_join_start = token  -- INNER, LEFT, etc.
+        end
+      end
+
       self:advance()
 
       -- Skip JOIN modifiers
@@ -769,6 +841,10 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries)
 
       -- Skip the JOIN keyword itself (if present after modifiers)
       if self:is_keyword("JOIN") then
+        if not current_join_start then
+          current_join_start = self:current()
+        end
+        join_count = join_count + 1
         self:advance()
       end
 
@@ -819,6 +895,29 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries)
         -- Skip optional alias
         self:parse_alias()
         -- Don't add to tables - APPLY is handled, continue to next token
+        goto continue_from_loop
+      end
+
+      -- Check for ON keyword before table reference
+      if self:is_keyword("ON") then
+        -- End the current JOIN position (JOIN ends at ON)
+        if current_join_start then
+          local prev_token = self.tokens[self.pos - 1]
+          if prev_token then
+            table.insert(join_positions, {
+              start_line = current_join_start.line,
+              start_col = current_join_start.col,
+              end_line = prev_token.line,
+              end_col = prev_token.col + #prev_token.text - 1,
+            })
+          end
+          current_join_start = nil
+        end
+
+        -- Start tracking ON clause
+        current_on_start = self:current()
+        self:advance()  -- Move past ON
+        -- Continue loop - ON condition will be consumed until next JOIN/terminator
         goto continue_from_loop
       end
 
@@ -876,7 +975,38 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries)
     end
   end
 
-  return tables
+  -- Update clause end position to the last token processed (before WHERE/GROUP/ORDER/etc.)
+  if clause_pos then
+    local last_token = self.pos > 1 and self.tokens[self.pos - 1] or from_start_token
+    if last_token then
+      clause_pos.end_line = last_token.line
+      clause_pos.end_col = last_token.col + #last_token.text - 1
+    end
+  end
+
+  -- Finalize any open JOIN clause
+  if current_join_start then
+    local end_token = self.tokens[self.pos - 1] or current_join_start
+    table.insert(join_positions, {
+      start_line = current_join_start.line,
+      start_col = current_join_start.col,
+      end_line = end_token.line,
+      end_col = end_token.col + #end_token.text - 1,
+    })
+  end
+
+  -- Finalize any open ON clause
+  if current_on_start then
+    local end_token = self.tokens[self.pos - 1] or current_on_start
+    table.insert(on_positions, {
+      start_line = current_on_start.line,
+      start_col = current_on_start.col,
+      end_line = end_token.line,
+      end_col = end_token.col + #end_token.text - 1,
+    })
+  end
+
+  return tables, clause_pos, join_positions, on_positions
 end
 
 ---Parse a subquery recursively
@@ -906,12 +1036,12 @@ function ParserState:parse_subquery(known_ctes)
 
   local paren_depth = 0
 
-  -- Parse SELECT list
-  subquery.columns = self:parse_select_columns(paren_depth, known_ctes, subquery.subqueries)
+  -- Parse SELECT list (no position tracking for subqueries)
+  subquery.columns = self:parse_select_columns(paren_depth, known_ctes, subquery.subqueries, nil)
 
-  -- Parse FROM clause
+  -- Parse FROM clause (no position tracking for subqueries)
   if self:is_keyword("FROM") then
-    subquery.tables = self:parse_from_clause(known_ctes, paren_depth, subquery.subqueries)
+    subquery.tables = self:parse_from_clause(known_ctes, paren_depth, subquery.subqueries, nil)
   end
 
   -- Handle set operations (UNION, INTERSECT, EXCEPT) to capture tables from all members
@@ -986,9 +1116,9 @@ function ParserState:parse_subquery(known_ctes)
       self:advance()
     end
 
-    -- Parse FROM clause if found
+    -- Parse FROM clause if found (no position tracking for subqueries)
     if self:is_keyword("FROM") then
-      local union_tables = self:parse_from_clause(known_ctes, paren_depth, subquery.subqueries)
+      local union_tables = self:parse_from_clause(known_ctes, paren_depth, subquery.subqueries, nil)
       for _, tbl in ipairs(union_tables) do
         table.insert(subquery.tables, tbl)
       end
@@ -1208,6 +1338,7 @@ function ParserState:parse_statement(known_ctes, temp_tables)
     start_col = start_token.col,
     end_col = start_token.col,
     go_batch_index = self.go_batch_index,
+    clause_positions = {},
   }
 
   local paren_depth = 0
@@ -1231,15 +1362,21 @@ function ParserState:parse_statement(known_ctes, temp_tables)
   if self:is_keyword("SELECT") then
     chunk.statement_type = "SELECT"
     in_select = true
+    local select_token = self:current()
     self:advance()
 
     -- Parse SELECT list
-    chunk.columns = self:parse_select_columns(paren_depth, known_ctes, chunk.subqueries)
+    local select_clause_pos
+    chunk.columns, select_clause_pos = self:parse_select_columns(paren_depth, known_ctes, chunk.subqueries, select_token)
+    if select_clause_pos then
+      chunk.clause_positions["select"] = select_clause_pos
+    end
 
     -- Check for INTO
     if self:is_keyword("INTO") then
       -- Don't change statement_type, keep as "SELECT"
       -- The temp_table_name field indicates this is SELECT INTO
+      local into_token = self:current()
       self:advance()
 
       local qualified = self:parse_qualified_identifier()
@@ -1265,12 +1402,40 @@ function ParserState:parse_statement(known_ctes, temp_tables)
           }
         end
       end
+
+      -- Track INTO clause position
+      local last_token = self.pos > 1 and self.tokens[self.pos - 1] or into_token
+      chunk.clause_positions["into"] = {
+        start_line = into_token.line,
+        start_col = into_token.col,
+        end_line = last_token.line,
+        end_col = last_token.col + #last_token.text - 1,
+      }
     end
 
     -- Parse FROM clause
     if self:is_keyword("FROM") then
       in_from = true
-      chunk.tables = self:parse_from_clause(known_ctes, paren_depth, chunk.subqueries)
+      local from_token = self:current()
+      local from_clause_pos, join_positions, on_positions
+      chunk.tables, from_clause_pos, join_positions, on_positions = self:parse_from_clause(known_ctes, paren_depth, chunk.subqueries, from_token)
+      if from_clause_pos then
+        chunk.clause_positions["from"] = from_clause_pos
+      end
+
+      -- Store individual JOIN positions
+      if join_positions then
+        for i, pos in ipairs(join_positions) do
+          chunk.clause_positions["join_" .. i] = pos
+        end
+      end
+
+      -- Store individual ON positions
+      if on_positions then
+        for i, pos in ipairs(on_positions) do
+          chunk.clause_positions["on_" .. i] = pos
+        end
+      end
     end
   elseif self:is_keyword("INSERT") then
     chunk.statement_type = "INSERT"
@@ -1279,11 +1444,21 @@ function ParserState:parse_statement(known_ctes, temp_tables)
 
     -- Extract INSERT INTO table
     if self:is_keyword("INTO") then
+      local into_token = self:current()
       self:advance()
       local table_ref = self:parse_table_reference(known_ctes)
       if table_ref then
         table.insert(chunk.tables, table_ref)
       end
+
+      -- Track INTO clause position
+      local last_token = self.pos > 1 and self.tokens[self.pos - 1] or into_token
+      chunk.clause_positions["into"] = {
+        start_line = into_token.line,
+        start_col = into_token.col,
+        end_line = last_token.line,
+        end_col = last_token.col + #last_token.text - 1,
+      }
     end
 
     -- Skip column list if present (...)
@@ -1313,16 +1488,39 @@ function ParserState:parse_statement(known_ctes, temp_tables)
     -- If INSERT...SELECT, parse the SELECT
     if self:is_keyword("SELECT") then
       in_select = true
+      local select_token = self:current()
       self:advance()
 
-      chunk.columns = self:parse_select_columns(paren_depth, known_ctes, chunk.subqueries)
+      local select_clause_pos
+      chunk.columns, select_clause_pos = self:parse_select_columns(paren_depth, known_ctes, chunk.subqueries, select_token)
+      if select_clause_pos then
+        chunk.clause_positions["select"] = select_clause_pos
+      end
 
       if self:is_keyword("FROM") then
         in_from = true
+        local from_token = self:current()
         -- Add FROM clause tables to existing tables (preserve INSERT target)
-        local from_tables = self:parse_from_clause(known_ctes, paren_depth, chunk.subqueries)
+        local from_tables, from_clause_pos, join_positions, on_positions = self:parse_from_clause(known_ctes, paren_depth, chunk.subqueries, from_token)
         for _, t in ipairs(from_tables) do
           table.insert(chunk.tables, t)
+        end
+        if from_clause_pos then
+          chunk.clause_positions["from"] = from_clause_pos
+        end
+
+        -- Store individual JOIN positions
+        if join_positions then
+          for i, pos in ipairs(join_positions) do
+            chunk.clause_positions["join_" .. i] = pos
+          end
+        end
+
+        -- Store individual ON positions
+        if on_positions then
+          for i, pos in ipairs(on_positions) do
+            chunk.clause_positions["on_" .. i] = pos
+          end
         end
       end
     end
@@ -1468,6 +1666,13 @@ function ParserState:parse_statement(known_ctes, temp_tables)
   -- Initialize to previous token (what we last consumed before this loop)
   local last_statement_token = self.pos > 1 and self.tokens[self.pos - 1] or start_token
 
+  -- Track clause start positions
+  local where_start = nil
+  local group_by_start = nil
+  local having_start = nil
+  local order_by_start = nil
+  local set_start = nil
+
   while self:current() do
     local token = self:current()
 
@@ -1478,6 +1683,29 @@ function ParserState:parse_statement(known_ctes, temp_tables)
 
     -- Check for new statement starting
     local upper_text = token.text:upper()
+
+    -- Track clause positions at paren_depth 0
+    if paren_depth == 0 then
+      if upper_text == "WHERE" and not where_start then
+        where_start = token
+      elseif upper_text == "GROUP" then
+        -- Check if next is BY
+        local next_tok = self:peek(1)
+        if next_tok and next_tok.text:upper() == "BY" and not group_by_start then
+          group_by_start = token
+        end
+      elseif upper_text == "HAVING" and not having_start then
+        having_start = token
+      elseif upper_text == "ORDER" then
+        -- Check if next is BY
+        local next_tok = self:peek(1)
+        if next_tok and next_tok.text:upper() == "BY" and not order_by_start then
+          order_by_start = token
+        end
+      elseif upper_text == "SET" and chunk.statement_type == "UPDATE" and not set_start then
+        set_start = token
+      end
+    end
 
     -- UNION/INTERSECT/EXCEPT end the current SELECT statement
     -- Each SELECT in a UNION should be its own chunk for proper autocompletion scoping
@@ -1491,7 +1719,27 @@ function ParserState:parse_statement(known_ctes, temp_tables)
     if paren_depth == 0 and upper_text == "FROM" and chunk.statement_type == "UPDATE" then
       -- Extended UPDATE syntax: UPDATE alias SET ... FROM table alias
       -- Parse FROM clause to get the actual tables
-      chunk.tables = self:parse_from_clause(known_ctes, paren_depth, chunk.subqueries)
+      local from_token = self:current()
+      local from_clause_pos, join_positions, on_positions
+      chunk.tables, from_clause_pos, join_positions, on_positions = self:parse_from_clause(known_ctes, paren_depth, chunk.subqueries, from_token)
+      if from_clause_pos then
+        chunk.clause_positions["from"] = from_clause_pos
+      end
+
+      -- Store individual JOIN positions
+      if join_positions then
+        for i, pos in ipairs(join_positions) do
+          chunk.clause_positions["join_" .. i] = pos
+        end
+      end
+
+      -- Store individual ON positions
+      if on_positions then
+        for i, pos in ipairs(on_positions) do
+          chunk.clause_positions["on_" .. i] = pos
+        end
+      end
+
       -- Mark that we found a FROM clause so we don't add update_target later
       chunk.has_from_clause = true
       goto continue_loop
@@ -1566,6 +1814,57 @@ function ParserState:parse_statement(known_ctes, temp_tables)
   if last_statement_token then
     chunk.end_line = last_statement_token.line
     chunk.end_col = last_statement_token.col + #last_statement_token.text - 1
+  end
+
+  -- Build clause positions for WHERE, GROUP BY, HAVING, ORDER BY, SET
+  -- Each clause ends at the start of the next clause, or at statement end
+  if where_start then
+    local where_end = group_by_start or having_start or order_by_start or last_statement_token
+    chunk.clause_positions["where"] = {
+      start_line = where_start.line,
+      start_col = where_start.col,
+      end_line = where_end.line,
+      end_col = (where_end == last_statement_token) and (where_end.col + #where_end.text - 1) or (where_end.col - 1),
+    }
+  end
+
+  if group_by_start then
+    local group_by_end = having_start or order_by_start or last_statement_token
+    chunk.clause_positions["group_by"] = {
+      start_line = group_by_start.line,
+      start_col = group_by_start.col,
+      end_line = group_by_end.line,
+      end_col = (group_by_end == last_statement_token) and (group_by_end.col + #group_by_end.text - 1) or (group_by_end.col - 1),
+    }
+  end
+
+  if having_start then
+    local having_end = order_by_start or last_statement_token
+    chunk.clause_positions["having"] = {
+      start_line = having_start.line,
+      start_col = having_start.col,
+      end_line = having_end.line,
+      end_col = (having_end == last_statement_token) and (having_end.col + #having_end.text - 1) or (having_end.col - 1),
+    }
+  end
+
+  if order_by_start then
+    chunk.clause_positions["order_by"] = {
+      start_line = order_by_start.line,
+      start_col = order_by_start.col,
+      end_line = last_statement_token.line,
+      end_col = last_statement_token.col + #last_statement_token.text - 1,
+    }
+  end
+
+  if set_start then
+    local set_end = where_start or last_statement_token
+    chunk.clause_positions["set"] = {
+      start_line = set_start.line,
+      start_col = set_start.col,
+      end_line = set_end.line,
+      end_col = (set_end == last_statement_token) and (set_end.col + #set_end.text - 1) or (set_end.col - 1),
+    }
   end
 
   -- Post-parse parameter extraction: scan all tokens in statement for @ symbols
@@ -1703,6 +2002,35 @@ function StatementParser.get_subquery_at_position(chunk, line, col)
       return result
     end
   end
+  return nil
+end
+
+---Get which clause the cursor is in
+---@param chunk StatementChunk
+---@param line number 1-indexed line
+---@param col number 1-indexed column
+---@return string? clause_name "select", "from", "where", "group_by", "having", "order_by", "set", "into", "join", "on", or nil
+function StatementParser.get_clause_at_position(chunk, line, col)
+  if not chunk or not chunk.clause_positions then
+    return nil
+  end
+
+  -- Check each clause position to find which one contains this position
+  -- A position is "in" a clause if it's >= start and <= end
+  for clause_name, pos in pairs(chunk.clause_positions) do
+    if line > pos.start_line or (line == pos.start_line and col >= pos.start_col) then
+      if line < pos.end_line or (line == pos.end_line and col <= pos.end_col) then
+        -- Normalize join_N and on_N to just "join" and "on"
+        if clause_name:match("^join_%d+$") then
+          return "join"
+        elseif clause_name:match("^on_%d+$") then
+          return "on"
+        end
+        return clause_name
+      end
+    end
+  end
+
   return nil
 end
 
