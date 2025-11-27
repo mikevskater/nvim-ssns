@@ -503,14 +503,6 @@ end
 function Source:detect_context(ctx)
   local Context = require('ssns.completion.context')
 
-  -- Optional: Log tree-sitter availability in debug mode
-  if self.opts.debug then
-    local Treesitter = require('ssns.completion.metadata.treesitter')
-    if not Treesitter.is_available() then
-      self:log("Tree-sitter SQL parser not available, using regex fallback", vim.log.levels.DEBUG)
-    end
-  end
-
   -- Use full context detection with comment/string checks
   local success, context = pcall(function()
     return Context.detect_full(ctx.bufnr, ctx.cursor[1], ctx.cursor[2])
