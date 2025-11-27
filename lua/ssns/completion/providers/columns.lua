@@ -130,10 +130,14 @@ function ColumnsProvider._get_completions_impl(ctx)
     -- Pattern: JOIN table ON left.col = | (show columns from other tables with fuzzy matching)
     return ColumnsProvider._get_on_clause_columns(connection, sql_context)
 
-  elseif sql_context.mode == "select" or sql_context.mode == "where" or
+  elseif sql_context.mode == "where" then
+    -- Pattern: WHERE col = | (show columns with type compatibility warnings)
+    return ColumnsProvider._get_where_clause_columns(connection, sql_context)
+
+  elseif sql_context.mode == "select" or
          sql_context.mode == "order_by" or sql_context.mode == "group_by" or
          sql_context.mode == "set" then
-    -- Pattern: SELECT | or WHERE | or UPDATE SET | (show columns from all tables in query)
+    -- Pattern: SELECT | or ORDER BY | or GROUP BY | or UPDATE SET | (show columns from all tables in query)
     return ColumnsProvider._get_all_columns_from_query(connection, sql_context)
 
   elseif sql_context.mode == "qualified_bracket" then
@@ -516,6 +520,89 @@ function ColumnsProvider._get_on_clause_columns(connection, context)
   end)
 
   return items
+end
+
+---Get columns for WHERE clause with type compatibility checking
+---Shows type warnings when comparing incompatible column types
+---@param connection table Connection context
+---@param context table SQL context with left_side info
+---@return table[] items CompletionItems
+function ColumnsProvider._get_where_clause_columns(connection, context)
+  local Resolver = require('ssns.completion.metadata.resolver')
+  local Utils = require('ssns.completion.utils')
+
+  -- Get base columns from all tables in query
+  local base_items = ColumnsProvider._get_all_columns_from_query(connection, context)
+
+  -- If no left-side column info, return base items
+  if not context.left_side then
+    return base_items
+  end
+
+  local left_col_name = context.left_side.column_name
+  local left_table_ref = context.left_side.table_ref
+
+  -- Try to resolve left-side column type
+  local left_col_type = nil
+  if left_table_ref and context.resolved_scope then
+    local left_table = Resolver.get_resolved(context.resolved_scope, left_table_ref)
+    if left_table then
+      local left_cols = Resolver.get_columns(left_table, connection)
+      for _, col in ipairs(left_cols or {}) do
+        local col_name = col.name or col.column_name
+        if col_name and col_name:lower() == left_col_name:lower() then
+          left_col_type = col.data_type
+          break
+        end
+      end
+    end
+  end
+
+  -- If we couldn't determine left-side type, return base items
+  if not left_col_type then
+    return base_items
+  end
+
+  -- Enhance items with type compatibility info
+  for _, item in ipairs(base_items) do
+    local item_type = item.data and item.data.data_type
+
+    if item_type then
+      local type_info = TypeCompatibility.get_info(left_col_type, item_type)
+
+      if not type_info.compatible then
+        -- Incompatible type - add warning icon and demote priority
+        item.detail = (item.detail or "") .. " " .. type_info.icon
+
+        -- Adjust priority (add 2000 to push incompatible to bottom)
+        local current_priority = tonumber(item.sortText:match("^(%d+)")) or 5000
+        item.sortText = string.format("%05d_%s", current_priority + 2000, item.label)
+
+        -- Add warning to documentation
+        local doc = item.documentation
+        if type(doc) == "table" and doc.value then
+          doc.value = doc.value .. "\n\n" .. type_info.icon .. " " .. type_info.warning
+        elseif type(doc) == "string" then
+          item.documentation = doc .. "\n\n" .. type_info.icon .. " " .. type_info.warning
+        else
+          item.documentation = {
+            kind = "markdown",
+            value = type_info.icon .. " " .. type_info.warning,
+          }
+        end
+      elseif type_info.warning then
+        -- Implicit conversion warning (not incompatible, just a note)
+        item.detail = (item.detail or "") .. " " .. type_info.icon
+      end
+    end
+  end
+
+  -- Re-sort by updated priorities
+  table.sort(base_items, function(a, b)
+    return (a.sortText or "") < (b.sortText or "")
+  end)
+
+  return base_items
 end
 
 ---Get columns for bracketed qualified reference ([schema].[table].|)
