@@ -359,34 +359,9 @@ function Source:get_completions(ctx, callback)
     cursor_pos = {context_result.line_num, context_result.col},
   }
 
-  -- Detect temp tables in buffer (lazy, on-demand)
-  -- This runs once per buffer when completion is first triggered
-  local Cache = require('ssns.cache')
-  if not Cache.buffer_cache[ctx.bufnr] then
-    -- Parse buffer for temp tables
-    local success, _ = pcall(function()
-      local lines = vim.api.nvim_buf_get_lines(ctx.bufnr, 0, -1, false)
-      local query = table.concat(lines, '\n')
-
-      local TempTableTracker = require('ssns.completion.metadata.temp_tables')
-      local temp_tables = TempTableTracker.detect_temp_tables(query, ctx.bufnr)
-
-      -- Add to buffer cache
-      for _, temp_table in ipairs(temp_tables) do
-        Cache.add_buffer_temp_table(ctx.bufnr, temp_table, 1) -- Chunk 1 by default
-      end
-    end)
-
-    -- Silent failure - temp table detection is optional
-    if not success then
-      -- Initialize empty cache so we don't retry every time
-      Cache.buffer_cache[ctx.bufnr] = {
-        temp_tables = {},
-        go_chunks = {},
-        last_go_line = 0,
-      }
-    end
-  end
+  -- NOTE: Temp table detection is now handled by StatementCache
+  -- StatementCache.get_context_at_position() returns temp_tables in context
+  -- No need for lazy buffer-level detection here
 
   -- Create callback wrapper to apply limits and track performance
   local wrapped_callback = function(items)
