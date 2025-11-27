@@ -196,6 +196,165 @@ end
 
 -- Internal functions
 
+---Create mock database structure for provider tests
+---@param connection_config table Connection configuration from test.context.connection
+---@return table database Mock database object
+function UnitRunner._create_mock_database(connection_config)
+  local mock_tables = {
+    { name = "Employees", schema = "dbo", object_type = "table" },
+    { name = "Departments", schema = "dbo", object_type = "table" },
+    { name = "Orders", schema = "dbo", object_type = "table" },
+    { name = "Customers", schema = "dbo", object_type = "table" },
+    { name = "Products", schema = "dbo", object_type = "table" },
+    { name = "Branches", schema = "dbo", object_type = "table" },
+    { name = "test_table1", schema = "dbo", object_type = "table" },
+    { name = "test_table2", schema = "dbo", object_type = "table" },
+    { name = "Benefits", schema = "hr", object_type = "table" },
+    { name = "EmployeeReviews", schema = "hr", object_type = "table" },
+    { name = "Salaries", schema = "hr", object_type = "table" },
+    { name = "AllDivisions", schema = "Branch", object_type = "table" },
+    { name = "CentralDivision", schema = "Branch", object_type = "table" },
+    { name = "BranchManagers", schema = "Branch", object_type = "table" },
+    { name = "BranchLocations", schema = "Branch", object_type = "table" },
+    { name = "ExternalTable1", schema = "dbo", object_type = "table", database = "OtherDB" },
+    { name = "ExternalTable2", schema = "dbo", object_type = "table", database = "OtherDB" },
+    { name = "My Table", schema = "dbo", object_type = "table" },
+    { name = "My Other Table", schema = "dbo", object_type = "table" },
+  }
+
+  local mock_views = {
+    { name = "vw_ActiveEmployees", schema = "dbo", object_type = "view" },
+    { name = "vw_DepartmentSummary", schema = "dbo", object_type = "view" },
+    { name = "vw_EmployeeDetails", schema = "dbo", object_type = "view" },
+  }
+
+  local mock_synonyms = {
+    { name = "syn_Employees", schema = "dbo", object_type = "synonym" },
+    { name = "syn_Depts", schema = "dbo", object_type = "synonym" },
+    { name = "syn_RemoteTable", schema = "dbo", object_type = "synonym" },
+  }
+
+  -- Build mock database structure matching DbClass format
+  local database = {
+    name = connection_config.database or "vim_dadbod_test",
+    is_loaded = true,
+    children = {
+      {
+        object_type = "tables_group",
+        children = mock_tables,
+      },
+      {
+        object_type = "views_group",
+        children = mock_views,
+      },
+      {
+        object_type = "synonyms_group",
+        children = mock_synonyms,
+      },
+    },
+    get_adapter = function()
+      return {
+        features = {
+          views = true,
+          synonyms = true,
+          functions = true,
+        },
+      }
+    end,
+    load = function() end, -- No-op for mock
+  }
+
+  return database
+end
+
+---Compare provider results with expected output
+---@param actual_items table[] Actual completion items
+---@param expected table Expected structure
+---@return boolean passed
+---@return string? error Error message if failed
+function UnitRunner._compare_provider_results(actual_items, expected)
+  if not expected or not expected.items then
+    return false, "Invalid expected structure: missing 'items' field"
+  end
+
+  local exp_items = expected.items
+
+  -- Handle different expected formats
+  if type(exp_items) == "table" then
+    -- Check if it's an array of strings (exact labels)
+    local is_array = #exp_items > 0 and type(exp_items[1]) == "string"
+
+    if is_array then
+      -- Expected is array of strings - check exact match
+      if #actual_items ~= #exp_items then
+        return false,
+          string.format("Item count mismatch: expected %d items, got %d", #exp_items, #actual_items)
+      end
+
+      -- Build set of actual labels
+      local actual_labels = {}
+      for _, item in ipairs(actual_items) do
+        actual_labels[item.label] = true
+      end
+
+      -- Check all expected labels are present
+      for _, exp_label in ipairs(exp_items) do
+        if not actual_labels[exp_label] then
+          return false, string.format("Expected item '%s' not found in results", exp_label)
+        end
+      end
+    else
+      -- Expected has includes/excludes
+      local includes = exp_items.includes or {}
+      local excludes = exp_items.excludes or {}
+
+      -- Build set of actual labels
+      local actual_labels = {}
+      for _, item in ipairs(actual_items) do
+        actual_labels[item.label] = true
+      end
+
+      -- Check all includes are present
+      for _, inc_label in ipairs(includes) do
+        if not actual_labels[inc_label] then
+          return false, string.format("Expected included item '%s' not found in results", inc_label)
+        end
+      end
+
+      -- Check all excludes are absent
+      for _, exc_label in ipairs(excludes) do
+        if actual_labels[exc_label] then
+          return false, string.format("Expected excluded item '%s' found in results", exc_label)
+        end
+      end
+    end
+  else
+    return false, "Invalid expected.items format: must be array or object with includes/excludes"
+  end
+
+  -- Check sort order if specified
+  if expected.sort_order then
+    local actual_order = {}
+    for _, item in ipairs(actual_items) do
+      table.insert(actual_order, item.label)
+    end
+
+    for i, exp_label in ipairs(expected.sort_order) do
+      if actual_order[i] ~= exp_label then
+        return false,
+          string.format(
+            "Sort order mismatch at position %d: expected '%s', got '%s'",
+            i,
+            exp_label,
+            actual_order[i] or "nil"
+          )
+      end
+    end
+  end
+
+  return true, nil
+end
+
 ---Run tokenizer test
 ---@param test table Test definition
 ---@return table actual Actual tokens
@@ -243,13 +402,66 @@ end
 ---@return boolean passed Whether test passed
 ---@return string? error Error message if failed
 function UnitRunner._run_provider_test(test)
-  -- TODO: Implement provider test execution once provider test structure is defined
-  -- This will need to:
-  -- 1. Mock database metadata or load test fixtures
-  -- 2. Call the appropriate provider (tables, columns, joins, etc.)
-  -- 3. Compare actual completion items with expected items
-  -- For now, return placeholder result
-  return {}, true, nil
+  -- Load the TablesProvider (add other providers when available)
+  local ok, TablesProvider = pcall(require, "ssns.completion.providers.tables")
+  if not ok then
+    return nil, false, "Failed to load TablesProvider: " .. tostring(TablesProvider)
+  end
+
+  -- Parse test input to extract SQL and cursor position
+  local sql_text = test.input or ""
+  local cursor_pos = test.cursor or { line = 1, col = 1 }
+
+  -- If input contains |, calculate cursor position from it
+  local pipe_pos = sql_text:find("|", 1, true)
+  if pipe_pos then
+    -- Remove pipe marker
+    sql_text = sql_text:gsub("|", "")
+
+    -- Calculate line and column (1-indexed)
+    local line = 1
+    local col = 1
+    for i = 1, pipe_pos - 1 do
+      if sql_text:sub(i, i) == "\n" then
+        line = line + 1
+        col = 1
+      else
+        col = col + 1
+      end
+    end
+    cursor_pos = { line = line, col = col }
+  end
+
+  -- Create mock database objects
+  local mock_database = UnitRunner._create_mock_database(test.context.connection or {})
+
+  -- Create mock server object
+  local mock_server = {
+    is_connected = function() return true end,
+    name = test.context.connection.server or "localhost",
+  }
+
+  -- Create mock context for the provider
+  local mock_ctx = {
+    bufnr = 0,
+    cursor = cursor_pos,
+    connection = {
+      server = mock_server,
+      database = mock_database,
+      schema = test.context.connection.schema or "dbo",
+    },
+    sql_context = test.context or {},
+  }
+
+  -- Call the provider's internal implementation (synchronous)
+  local items_ok, items = pcall(TablesProvider._get_completions_impl, mock_ctx)
+  if not items_ok then
+    return nil, false, "Provider execution failed: " .. tostring(items)
+  end
+
+  -- Compare results with expected
+  local passed, error_msg = UnitRunner._compare_provider_results(items, test.expected)
+  return items, passed, error_msg
 end
 
 ---Run context detection test
