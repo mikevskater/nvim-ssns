@@ -316,6 +316,7 @@ SELECT
   c.scale,
   c.is_nullable,
   c.is_identity,
+  c.is_computed,
   OBJECT_DEFINITION(c.default_object_id) AS default_value,
   c.column_id AS ordinal_position
 FROM sys.columns c
@@ -720,6 +721,7 @@ function SqlServerAdapter:parse_columns(result)
         scale = row.scale,
         nullable = row.is_nullable == 1 or row.is_nullable == true,
         is_identity = row.is_identity == 1 or row.is_identity == true,
+        is_computed = row.is_computed == 1 or row.is_computed == true,
         default = row.default_value,
         ordinal_position = row.ordinal_position,
       })

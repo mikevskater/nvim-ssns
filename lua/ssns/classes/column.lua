@@ -8,6 +8,7 @@ local BaseDbObject = require('ssns.classes.base')
 ---@field scale number? Numeric scale
 ---@field nullable boolean Whether the column accepts NULL
 ---@field is_identity boolean Whether this is an identity/auto-increment column
+---@field is_computed boolean Whether this is a computed column
 ---@field default string? Default value expression
 ---@field ordinal_position number? Column position in table
 ---@field parent TableClass|ViewClass The parent table or view object
@@ -15,7 +16,7 @@ local ColumnClass = setmetatable({}, { __index = BaseDbObject })
 ColumnClass.__index = ColumnClass
 
 ---Create a new Column instance
----@param opts {name: string, data_type: string, nullable: boolean, is_identity: boolean?, default: string?, max_length: number?, precision: number?, scale: number?, parent: BaseDbObject}
+---@param opts {name: string, data_type: string, nullable: boolean, is_identity: boolean?, is_computed: boolean?, default: string?, max_length: number?, precision: number?, scale: number?, parent: BaseDbObject}
 ---@return ColumnClass
 function ColumnClass.new(opts)
   local self = setmetatable(BaseDbObject.new({
@@ -30,6 +31,7 @@ function ColumnClass.new(opts)
   self.scale = opts.scale
   self.nullable = opts.nullable
   self.is_identity = opts.is_identity or false
+  self.is_computed = opts.is_computed or false
   self.default = opts.default
   self.ordinal_position = opts.ordinal_position
 
@@ -194,6 +196,9 @@ function ColumnClass:get_display_name()
   end
   if self.is_identity then
     table.insert(constraints, "IDENTITY")
+  end
+  if self.is_computed then
+    table.insert(constraints, "COMPUTED")
   end
 
   if #constraints > 0 then

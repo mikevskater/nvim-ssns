@@ -126,7 +126,7 @@ function Utils.format_column(column_obj, opts)
   local nullable = column_obj.nullable or column_obj.is_nullable
   local is_pk = column_obj.is_primary_key or column_obj.is_pk
   local is_fk = column_obj.is_foreign_key or column_obj.is_fk
-  local default_value = column_obj.default_value
+  local default_value = column_obj.default_value or column_obj.column_default or column_obj.default
   local ordinal = column_obj.ordinal_position or 999
 
   -- Build detail string (type + nullable + constraints)
