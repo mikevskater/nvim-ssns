@@ -233,6 +233,7 @@ return {
                         }
                     },
                     tables = {
+                        { name = "ActiveEmployees", alias = "ae", is_cte = true },
                         { name = "Departments", alias = "d" }
                     }
                 }
@@ -519,7 +520,8 @@ SELECT * FROM EmployeeCTE e JOIN DeptCTE d ON e.DeptId = d.Id]],
                         }
                     },
                     tables = {
-                        { name = "EmployeeBackup" }
+                        { name = "EmployeeBackup" },
+                        { name = "SourceData", is_cte = true }
                     }
                 }
             }
@@ -688,12 +690,16 @@ JOIN Departments d ON ds.DeptId = d.Id]],
                         { name = "ActiveEmps", tables = {{ name = "Employees" }} },
                         {
                             name = "DeptStats",
+                            tables = {
+                                { name = "ActiveEmps", alias = "e", is_cte = true }
+                            },
                             subqueries = {
                                 { tables = {{ name = "Employees" }} }
                             }
                         }
                     },
                     tables = {
+                        { name = "DeptStats", alias = "ds", is_cte = true },
                         { name = "Departments", alias = "d" }
                     }
                 }

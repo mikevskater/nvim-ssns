@@ -611,6 +611,7 @@ INNER JOIN Customers c ON ao.CustomerId = c.CustomerId]],
                         { name = "ActiveOrders", tables = { { name = "Orders" } } }
                     },
                     tables = {
+                        { name = "ActiveOrders", alias = "ao", is_cte = true },
                         { name = "Customers", alias = "c" }
                     }
                 }
@@ -701,8 +702,22 @@ SELECT * FROM HighValueCustomers]],
                     statement_type = "SELECT",  -- CTE queries report as SELECT for completion
                     ctes = {
                         { name = "Customers2024", tables = { { name = "Customers" } } },
-                        { name = "CustomerOrders", tables = { { name = "Orders", alias = "o" } } },
-                        { name = "HighValueCustomers" }
+                        {
+                            name = "CustomerOrders",
+                            tables = {
+                                { name = "Customers2024", alias = "c", is_cte = true },
+                                { name = "Orders", alias = "o" }
+                            }
+                        },
+                        {
+                            name = "HighValueCustomers",
+                            tables = {
+                                { name = "CustomerOrders", is_cte = true }
+                            }
+                        }
+                    },
+                    tables = {
+                        { name = "HighValueCustomers", is_cte = true }
                     }
                 }
             }
@@ -2203,7 +2218,8 @@ WHEN MATCHED THEN
                         { name = "UpdatedPrices", tables = { { name = "Products" } } }
                     },
                     tables = {
-                        { name = "Products", alias = "target" }
+                        { name = "Products", alias = "target" },
+                        { name = "UpdatedPrices", alias = "source", is_cte = true }
                     }
                 }
             }
@@ -2261,13 +2277,20 @@ ORDER BY ct.Tier, mo.MonthlyTotal DESC]],
                     statement_type = "SELECT",  -- CTE queries report as SELECT for completion
                     ctes = {
                         { name = "MonthlyOrders", tables = { { name = "Orders" } } },
-                        { name = "CustomerTiers" }
+                        {
+                            name = "CustomerTiers",
+                            tables = {
+                                { name = "MonthlyOrders", is_cte = true }
+                            }
+                        }
                     },
                     tables = {
-                        { name = "Customers", alias = "c" }
+                        { name = "Customers", alias = "c" },
+                        { name = "CustomerTiers", alias = "ct", is_cte = true },
+                        { name = "MonthlyOrders", alias = "mo", is_cte = true }
                     },
                     subqueries = {
-                        {},
+                        { tables = { { name = "MonthlyOrders", is_cte = true } } },
                         { tables = { { name = "Orders", alias = "o" } } }
                     }
                 }

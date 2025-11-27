@@ -86,8 +86,8 @@ local function resolve_column_parents(columns, aliases, tables)
                     end
                 end
             end
-        elseif not col.is_star and #tables == 1 then
-            -- Unqualified column with single table - can infer parent
+        elseif #tables == 1 then
+            -- Unqualified column/star with single table - can infer parent
             col.parent_table = tables[1].name
             col.parent_schema = tables[1].schema
         end
@@ -550,22 +550,49 @@ function ParserState:parse_select_columns(paren_depth, known_ctes, subqueries)
       end
       self:advance()
     elseif token.type == "star" then
-      -- Handle * or alias.*
-      if current_source_table then
+      -- Check context: is this SELECT * or arithmetic *?
+      if current_col and paren_depth == 0 then
+        -- Arithmetic operator at column level (e.g., "Salary * 12")
+        -- Skip the * and continue - the expression result will be
+        -- captured when we hit AS (alias) or comma/FROM (no alias)
+        self:advance()
+        -- Continue consuming the expression until AS, comma, or FROM
+        while self.pos <= #self.tokens do
+          local next_tok = self:current()
+          if not next_tok then break end
+          if next_tok.type == "comma" then break end
+          if self:is_keyword("AS") then break end
+          if self:is_keyword("FROM") then break end
+          if self:is_keyword("INTO") then break end
+          if self:is_keyword("WHERE") then break end
+          self:advance()
+        end
+        -- Now current_col still has the first identifier (e.g., "Salary")
+        -- If there's an AS next, it will be handled and create a proper column
+        -- If not, we'll flush "Salary" as the column name at comma/FROM
+      elseif current_source_table and paren_depth == 0 then
+        -- alias.* pattern (e.g., "t.*")
         table.insert(columns, {
           name = "*",
           source_table = current_source_table,
           is_star = true,
         })
         current_source_table = nil
-      else
+        current_col = nil
+        self:advance()
+      elseif paren_depth == 0 then
+        -- Standalone * (SELECT *) at column level
         table.insert(columns, {
           name = "*",
           source_table = nil,
           is_star = true,
         })
+        current_col = nil
+        self:advance()
+      else
+        -- Star inside parentheses (e.g., COUNT(*)) - just skip it
+        self:advance()
       end
-      self:advance()
     elseif token.type == "dot" then
       -- Previous identifier is a table qualifier
       if current_col then
@@ -583,7 +610,7 @@ function ParserState:parse_select_columns(paren_depth, known_ctes, subqueries)
         local alias_token = self:current()
         if alias_token and (alias_token.type == "identifier" or alias_token.type == "bracket_id") then
           current_col = strip_brackets(alias_token.text)
-          current_source_table = nil
+          -- Don't clear current_source_table - preserve the table reference for the alias
           self:advance()
         end
       end
@@ -722,7 +749,7 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries)
 
       -- Parse table reference
       local table_ref = self:parse_table_reference(known_ctes)
-      if table_ref and not table_ref.is_cte then
+      if table_ref then
         table.insert(tables, table_ref)
       end
 
@@ -730,7 +757,7 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries)
       while self:is_type("comma") do
         self:advance()
         table_ref = self:parse_table_reference(known_ctes)
-        if table_ref and not table_ref.is_cte then
+        if table_ref then
           table.insert(tables, table_ref)
         end
       end
@@ -1237,7 +1264,7 @@ function ParserState:parse_statement(known_ctes, temp_tables)
     if self:is_keyword("INTO") then
       self:advance()
       local target = self:parse_table_reference(known_ctes)
-      if target and not target.is_cte then
+      if target then
         table.insert(chunk.tables, target)
       end
     end
@@ -1272,7 +1299,7 @@ function ParserState:parse_statement(known_ctes, temp_tables)
       else
         -- Simple table reference: USING SourceTable s
         local source = self:parse_table_reference(known_ctes)
-        if source and not source.is_cte then
+        if source then
           table.insert(chunk.tables, source)
         end
       end

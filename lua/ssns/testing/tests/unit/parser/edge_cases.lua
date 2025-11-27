@@ -913,12 +913,24 @@ ORDER BY e.Name
                     statement_type = "SELECT",  -- CTE queries still report as SELECT for completion
                     temp_table_name = "#EmployeeReport",
                     ctes = {
-                        { name = "ActiveEmployees" },
-                        { name = "DeptStats" }
+                        { name = "ActiveEmployees", tables = { { name = "Employees", schema = "dbo" } } },
+                        {
+                            name = "DeptStats",
+                            tables = {
+                                { name = "ActiveEmployees", is_cte = true }
+                            }
+                        }
                     },
                     tables = {
+                        { name = "ActiveEmployees", alias = "e", is_cte = true },
                         { name = "Departments", alias = "d" },
-                        { name = "Locations", alias = "l" }
+                        { name = "Locations", alias = "l" },
+                        { name = "DeptStats", alias = "ds", is_cte = true }
+                    },
+                    subqueries = {
+                        { tables = { { name = "Orders", alias = "o" } } },
+                        { tables = { { name = "Employees" } } },
+                        { tables = { { name = "Departments" } } }
                     }
                 }
             }
