@@ -138,6 +138,10 @@ function ColumnsProvider._get_completions_impl(ctx)
     -- Pattern: INSERT INTO table (| - show columns from target table
     return ColumnsProvider._get_insert_columns(connection, sql_context)
 
+  elseif sql_context.mode == "values" then
+    -- Pattern: INSERT INTO table (col1, col2) VALUES (|val1, val2)
+    return ColumnsProvider._get_values_completions(connection, sql_context)
+
   else
     return {}
   end
@@ -498,6 +502,158 @@ function ColumnsProvider._get_insert_columns(connection, context)
     end
 
     table.insert(items, item)
+  end
+
+  return items
+end
+
+---Get completion hints for VALUES clause: INSERT INTO table (col1, col2) VALUES (|
+---Shows the column name, type, and nullable info for the current position
+---@param connection table Connection context
+---@param context table SQL context with value_position and chunk.insert_columns
+---@return table[] items CompletionItems
+function ColumnsProvider._get_values_completions(connection, context)
+  local Resolver = require('ssns.completion.metadata.resolver')
+  local Utils = require('ssns.completion.utils')
+
+  -- Get INSERT target table and column list
+  if not context.chunk or not context.chunk.tables or #context.chunk.tables == 0 then
+    return {}
+  end
+
+  local insert_columns = context.chunk.insert_columns
+  if not insert_columns or #insert_columns == 0 then
+    return {}
+  end
+
+  -- Get the column at current value position (0-indexed)
+  local value_position = context.value_position or 0
+  local target_column_name = insert_columns[value_position + 1]  -- Lua is 1-indexed
+
+  if not target_column_name then
+    -- Position beyond column list
+    return {}
+  end
+
+  -- Resolve INSERT target table to get column metadata
+  local target_table = context.chunk.tables[1]
+  local table_name = target_table.name or target_table
+
+  local table_obj = nil
+  if context.resolved_scope then
+    table_obj = Resolver.get_resolved(context.resolved_scope, table_name)
+  end
+  if not table_obj then
+    table_obj = Resolver.resolve_table(table_name, connection, context)
+  end
+
+  if not table_obj then
+    -- Can't resolve table, return column name as basic hint
+    return {{
+      label = target_column_name,
+      kind = vim.lsp.protocol.CompletionItemKind.Field,
+      detail = string.format("Column %d of %d", value_position + 1, #insert_columns),
+      insertText = "",  -- Don't insert anything, just show hint
+      sortText = "0001_" .. target_column_name,
+    }}
+  end
+
+  -- Get column metadata
+  local columns = Resolver.get_columns(table_obj, connection)
+  if not columns or #columns == 0 then
+    return {{
+      label = target_column_name,
+      kind = vim.lsp.protocol.CompletionItemKind.Field,
+      detail = string.format("Column %d of %d", value_position + 1, #insert_columns),
+      insertText = "",
+      sortText = "0001_" .. target_column_name,
+    }}
+  end
+
+  -- Find the target column in metadata
+  local target_col = nil
+  for _, col in ipairs(columns) do
+    if col.name:lower() == target_column_name:lower() then
+      target_col = col
+      break
+    end
+  end
+
+  local items = {}
+
+  if target_col then
+    -- Build detailed column hint
+    local type_info = target_col.data_type or "unknown"
+    local nullable_info = target_col.is_nullable and "nullable" or "NOT NULL"
+    local pk_info = (target_col.is_primary_key or target_col.is_pk) and " [PK]" or ""
+    local identity_info = target_col.is_identity and " [IDENTITY]" or ""
+    local computed_info = target_col.is_computed and " [COMPUTED]" or ""
+
+    -- Build documentation
+    local doc_lines = {
+      string.format("**%s** - Column %d of %d", target_column_name, value_position + 1, #insert_columns),
+      "",
+      string.format("Type: %s", type_info),
+      string.format("Nullable: %s", nullable_info),
+    }
+
+    if target_col.column_default then
+      table.insert(doc_lines, string.format("Default: %s", target_col.column_default))
+    end
+
+    if target_col.is_identity then
+      table.insert(doc_lines, "")
+      table.insert(doc_lines, "⚠️ IDENTITY column - value auto-generated")
+    end
+
+    if target_col.is_computed then
+      table.insert(doc_lines, "")
+      table.insert(doc_lines, "⚠️ COMPUTED column - cannot insert directly")
+    end
+
+    -- Primary hint: column name with full details
+    table.insert(items, {
+      label = target_column_name,
+      kind = vim.lsp.protocol.CompletionItemKind.Field,
+      detail = string.format("%s (%s)%s%s%s", type_info, nullable_info, pk_info, identity_info, computed_info),
+      documentation = {
+        kind = "markdown",
+        value = table.concat(doc_lines, "\n"),
+      },
+      insertText = "",  -- Don't insert column name, user is entering value
+      sortText = "0001_" .. target_column_name,
+    })
+
+    -- If nullable, suggest NULL
+    if target_col.is_nullable then
+      table.insert(items, {
+        label = "NULL",
+        kind = vim.lsp.protocol.CompletionItemKind.Keyword,
+        detail = "NULL value (column is nullable)",
+        insertText = "NULL",
+        sortText = "0002_NULL",
+      })
+    end
+
+    -- If has default, suggest DEFAULT
+    if target_col.column_default then
+      table.insert(items, {
+        label = "DEFAULT",
+        kind = vim.lsp.protocol.CompletionItemKind.Keyword,
+        detail = string.format("Use default: %s", target_col.column_default),
+        insertText = "DEFAULT",
+        sortText = "0003_DEFAULT",
+      })
+    end
+  else
+    -- Column not found in metadata, return basic hint
+    table.insert(items, {
+      label = target_column_name,
+      kind = vim.lsp.protocol.CompletionItemKind.Field,
+      detail = string.format("Column %d of %d", value_position + 1, #insert_columns),
+      insertText = "",
+      sortText = "0001_" .. target_column_name,
+    })
   end
 
   return items

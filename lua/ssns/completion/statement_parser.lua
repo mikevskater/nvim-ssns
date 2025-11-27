@@ -61,7 +61,7 @@
 ---@field start_col number 1-indexed start column
 ---@field end_col number 1-indexed end column
 ---@field go_batch_index number Which GO batch this belongs to (1-indexed)
----@field clause_positions table<string, ClausePosition>? Positions of each clause (select, from, where, etc.)
+---@field clause_positions table<string, ClausePosition>? Positions of each clause (select, from, where, values, insert_columns, etc.)
 
 ---@class TempTableInfo
 ---@field name string Temp table name
@@ -1504,8 +1504,53 @@ function ParserState:parse_statement(known_ctes, temp_tables)
       self:advance()
     end
 
-    -- If INSERT...VALUES, reset in_insert flag (VALUES ends the INSERT, next SELECT is new statement)
+    -- Parse VALUES clause if present: INSERT INTO table (...) VALUES (...)
     if self:is_keyword("VALUES") then
+      local values_token = self:current()
+      self:advance()  -- consume VALUES
+
+      -- VALUES can have multiple row sets: VALUES (...), (...)
+      local first_values_paren = nil
+      local last_values_token = values_token
+
+      while self:current() do
+        if self:is_type("paren_open") then
+          if not first_values_paren then
+            first_values_paren = self:current()
+          end
+
+          -- Skip this VALUES row
+          local paren_depth_values = 1
+          self:advance()  -- consume (
+
+          while self:current() and paren_depth_values > 0 do
+            if self:is_type("paren_open") then
+              paren_depth_values = paren_depth_values + 1
+            elseif self:is_type("paren_close") then
+              paren_depth_values = paren_depth_values - 1
+            end
+            last_values_token = self:current()
+            self:advance()
+          end
+        elseif self:is_type("comma") then
+          -- Multi-row VALUES: VALUES (...), (...)
+          self:advance()
+        else
+          break  -- Not part of VALUES clause
+        end
+      end
+
+      -- Track VALUES clause position (from VALUES keyword to last closing paren)
+      if first_values_paren then
+        chunk.clause_positions["values"] = {
+          start_line = values_token.line,
+          start_col = values_token.col,
+          end_line = last_values_token.line,
+          end_col = last_values_token.col + #last_values_token.text - 1,
+        }
+      end
+
+      -- Reset in_insert flag (VALUES ends the INSERT, next SELECT is new statement)
       in_insert = false
     end
 
@@ -2033,7 +2078,7 @@ end
 ---@param chunk StatementChunk
 ---@param line number 1-indexed line
 ---@param col number 1-indexed column
----@return string? clause_name "select", "from", "where", "group_by", "having", "order_by", "set", "into", "join", "on", or nil
+---@return string? clause_name "select", "from", "where", "group_by", "having", "order_by", "set", "into", "join", "on", "values", "insert_columns", or nil
 function StatementParser.get_clause_at_position(chunk, line, col)
   if not chunk or not chunk.clause_positions then
     return nil

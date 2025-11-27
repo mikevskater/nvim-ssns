@@ -224,6 +224,50 @@ function Context._detect_type_from_line(before_cursor, chunk)
     return Context.Type.TABLE, "delete", extra
   end
 
+  -- VALUES clause context: INSERT INTO table (...) VALUES (val1, |val2)
+  -- Need to count commas to determine which column position we're in
+  local values_match = before_cursor:match("VALUES%s*%((.*)$")
+  if values_match then
+    -- Count commas to determine value position (which column we're inserting into)
+    -- Handle nested parens (e.g., function calls) by tracking paren depth
+    local value_position = 0
+    local paren_depth = 0
+
+    for char in values_match:gmatch(".") do
+      if char == "(" then
+        paren_depth = paren_depth + 1
+      elseif char == ")" then
+        paren_depth = paren_depth - 1
+      elseif char == "," and paren_depth == 0 then
+        value_position = value_position + 1
+      end
+    end
+
+    extra.value_position = value_position
+    return Context.Type.COLUMN, "values", extra
+  end
+
+  -- Also handle multi-row VALUES: VALUES (...), (|
+  -- Reset position to 0 for new row
+  local multi_row_match = before_cursor:match("VALUES[^%(]*%([^%)]*%)%s*,%s*%((.*)$")
+  if multi_row_match then
+    local value_position = 0
+    local paren_depth = 0
+
+    for char in multi_row_match:gmatch(".") do
+      if char == "(" then
+        paren_depth = paren_depth + 1
+      elseif char == ")" then
+        paren_depth = paren_depth - 1
+      elseif char == "," and paren_depth == 0 then
+        value_position = value_position + 1
+      end
+    end
+
+    extra.value_position = value_position
+    return Context.Type.COLUMN, "values", extra
+  end
+
   if upper_trimmed:match("INSERT%s+INTO%s+$") or upper:match("INSERT%s+INTO%s+[%w_#@%.%[%]]*$") then
     return Context.Type.TABLE, "insert", extra
   end
@@ -399,6 +443,9 @@ function Context.detect(bufnr, line_num, col)
       elseif clause == "insert_columns" then
         ctx_type = Context.Type.COLUMN
         mode = "insert_columns"
+      elseif clause == "values" then
+        ctx_type = Context.Type.COLUMN
+        mode = "values"
       end
 
       -- Check for qualified column reference (alias.column, table.column)
@@ -444,6 +491,7 @@ function Context.detect(bufnr, line_num, col)
     filter_table = extra.filter_table,
     omit_schema = extra.omit_schema,
     omit_table = extra.omit_table,
+    value_position = extra.value_position,
   }
 
   Debug.log(string.format("[statement_context] detected type=%s, mode=%s, prefix=%s", ctx_type, mode, prefix))
