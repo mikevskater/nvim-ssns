@@ -1,14 +1,14 @@
 -- Test file: aliases.lua
--- IDs: 2531-2550
+-- IDs: 2831-2850
 -- Tests: Alias dictionary mapping for table resolution
 
 return {
     -- ========================================
-    -- 2531-2535: Basic Alias Mapping
+    -- 2831-2835: Basic Alias Mapping
     -- ========================================
 
     {
-        id = 2531,
+        id = 2831,
         type = "parser",
         name = "Single table with alias",
         input = "SELECT * FROM Employees e",
@@ -26,7 +26,7 @@ return {
     },
 
     {
-        id = 2532,
+        id = 2832,
         type = "parser",
         name = "Multiple table aliases",
         input = "SELECT * FROM Employees e, Departments d WHERE e.DepartmentID = d.DepartmentID",
@@ -48,7 +48,7 @@ return {
     },
 
     {
-        id = 2533,
+        id = 2833,
         type = "parser",
         name = "Schema-qualified table with alias",
         input = "SELECT * FROM dbo.Employees e JOIN hr.Benefits b ON e.EmployeeID = b.EmployeeID",
@@ -70,7 +70,7 @@ return {
     },
 
     {
-        id = 2534,
+        id = 2834,
         type = "parser",
         name = "Database.schema.table with alias",
         input = "SELECT * FROM TestDB.dbo.Employees e",
@@ -88,7 +88,7 @@ return {
     },
 
     {
-        id = 2535,
+        id = 2835,
         type = "parser",
         name = "Three-part name with alias",
         input = "SELECT * FROM [OtherDB].[sales].[Orders] o JOIN [TestDB].[dbo].[Customers] c ON o.CustomerID = c.CustomerID",
@@ -106,11 +106,11 @@ return {
     },
 
     -- ========================================
-    -- 2536-2540: Special Table Types with Aliases
+    -- 2836-2840: Special Table Types with Aliases
     -- ========================================
 
     {
-        id = 2536,
+        id = 2836,
         type = "parser",
         name = "Temp table with alias",
         input = "SELECT * FROM #TempEmployees t WHERE t.Salary > 50000",
@@ -128,7 +128,7 @@ return {
     },
 
     {
-        id = 2537,
+        id = 2837,
         type = "parser",
         name = "Global temp table with alias",
         input = "SELECT * FROM ##GlobalTemp g JOIN Employees e ON g.EmployeeID = e.EmployeeID",
@@ -146,7 +146,7 @@ return {
     },
 
     {
-        id = 2538,
+        id = 2838,
         type = "parser",
         name = "Table variable with alias",
         input = "SELECT * FROM @EmployeeTable et WHERE et.DepartmentID = 5",
@@ -164,7 +164,7 @@ return {
     },
 
     {
-        id = 2539,
+        id = 2839,
         type = "parser",
         name = "CTE reference with alias",
         input = "WITH EmployeeCTE AS (SELECT * FROM Employees) SELECT * FROM EmployeeCTE ec WHERE ec.Salary > 60000",
@@ -185,7 +185,7 @@ return {
     },
 
     {
-        id = 2540,
+        id = 2840,
         type = "parser",
         name = "Mixed types - regular, temp, and CTE",
         input = "WITH TopEmployees AS (SELECT * FROM Employees WHERE Salary > 80000) SELECT * FROM TopEmployees te JOIN #TempDepts td ON te.DepartmentID = td.DepartmentID JOIN Departments d ON td.DepartmentID = d.DepartmentID",
@@ -207,11 +207,11 @@ return {
     },
 
     -- ========================================
-    -- 2541-2545: JOIN Scenarios
+    -- 2841-2845: JOIN Scenarios
     -- ========================================
 
     {
-        id = 2541,
+        id = 2841,
         type = "parser",
         name = "INNER JOIN with aliases",
         input = "SELECT * FROM Employees e INNER JOIN Departments d ON e.DepartmentID = d.DepartmentID",
@@ -233,7 +233,7 @@ return {
     },
 
     {
-        id = 2542,
+        id = 2842,
         type = "parser",
         name = "LEFT/RIGHT JOIN with aliases",
         input = "SELECT * FROM Employees e LEFT JOIN Departments d ON e.DepartmentID = d.DepartmentID RIGHT JOIN Benefits b ON e.EmployeeID = b.EmployeeID",
@@ -252,7 +252,7 @@ return {
     },
 
     {
-        id = 2543,
+        id = 2843,
         type = "parser",
         name = "Multiple JOINs with aliases",
         input = "SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Orders o ON e.EmployeeID = o.EmployeeID JOIN Customers c ON o.CustomerID = c.CustomerID",
@@ -272,7 +272,7 @@ return {
     },
 
     {
-        id = 2544,
+        id = 2844,
         type = "parser",
         name = "Self-join - same table, different aliases",
         input = "SELECT * FROM Employees e1 JOIN Employees e2 ON e1.ManagerID = e2.EmployeeID",
@@ -294,7 +294,7 @@ return {
     },
 
     {
-        id = 2545,
+        id = 2845,
         type = "parser",
         name = "Cross-database JOIN with aliases",
         input = "SELECT * FROM DB1.dbo.Employees e JOIN DB2.sales.Orders o ON e.EmployeeID = o.EmployeeID",
@@ -312,11 +312,11 @@ return {
     },
 
     -- ========================================
-    -- 2546-2550: Edge Cases
+    -- 2846-2850: Edge Cases
     -- ========================================
 
     {
-        id = 2546,
+        id = 2846,
         type = "parser",
         name = "Table without alias - no entry in aliases dict",
         input = "SELECT * FROM Employees JOIN Departments d ON Employees.DepartmentID = d.DepartmentID",
@@ -338,7 +338,7 @@ return {
     },
 
     {
-        id = 2547,
+        id = 2847,
         type = "parser",
         name = "Subquery with alias - subquery alias NOT in aliases",
         input = "SELECT * FROM (SELECT EmployeeID, FirstName FROM Employees) emp WHERE emp.EmployeeID > 100",
@@ -359,7 +359,7 @@ return {
     },
 
     {
-        id = 2548,
+        id = 2848,
         type = "parser",
         name = "Case sensitivity - aliases stored lowercase",
         input = "SELECT * FROM Employees E JOIN Departments D ON E.DepartmentID = D.DepartmentID",
@@ -378,7 +378,7 @@ return {
     },
 
     {
-        id = 2549,
+        id = 2849,
         type = "parser",
         name = "Reserved word as alias - bracketed",
         input = "SELECT * FROM Employees [select] JOIN Departments [where] ON [select].DepartmentID = [where].DepartmentID",
@@ -396,7 +396,7 @@ return {
     },
 
     {
-        id = 2550,
+        id = 2850,
         type = "parser",
         name = "Multi-statement - same alias in different contexts",
         input = [[

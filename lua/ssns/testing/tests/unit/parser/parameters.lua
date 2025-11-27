@@ -1,14 +1,14 @@
 -- Test file: parameters.lua
--- IDs: 2551-2580
+-- IDs: 2851-2880
 -- Tests: Parameter tracking for IntelliSense (user parameters and system variables)
 
 return {
     -- ========================================
-    -- 2551-2555: Basic Parameters
+    -- 2851-2855: Basic Parameters
     -- ========================================
 
     {
-        id = 2551,
+        id = 2851,
         type = "parser",
         name = "Single parameter in WHERE",
         input = "SELECT * FROM Employees WHERE DepartmentID = @DeptId",
@@ -25,7 +25,7 @@ return {
     },
 
     {
-        id = 2552,
+        id = 2852,
         type = "parser",
         name = "Multiple parameters in WHERE",
         input = "SELECT * FROM Employees WHERE DepartmentID = @DeptId AND Salary > @MinSalary AND Status = @Status",
@@ -44,7 +44,7 @@ return {
     },
 
     {
-        id = 2553,
+        id = 2853,
         type = "parser",
         name = "System variable (@@ROWCOUNT)",
         input = "SELECT @@ROWCOUNT AS AffectedRows",
@@ -61,7 +61,7 @@ return {
     },
 
     {
-        id = 2554,
+        id = 2854,
         type = "parser",
         name = "Mixed user params and system vars",
         input = "SELECT EmployeeID, @@IDENTITY AS NewId FROM Employees WHERE DepartmentID = @DeptId",
@@ -79,7 +79,7 @@ return {
     },
 
     {
-        id = 2555,
+        id = 2855,
         type = "parser",
         name = "Parameter in SELECT clause",
         input = "SELECT @EmployeeName AS EmpName, EmployeeID FROM Employees",
@@ -96,11 +96,11 @@ return {
     },
 
     -- ========================================
-    -- 2556-2560: Parameters in Different Statements
+    -- 2856-2860: Parameters in Different Statements
     -- ========================================
 
     {
-        id = 2556,
+        id = 2856,
         type = "parser",
         name = "INSERT with parameters",
         input = "INSERT INTO Employees (FirstName, LastName, DepartmentID) VALUES (@FirstName, @LastName, @DeptId)",
@@ -119,7 +119,7 @@ return {
     },
 
     {
-        id = 2557,
+        id = 2857,
         type = "parser",
         name = "UPDATE with parameters",
         input = "UPDATE Employees SET Salary = @NewSalary, Status = @Status WHERE EmployeeID = @EmpId",
@@ -138,7 +138,7 @@ return {
     },
 
     {
-        id = 2558,
+        id = 2858,
         type = "parser",
         name = "DELETE with parameter",
         input = "DELETE FROM Employees WHERE DepartmentID = @DeptId",
@@ -155,7 +155,7 @@ return {
     },
 
     {
-        id = 2559,
+        id = 2859,
         type = "parser",
         name = "EXEC with parameters",
         input = "EXEC sp_GetEmployees @DeptId, @Status",
@@ -173,7 +173,7 @@ return {
     },
 
     {
-        id = 2560,
+        id = 2860,
         type = "parser",
         name = "MERGE with parameters",
         input = "MERGE INTO Employees AS target USING EmployeeUpdates AS source ON target.EmployeeID = source.EmployeeID WHEN MATCHED THEN UPDATE SET Salary = @NewSalary",
@@ -190,11 +190,11 @@ return {
     },
 
     -- ========================================
-    -- 2561-2565: DECLARE and SET
+    -- 2861-2865: DECLARE and SET
     -- ========================================
 
     {
-        id = 2561,
+        id = 2861,
         type = "parser",
         name = "DECLARE statement",
         input = "DECLARE @EmpId INT",
@@ -211,7 +211,7 @@ return {
     },
 
     {
-        id = 2562,
+        id = 2862,
         type = "parser",
         name = "SET statement with parameter",
         input = "SET @EmpId = 123",
@@ -228,7 +228,7 @@ return {
     },
 
     {
-        id = 2563,
+        id = 2863,
         type = "parser",
         name = "Multiple DECLARE",
         input = "DECLARE @EmpId INT, @DeptId INT, @Status VARCHAR(50)",
@@ -247,7 +247,7 @@ return {
     },
 
     {
-        id = 2564,
+        id = 2864,
         type = "parser",
         name = "SET with expression",
         input = "SET @Total = @Price * @Quantity",
@@ -266,7 +266,7 @@ return {
     },
 
     {
-        id = 2565,
+        id = 2865,
         type = "parser",
         name = "DECLARE with initial value",
         input = "DECLARE @EmpId INT = 123",
@@ -283,11 +283,11 @@ return {
     },
 
     -- ========================================
-    -- 2566-2570: Table Variables
+    -- 2866-2870: Table Variables
     -- ========================================
 
     {
-        id = 2566,
+        id = 2866,
         type = "parser",
         name = "Table variable in FROM",
         input = "SELECT * FROM @EmployeeTable",
@@ -304,7 +304,7 @@ return {
     },
 
     {
-        id = 2567,
+        id = 2867,
         type = "parser",
         name = "Table variable with alias",
         input = "SELECT e.EmployeeID FROM @EmployeeTable e",
@@ -321,7 +321,7 @@ return {
     },
 
     {
-        id = 2568,
+        id = 2868,
         type = "parser",
         name = "INSERT INTO table variable",
         input = "INSERT INTO @EmployeeTable (EmployeeID, FirstName) VALUES (1, 'John')",
@@ -338,7 +338,7 @@ return {
     },
 
     {
-        id = 2569,
+        id = 2869,
         type = "parser",
         name = "Table variable in JOIN",
         input = "SELECT e.EmployeeID, t.FirstName FROM Employees e JOIN @EmployeeTable t ON e.EmployeeID = t.EmployeeID",
@@ -356,7 +356,7 @@ return {
     },
 
     {
-        id = 2570,
+        id = 2870,
         type = "parser",
         name = "Multiple table variables",
         input = "SELECT * FROM @EmployeeTable e JOIN @DepartmentTable d ON e.DepartmentID = d.DepartmentID",
@@ -374,11 +374,11 @@ return {
     },
 
     -- ========================================
-    -- 2571-2575: Parameters in Subqueries/CTEs
+    -- 2871-2875: Parameters in Subqueries/CTEs
     -- ========================================
 
     {
-        id = 2571,
+        id = 2871,
         type = "parser",
         name = "Parameter in subquery",
         input = "SELECT * FROM Employees WHERE DepartmentID IN (SELECT DepartmentID FROM Departments WHERE Budget > @MinBudget)",
@@ -395,7 +395,7 @@ return {
     },
 
     {
-        id = 2572,
+        id = 2872,
         type = "parser",
         name = "Parameter in CTE definition",
         input = "WITH EmployeeCTE AS (SELECT * FROM Employees WHERE DepartmentID = @DeptId) SELECT * FROM EmployeeCTE",
@@ -417,7 +417,7 @@ return {
     },
 
     {
-        id = 2573,
+        id = 2873,
         type = "parser",
         name = "Parameter in correlated subquery",
         input = "SELECT EmployeeID, (SELECT COUNT(*) FROM Orders WHERE EmployeeId = @EmpId) AS OrderCount FROM Employees",
@@ -434,7 +434,7 @@ return {
     },
 
     {
-        id = 2574,
+        id = 2874,
         type = "parser",
         name = "Multiple parameters in different scopes",
         input = "SELECT * FROM Employees WHERE DepartmentID = @DeptId AND EmployeeID IN (SELECT EmployeeID FROM Orders WHERE OrderDate > @StartDate)",
@@ -452,7 +452,7 @@ return {
     },
 
     {
-        id = 2575,
+        id = 2875,
         type = "parser",
         name = "Nested subqueries with params",
         input = "SELECT * FROM Employees WHERE DepartmentID IN (SELECT DepartmentID FROM Departments WHERE Budget > (SELECT AVG(Budget) FROM Departments WHERE Region = @Region))",
@@ -469,11 +469,11 @@ return {
     },
 
     -- ========================================
-    -- 2576-2580: Edge Cases
+    -- 2876-2880: Edge Cases
     -- ========================================
 
     {
-        id = 2576,
+        id = 2876,
         type = "parser",
         name = "Same parameter used multiple times (track first occurrence)",
         input = "SELECT * FROM Employees WHERE DepartmentID = @DeptId OR ManagerDepartmentID = @DeptId",
@@ -490,7 +490,7 @@ return {
     },
 
     {
-        id = 2577,
+        id = 2877,
         type = "parser",
         name = "Parameter in function call",
         input = "SELECT CONCAT(@FirstName, ' ', @LastName) AS FullName FROM Employees",
@@ -508,7 +508,7 @@ return {
     },
 
     {
-        id = 2578,
+        id = 2878,
         type = "parser",
         name = "Parameter in CASE expression",
         input = "SELECT CASE WHEN Salary > @Threshold THEN 'High' ELSE 'Low' END AS SalaryRange FROM Employees",
@@ -525,7 +525,7 @@ return {
     },
 
     {
-        id = 2579,
+        id = 2879,
         type = "parser",
         name = "Unicode parameter name",
         input = "SELECT * FROM Employees WHERE FirstName = @ИмяСотрудника",
@@ -542,7 +542,7 @@ return {
     },
 
     {
-        id = 2580,
+        id = 2880,
         type = "parser",
         name = "Many parameters (10+)",
         input = "SELECT * FROM Employees WHERE DeptId = @P1 AND Status = @P2 AND Level = @P3 AND Location = @P4 AND Manager = @P5 AND Salary > @P6 AND StartDate > @P7 AND EndDate < @P8 AND Type = @P9 AND Grade = @P10",

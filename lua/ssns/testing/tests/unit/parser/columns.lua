@@ -1,14 +1,14 @@
 -- Test file: columns.lua
--- IDs: 2501-2530
+-- IDs: 2801-2830
 -- Tests: Column tracking with parent_table lineage for IntelliSense
 
 return {
     -- ========================================
-    -- 2501-2505: Basic Column Lists
+    -- 2801-2805: Basic Column Lists
     -- ========================================
 
     {
-        id = 2501,
+        id = 2801,
         type = "parser",
         name = "Simple column list with single table",
         input = "SELECT EmployeeID, FirstName, LastName FROM Employees",
@@ -28,7 +28,7 @@ return {
     },
 
     {
-        id = 2502,
+        id = 2802,
         type = "parser",
         name = "Qualified columns with table prefix",
         input = "SELECT Employees.EmployeeID, Employees.FirstName FROM Employees",
@@ -47,7 +47,7 @@ return {
     },
 
     {
-        id = 2503,
+        id = 2803,
         type = "parser",
         name = "Mixed qualified and unqualified columns",
         input = "SELECT EmployeeID, Employees.FirstName, LastName FROM Employees",
@@ -67,7 +67,7 @@ return {
     },
 
     {
-        id = 2504,
+        id = 2804,
         type = "parser",
         name = "Column with AS alias",
         input = "SELECT EmployeeID AS EmpId, FirstName AS FName FROM Employees",
@@ -86,7 +86,7 @@ return {
     },
 
     {
-        id = 2505,
+        id = 2805,
         type = "parser",
         name = "Multiple columns with various aliases",
         input = "SELECT EmployeeID, FirstName AS FName, LastName LName, Email FROM Employees",
@@ -107,11 +107,11 @@ return {
     },
 
     -- ========================================
-    -- 2506-2510: Star Expansion
+    -- 2806-2810: Star Expansion
     -- ========================================
 
     {
-        id = 2506,
+        id = 2806,
         type = "parser",
         name = "Simple SELECT *",
         input = "SELECT * FROM Employees",
@@ -129,7 +129,7 @@ return {
     },
 
     {
-        id = 2507,
+        id = 2807,
         type = "parser",
         name = "Qualified star with alias resolves parent_table",
         input = "SELECT e.* FROM Employees e",
@@ -147,7 +147,7 @@ return {
     },
 
     {
-        id = 2508,
+        id = 2808,
         type = "parser",
         name = "Mixed star and columns",
         input = "SELECT e.*, d.DepartmentName FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID",
@@ -169,7 +169,7 @@ return {
     },
 
     {
-        id = 2509,
+        id = 2809,
         type = "parser",
         name = "Multiple qualified stars",
         input = "SELECT e.*, d.* FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID",
@@ -191,7 +191,7 @@ return {
     },
 
     {
-        id = 2510,
+        id = 2810,
         type = "parser",
         name = "Star from schema-qualified table",
         input = "SELECT dbo.Employees.* FROM dbo.Employees",
@@ -209,11 +209,11 @@ return {
     },
 
     -- ========================================
-    -- 2511-2515: Parent Table Resolution via Aliases
+    -- 2811-2815: Parent Table Resolution via Aliases
     -- ========================================
 
     {
-        id = 2511,
+        id = 2811,
         type = "parser",
         name = "Single alias resolves to parent_table",
         input = "SELECT e.EmployeeID, e.FirstName FROM Employees e",
@@ -232,7 +232,7 @@ return {
     },
 
     {
-        id = 2512,
+        id = 2812,
         type = "parser",
         name = "Multiple aliases resolve correctly",
         input = "SELECT e.EmployeeID, d.DepartmentName FROM Employees e, Departments d",
@@ -254,7 +254,7 @@ return {
     },
 
     {
-        id = 2513,
+        id = 2813,
         type = "parser",
         name = "Schema-qualified tables with aliases",
         input = "SELECT e.EmployeeID FROM dbo.Employees e",
@@ -272,7 +272,7 @@ return {
     },
 
     {
-        id = 2514,
+        id = 2814,
         type = "parser",
         name = "Database.schema.table with alias",
         input = "SELECT e.EmployeeID FROM TestDB.dbo.Employees e",
@@ -290,7 +290,7 @@ return {
     },
 
     {
-        id = 2515,
+        id = 2815,
         type = "parser",
         name = "No alias - direct table reference",
         input = "SELECT Employees.EmployeeID, Employees.FirstName FROM Employees",
@@ -309,11 +309,11 @@ return {
     },
 
     -- ========================================
-    -- 2516-2520: JOINs with Multiple Tables
+    -- 2816-2820: JOINs with Multiple Tables
     -- ========================================
 
     {
-        id = 2516,
+        id = 2816,
         type = "parser",
         name = "Simple JOIN with both table aliases resolving",
         input = "SELECT e.EmployeeID, e.FirstName, d.DepartmentName FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID",
@@ -336,7 +336,7 @@ return {
     },
 
     {
-        id = 2517,
+        id = 2817,
         type = "parser",
         name = "Multiple JOINs - all aliases resolve",
         input = "SELECT e.EmployeeID, d.DepartmentName, o.OrderId FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Orders o ON e.EmployeeID = o.EmployeeId",
@@ -360,7 +360,7 @@ return {
     },
 
     {
-        id = 2518,
+        id = 2818,
         type = "parser",
         name = "Self-join with different aliases",
         input = "SELECT e1.FirstName AS Employee, e2.FirstName AS Manager FROM Employees e1 LEFT JOIN Employees e2 ON e1.EmployeeID = e2.EmployeeID",
@@ -382,7 +382,7 @@ return {
     },
 
     {
-        id = 2519,
+        id = 2819,
         type = "parser",
         name = "Mix of aliased and non-aliased tables",
         input = "SELECT e.EmployeeID, Departments.DepartmentName FROM Employees e JOIN Departments ON e.DepartmentID = Departments.DepartmentID",
@@ -404,7 +404,7 @@ return {
     },
 
     {
-        id = 2520,
+        id = 2820,
         type = "parser",
         name = "Columns from specific tables in complex JOIN",
         input = "SELECT c.Name, o.OrderId, p.Name AS ProductName FROM Customers c JOIN Orders o ON c.CustomerId = o.CustomerId JOIN Products p ON o.ProductId = p.ProductId",
@@ -428,11 +428,11 @@ return {
     },
 
     -- ========================================
-    -- 2521-2525: Expressions and Computed Columns
+    -- 2821-2825: Expressions and Computed Columns
     -- ========================================
 
     {
-        id = 2521,
+        id = 2821,
         type = "parser",
         name = "Expression with alias",
         input = "SELECT Salary * 12 AS AnnualSalary FROM Employees",
@@ -450,7 +450,7 @@ return {
     },
 
     {
-        id = 2522,
+        id = 2822,
         type = "parser",
         name = "Aggregate functions",
         input = "SELECT COUNT(*) AS TotalEmployees, AVG(Salary) AS AvgSalary FROM Employees",
@@ -469,7 +469,7 @@ return {
     },
 
     {
-        id = 2523,
+        id = 2823,
         type = "parser",
         name = "CASE expression with alias",
         input = "SELECT CASE WHEN Salary > 50000 THEN 'High' ELSE 'Low' END AS SalaryRange FROM Employees",
@@ -487,7 +487,7 @@ return {
     },
 
     {
-        id = 2524,
+        id = 2824,
         type = "parser",
         name = "Function call with column and alias",
         input = "SELECT UPPER(FirstName) AS UpperName, LOWER(e.LastName) AS LowerName FROM Employees e",
@@ -506,7 +506,7 @@ return {
     },
 
     {
-        id = 2525,
+        id = 2825,
         type = "parser",
         name = "Computed from multiple tables",
         input = "SELECT e.Salary * 12 AS AnnualPay, d.Budget / 12 AS MonthlyBudget FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID",
@@ -528,11 +528,11 @@ return {
     },
 
     -- ========================================
-    -- 2526-2530: CTEs and Subqueries
+    -- 2826-2830: CTEs and Subqueries
     -- ========================================
 
     {
-        id = 2526,
+        id = 2826,
         type = "parser",
         name = "Columns in CTE definition inherit parent_table",
         input = "WITH EmployeeCTE AS (SELECT EmployeeID, FirstName FROM Employees) SELECT * FROM EmployeeCTE",
@@ -556,7 +556,7 @@ return {
     },
 
     {
-        id = 2527,
+        id = 2827,
         type = "parser",
         name = "Columns from CTE reference",
         input = "WITH EmployeeCTE AS (SELECT EmployeeID, FirstName FROM Employees) SELECT e.EmployeeID, e.FirstName FROM EmployeeCTE e",
@@ -585,7 +585,7 @@ return {
     },
 
     {
-        id = 2528,
+        id = 2828,
         type = "parser",
         name = "Subquery columns with parent_table",
         input = "SELECT EmployeeID, (SELECT COUNT(*) FROM Orders o WHERE o.EmployeeId = e.EmployeeID) AS OrderCount FROM Employees e",
@@ -604,7 +604,7 @@ return {
     },
 
     {
-        id = 2529,
+        id = 2829,
         type = "parser",
         name = "Nested CTEs - column lineage tracking",
         input = "WITH CTE1 AS (SELECT EmployeeID, FirstName FROM Employees), CTE2 AS (SELECT c.EmployeeID FROM CTE1 c) SELECT * FROM CTE2",
@@ -635,7 +635,7 @@ return {
     },
 
     {
-        id = 2530,
+        id = 2830,
         type = "parser",
         name = "SELECT INTO temp table - columns get parent_table",
         input = "SELECT e.EmployeeID, e.FirstName INTO #TempEmployees FROM Employees e",
