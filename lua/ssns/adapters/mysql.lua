@@ -424,6 +424,7 @@ function MySQLAdapter:parse_columns(result)
         scale = row.scale,
         nullable = row.is_nullable == "YES",
         is_identity = row.extra and row.extra:lower():find("auto_increment") ~= nil,
+        is_computed = row.extra and (row.extra:lower():find("generated") ~= nil or row.extra:lower():find("virtual") ~= nil),
         default = row.default_value,
         ordinal_position = row.ordinal_position,
       })
@@ -578,6 +579,7 @@ function MySQLAdapter:create_column(parent, row)
     data_type = row.data_type,
     nullable = row.nullable,
     is_identity = row.is_identity,
+    is_computed = row.is_computed,
     default = row.default,
     max_length = row.max_length,
     precision = row.precision,
