@@ -2,11 +2,7 @@ return {
   number = 1,
   description = [[Autocomplete for tables in schema]],
   database = [[vim_dadbod_test]],
-  query = [[SELECT * FROM dbo.]],
-  cursor = {
-    line = 0,
-    col = 18
-  },
+  query = [[SELECT * FROM dbo.█]],
   expected = {
     type = [[table]],
     items = {

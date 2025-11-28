@@ -2,14 +2,10 @@ return {
   number = 3,
   description = [[Autocomplete for tables in schema (Multi-line SELECT handling)]],
   database = [[vim_dadbod_test]],
-  query = [[SELECT 
-* 
+  query = [[SELECT
+*
 FROM
-dbo.]],
-  cursor = {
-    line = 3,
-    col = 4
-  },
+dbo.█]],
   expected = {
     type = [[table]],
     items = {
