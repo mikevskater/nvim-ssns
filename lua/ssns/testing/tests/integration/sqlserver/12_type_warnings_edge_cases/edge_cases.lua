@@ -312,7 +312,7 @@ Name FROM Employees]],
     number = 4743,
     description = "Complex - EXCEPT query columns",
     database = "vim_dadbod_test",
-    query = [[SELECT  FROM Employees EXCEPT SELECT EmployeeID FROM Inactive_Employees]],
+    query = [[SELECT  FROM Employees EXCEPT SELECT EmployeeID FROM Employees WHERE IsActive = 0]],
     cursor = { line = 0, col = 7 },
     expected = {
       type = "column",
@@ -374,7 +374,7 @@ WHERE EXISTS (
       type = "column",
       items = {
         includes = {
-          "ManagerID",
+          "DepartmentID",
           "EmployeeID",
         },
       },
@@ -415,13 +415,13 @@ WHERE EXISTS (
     number = 4749,
     description = "Complex - PIVOT query column",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM (SELECT DepartmentID,  FROM Employees) src PIVOT (COUNT(EmployeeID) FOR Quarter IN ([Q1],[Q2])) pvt]],
+    query = [[SELECT * FROM (SELECT DepartmentID,  FROM Employees) src PIVOT (COUNT(EmployeeID) FOR DepartmentID IN ([1],[2])) pvt]],
     cursor = { line = 0, col = 36 },
     expected = {
       type = "column",
       items = {
         includes_any = {
-          "Quarter",
+          "DepartmentID",
           "EmployeeID",
         },
       },
@@ -512,9 +512,9 @@ WHERE EXISTS (
     description = "Complex - recursive CTE with depth limit",
     database = "vim_dadbod_test",
     query = [[WITH RecCTE AS (
-  SELECT EmployeeID, ManagerID, 0 AS Depth FROM Employees WHERE ManagerID IS NULL
+  SELECT EmployeeID, DepartmentID, 0 AS Depth FROM Employees WHERE DepartmentID IS NULL
   UNION ALL
-  SELECT e.EmployeeID, e.ManagerID, r.Depth + 1 FROM Employees e JOIN RecCTE r ON e.ManagerID = r.EmployeeID WHERE r.Depth < 10
+  SELECT e.EmployeeID, e.DepartmentID, r.Depth + 1 FROM Employees e JOIN RecCTE r ON e.DepartmentID = r.EmployeeID WHERE r.Depth < 10
 )
 SELECT  FROM RecCTE]],
     cursor = { line = 5, col = 7 },
@@ -523,7 +523,7 @@ SELECT  FROM RecCTE]],
       items = {
         includes = {
           "EmployeeID",
-          "ManagerID",
+          "DepartmentID",
           "Depth",
         },
       },
@@ -868,8 +868,8 @@ SELECT  FROM RecCTE]],
     number = 4781,
     description = "Stress - very long query (1000+ chars)",
     database = "vim_dadbod_test",
-    query = [[SELECT e.EmployeeID, e.FirstName, e.LastName, e.Email, e.Phone, e.Address, e.City, e.State, e.ZipCode, e.Country, e.HireDate, e.Salary, e.DepartmentID, e.ManagerID, e.IsActive, d.DepartmentID, d.DepartmentName, d.Budget, d.ManagerID, d.LocationID, p.ProjectID, p.ProjectName, p.StartDate, p.EndDate, p.Budget, p.Status FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Projects p ON d.DepartmentID = p.DepartmentID WHERE ]],
-    cursor = { line = 0, col = 462 },
+    query = [[SELECT e.EmployeeID, e.FirstName, e.LastName, e.Email, e.HireDate, e.Salary, e.DepartmentID, e.IsActive, d.DepartmentID, d.DepartmentName, d.Budget, d.ManagerID, p.ProjectID, p.ProjectName, p.StartDate, p.EndDate, p.Budget, p.Status FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Projects p ON d.DepartmentID = p.ProjectID WHERE ]],
+    cursor = { line = 0, col = 338 },
     expected = {
       type = "column",
       items = {
@@ -977,7 +977,7 @@ FROM Employees e
 INNER JOIN Departments d
   ON e.DepartmentID = d.DepartmentID
 LEFT JOIN Projects p
-  ON d.DepartmentID = p.DepartmentID
+  ON e.EmployeeID = p.ProjectID
 WHERE
   e.IsActive = 1
   AND d.Budget > 100000

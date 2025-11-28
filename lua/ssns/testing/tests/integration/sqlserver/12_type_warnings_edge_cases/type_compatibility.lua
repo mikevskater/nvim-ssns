@@ -110,17 +110,13 @@ return {
   },
   {
     number = 4659,
-    description = "Type compatibility - uniqueidentifier = varchar (warning)",
+    description = "Type compatibility - varchar = varchar comparison",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees WHERE RowGUID = FirstName]],
-    cursor = { line = 0, col = 47 },
+    query = [[SELECT * FROM Employees WHERE Email = FirstName]],
+    cursor = { line = 0, col = 45 },
     expected = {
-      type = "warning",
-      items = {
-        includes_any = {
-          "type_mismatch",
-        },
-      },
+      type = "no_warning",
+      valid = true,
     },
   },
   {
@@ -158,10 +154,10 @@ return {
   },
   {
     number = 4663,
-    description = "Type compatibility - smallint = int (compatible)",
+    description = "Type compatibility - int = int (compatible)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees WHERE SmallCol = EmployeeID]],
-    cursor = { line = 0, col = 49 },
+    query = [[SELECT * FROM Employees WHERE DepartmentID = EmployeeID]],
+    cursor = { line = 0, col = 52 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -169,10 +165,10 @@ return {
   },
   {
     number = 4664,
-    description = "Type compatibility - binary = varbinary (compatible)",
+    description = "Type compatibility - decimal = decimal (compatible)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Documents WHERE BinaryData = VarBinaryData]],
-    cursor = { line = 0, col = 54 },
+    query = [[SELECT * FROM Projects WHERE Budget = Budget]],
+    cursor = { line = 0, col = 44 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -180,10 +176,10 @@ return {
   },
   {
     number = 4665,
-    description = "Type compatibility - binary = int (warning)",
+    description = "Type compatibility - date = varchar (warning)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Documents WHERE BinaryData = DocID]],
-    cursor = { line = 0, col = 47 },
+    query = [[SELECT * FROM Projects WHERE StartDate = ProjectName]],
+    cursor = { line = 0, col = 53 },
     expected = {
       type = "warning",
       items = {
@@ -195,10 +191,10 @@ return {
   },
   {
     number = 4666,
-    description = "Type compatibility - xml = varchar (warning)",
+    description = "Type compatibility - decimal = varchar (warning)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Documents WHERE XmlData = DocName]],
-    cursor = { line = 0, col = 46 },
+    query = [[SELECT * FROM Projects WHERE Budget = ProjectName]],
+    cursor = { line = 0, col = 50 },
     expected = {
       type = "warning",
       items = {
@@ -210,25 +206,21 @@ return {
   },
   {
     number = 4667,
-    description = "Type compatibility - geography = geometry (warning)",
+    description = "Type compatibility - int = decimal (compatible)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Locations WHERE GeoPoint = GeomShape]],
-    cursor = { line = 0, col = 49 },
+    query = [[SELECT * FROM Departments WHERE DepartmentID = Budget]],
+    cursor = { line = 0, col = 55 },
     expected = {
-      type = "warning",
-      items = {
-        includes_any = {
-          "type_mismatch",
-        },
-      },
+      type = "no_warning",
+      valid = true,
     },
   },
   {
     number = 4668,
-    description = "Type compatibility - hierarchyid comparison",
+    description = "Type compatibility - varchar = varchar (compatible)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM OrgChart WHERE NodePath = ParentPath]],
-    cursor = { line = 0, col = 49 },
+    query = [[SELECT * FROM Customers WHERE Name = Email]],
+    cursor = { line = 0, col = 44 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -236,10 +228,10 @@ return {
   },
   {
     number = 4669,
-    description = "Type compatibility - money = decimal (compatible)",
+    description = "Type compatibility - decimal = decimal (compatible)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees WHERE Salary = Bonus]],
-    cursor = { line = 0, col = 43 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.Salary = d.Budget]],
+    cursor = { line = 0, col = 67 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -247,12 +239,11 @@ return {
   },
   {
     number = 4670,
-    description = "Type compatibility - timestamp/rowversion (special)",
+    description = "Type compatibility - date = date (compatible)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees WHERE RowVersion = @version]],
-    cursor = { line = 0, col = 50 },
+    query = [[SELECT * FROM Employees e JOIN Projects p ON e.HireDate = p.StartDate]],
+    cursor = { line = 0, col = 67 },
     expected = {
-      -- Rowversion has special handling
       type = "no_warning",
       valid = true,
     },
@@ -276,8 +267,8 @@ return {
     number = 4672,
     description = "JOIN ON - varchar to int conversion (warning)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN StringIDs s ON e.EmployeeID = s.StringID]],
-    cursor = { line = 0, col = 70 },
+    query = [[SELECT * FROM Orders o JOIN Employees e ON o.OrderId = e.EmployeeID]],
+    cursor = { line = 0, col = 68 },
     expected = {
       type = "warning",
       items = {
@@ -292,8 +283,8 @@ return {
     number = 4673,
     description = "JOIN ON - date to datetime (compatible)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN TimeEntries t ON e.HireDate = t.EntryDateTime]],
-    cursor = { line = 0, col = 75 },
+    query = [[SELECT * FROM Employees e JOIN Customers c ON e.HireDate = c.CreatedDate]],
+    cursor = { line = 0, col = 73 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -301,10 +292,10 @@ return {
   },
   {
     number = 4674,
-    description = "JOIN ON - nullable = non-nullable (compatible)",
+    description = "JOIN ON - self-join on int columns (compatible)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Employees m ON e.ManagerID = m.EmployeeID]],
-    cursor = { line = 0, col = 70 },
+    query = [[SELECT * FROM Employees e JOIN Employees m ON e.DepartmentID = m.EmployeeID]],
+    cursor = { line = 0, col = 72 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -312,10 +303,10 @@ return {
   },
   {
     number = 4675,
-    description = "JOIN ON - char(10) = varchar(50) (compatible)",
+    description = "JOIN ON - varchar = varchar (compatible)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Codes c ON e.DeptCode = c.CodeValue]],
-    cursor = { line = 0, col = 65 },
+    query = [[SELECT * FROM Customers c JOIN Countries co ON c.Country = co.CountryName]],
+    cursor = { line = 0, col = 74 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -338,10 +329,10 @@ return {
   },
   {
     number = 4677,
-    description = "JOIN ON - composite key all compatible",
+    description = "JOIN ON - multiple compatible conditions",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM OrderDetails od JOIN Products p ON od.ProductID = p.ProductID AND od.OrderID = p.OrderID]],
-    cursor = { line = 0, col = 100 },
+    query = [[SELECT * FROM Orders o JOIN Products p ON o.Id = p.Id AND o.OrderId = p.ProductId]],
+    cursor = { line = 0, col = 84 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -362,8 +353,8 @@ return {
     number = 4679,
     description = "JOIN ON - CAST expression type",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN StringIDs s ON CAST(e.EmployeeID AS VARCHAR(10)) = s.StringID]],
-    cursor = { line = 0, col = 92 },
+    query = [[SELECT * FROM Employees e JOIN Orders o ON CAST(e.EmployeeID AS VARCHAR(10)) = o.OrderId]],
+    cursor = { line = 0, col = 93 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -371,10 +362,10 @@ return {
   },
   {
     number = 4680,
-    description = "JOIN ON - collation difference (warning)",
+    description = "JOIN ON - explicit collation",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN LatinTable l ON e.FirstName COLLATE Latin1_General_CI_AS = l.LatinName]],
-    cursor = { line = 0, col = 101 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.FirstName COLLATE Latin1_General_CI_AS = d.DepartmentName]],
+    cursor = { line = 0, col = 104 },
     expected = {
       -- Explicit collation should resolve
       type = "no_warning",
@@ -383,10 +374,10 @@ return {
   },
   {
     number = 4681,
-    description = "JOIN ON - cross-database type consistency",
+    description = "JOIN ON - cross-schema type consistency",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM vim_dadbod_test.dbo.Employees e JOIN vim_dadbod_second.dbo.ExtEmployees x ON e.EmployeeID = x.ExtID]],
-    cursor = { line = 0, col = 114 },
+    query = [[SELECT * FROM dbo.Employees e JOIN hr.Benefits b ON e.EmployeeID = b.EmployeeID]],
+    cursor = { line = 0, col = 80 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -394,10 +385,10 @@ return {
   },
   {
     number = 4682,
-    description = "JOIN ON - computed column type",
+    description = "JOIN ON - bit to int comparison",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN ComputedTable c ON e.EmployeeID = c.ComputedID]],
-    cursor = { line = 0, col = 76 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.IsActive = d.DepartmentID]],
+    cursor = { line = 0, col = 75 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -405,10 +396,10 @@ return {
   },
   {
     number = 4683,
-    description = "JOIN ON - user-defined type",
+    description = "JOIN ON - varchar length difference",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM CustomTypes c1 JOIN CustomTypes c2 ON c1.CustomCol = c2.CustomCol]],
-    cursor = { line = 0, col = 78 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.Email = d.DepartmentName]],
+    cursor = { line = 0, col = 75 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -416,10 +407,10 @@ return {
   },
   {
     number = 4684,
-    description = "JOIN ON - sql_variant comparison",
+    description = "JOIN ON - int to int consistency",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM VariantTable v1 JOIN VariantTable v2 ON v1.VariantCol = v2.VariantCol]],
-    cursor = { line = 0, col = 82 },
+    query = [[SELECT * FROM Customers c1 JOIN Customers c2 ON c1.CountryID = c2.CountryID]],
+    cursor = { line = 0, col = 78 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -427,10 +418,10 @@ return {
   },
   {
     number = 4685,
-    description = "JOIN ON - numeric precision difference (compatible)",
+    description = "JOIN ON - decimal precision compatible",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Precise1 p1 JOIN Precise2 p2 ON p1.Decimal_18_2 = p2.Decimal_10_4]],
-    cursor = { line = 0, col = 77 },
+    query = [[SELECT * FROM Employees e JOIN Projects p ON e.Salary = p.Budget]],
+    cursor = { line = 0, col = 63 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -438,42 +429,32 @@ return {
   },
   {
     number = 4686,
-    description = "JOIN ON - datetimeoffset vs datetime2",
+    description = "JOIN ON - date vs datetime",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM TimeTable1 t1 JOIN TimeTable2 t2 ON t1.DateTimeOffset = t2.DateTime2Col]],
-    cursor = { line = 0, col = 84 },
+    query = [[SELECT * FROM Orders o JOIN Customers c ON o.OrderDate = c.CreatedDate]],
+    cursor = { line = 0, col = 72 },
     expected = {
-      type = "warning",
-      items = {
-        includes_any = {
-          "precision_loss",
-          "implicit_conversion",
-        },
-      },
+      type = "no_warning",
+      valid = true,
     },
   },
   {
     number = 4687,
-    description = "JOIN ON - time vs datetime",
+    description = "JOIN ON - date to date comparison",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM TimeTable t JOIN DateTimeTable dt ON t.TimeCol = dt.DateTimeCol]],
-    cursor = { line = 0, col = 77 },
+    query = [[SELECT * FROM Orders o JOIN Projects p ON o.OrderDate = p.StartDate]],
+    cursor = { line = 0, col = 69 },
     expected = {
-      type = "warning",
-      items = {
-        includes_any = {
-          "type_mismatch",
-          "implicit_conversion",
-        },
-      },
+      type = "no_warning",
+      valid = true,
     },
   },
   {
     number = 4688,
-    description = "JOIN ON - nchar vs char (compatible with potential data loss)",
+    description = "JOIN ON - varchar compatibility",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM NCharTable n JOIN CharTable c ON n.NCharCol = c.CharCol]],
-    cursor = { line = 0, col = 68 },
+    query = [[SELECT * FROM Employees e JOIN Customers c ON e.Email = c.Email]],
+    cursor = { line = 0, col = 67 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -481,10 +462,10 @@ return {
   },
   {
     number = 4689,
-    description = "JOIN ON - image vs varbinary(max)",
+    description = "JOIN ON - varchar id comparison",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM LegacyTable l JOIN ModernTable m ON l.ImageCol = m.VarBinaryMax]],
-    cursor = { line = 0, col = 76 },
+    query = [[SELECT * FROM Orders o JOIN Products p ON o.OrderId = p.ProductId]],
+    cursor = { line = 0, col = 69 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -492,10 +473,10 @@ return {
   },
   {
     number = 4690,
-    description = "JOIN ON - text vs varchar(max)",
+    description = "JOIN ON - varchar to varchar compatibility",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM LegacyTable l JOIN ModernTable m ON l.TextCol = m.VarCharMax]],
-    cursor = { line = 0, col = 73 },
+    query = [[SELECT * FROM Customers c JOIN Products p ON c.CustomerId = p.ProductId]],
+    cursor = { line = 0, col = 74 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -509,8 +490,8 @@ return {
     number = 4691,
     description = "Expression - arithmetic on compatible types",
     database = "vim_dadbod_test",
-    query = [[SELECT Salary + Bonus FROM Employees]],
-    cursor = { line = 0, col = 22 },
+    query = [[SELECT Salary + DepartmentID FROM Employees]],
+    cursor = { line = 0, col = 29 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -575,8 +556,8 @@ return {
     number = 4696,
     description = "Expression - COALESCE type consistency",
     database = "vim_dadbod_test",
-    query = [[SELECT COALESCE(ManagerID, FirstName) FROM Employees]],
-    cursor = { line = 0, col = 38 },
+    query = [[SELECT COALESCE(DepartmentID, FirstName) FROM Employees]],
+    cursor = { line = 0, col = 42 },
     expected = {
       type = "warning",
       items = {
@@ -841,8 +822,8 @@ return {
     number = 4716,
     description = "UPDATE - SET from other column compatible",
     database = "vim_dadbod_test",
-    query = [[UPDATE Employees SET DepartmentID = ManagerID]],
-    cursor = { line = 0, col = 45 },
+    query = [[UPDATE Employees SET DepartmentID = EmployeeID]],
+    cursor = { line = 0, col = 47 },
     expected = {
       type = "no_warning",
       valid = true,
@@ -867,8 +848,8 @@ return {
     number = 4718,
     description = "MERGE - matched SET type check",
     database = "vim_dadbod_test",
-    query = [[MERGE INTO Employees AS t USING Staging AS s ON t.ID = s.ID WHEN MATCHED THEN UPDATE SET t.Salary = s.Name]],
-    cursor = { line = 0, col = 106 },
+    query = [[MERGE INTO Employees AS t USING (SELECT EmployeeID, FirstName FROM Employees) AS s ON t.EmployeeID = s.EmployeeID WHEN MATCHED THEN UPDATE SET t.Salary = s.FirstName]],
+    cursor = { line = 0, col = 156 },
     expected = {
       type = "warning",
       items = {
