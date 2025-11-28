@@ -2,21 +2,22 @@ return {
   number = 30,
   description = [[Autocomplete for columns in select with multiple select statements in query with same aliases (Multi-line handling)]],
   database = [[vim_dadbod_test]],
-  query = [[SELECT 
+  query = [[SELECT
     e.
 FROM
-    dbo.EMPLOYEES e;
+    dbo.Employees e;
 SELECT
     *
 FROM
-    dbo.DEPARTMENTS e;]],
+    dbo.Departments e;]],
   cursor = {
     line = 1,
     col = 6
   },
   expected = {
     type = [[column]],
-    items = {
+    includes = {
+      -- From Employees (current statement with alias 'e')
       "EmployeeID",
       "FirstName",
       "LastName",
@@ -25,6 +26,26 @@ FROM
       "HireDate",
       "Salary",
       "IsActive"
+    },
+    excludes = {
+      -- From Departments (different statement - alias 'e' means different table there)
+      "DepartmentName",
+      "ManagerID",
+      "Budget",
+      -- From other tables (not in query at all)
+      "OrderId",
+      "OrderDate",
+      "Total",
+      "Status",
+      "CustomerId",
+      "CompanyId",
+      "Country",
+      "CountryID",
+      "ProductId",
+      "CategoryId",
+      "Price",
+      "ProjectID",
+      "ProjectName"
     }
   }
 }

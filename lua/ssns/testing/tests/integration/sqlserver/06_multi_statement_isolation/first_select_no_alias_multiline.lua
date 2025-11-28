@@ -2,22 +2,23 @@ return {
   number = 26,
   description = [[Autocomplete for columns in select with multiple select statements in query (Multi-line handling)]],
   database = [[vim_dadbod_test]],
-  query = [[SELECT 
-    
+  query = [[SELECT
+
 FROM
-    dbo.EMPLOYEES;
+    dbo.Employees;
 
 SELECT
     *
 FROM
-    dbo.DEPARTMENTS;]],
+    dbo.Departments;]],
   cursor = {
     line = 1,
     col = 4
   },
   expected = {
     type = [[column]],
-    items = {
+    includes = {
+      -- From Employees (current statement)
       "EmployeeID",
       "FirstName",
       "LastName",
@@ -26,6 +27,26 @@ FROM
       "HireDate",
       "Salary",
       "IsActive"
+    },
+    excludes = {
+      -- From Departments (different statement - should be isolated)
+      "DepartmentName",
+      "ManagerID",
+      "Budget",
+      -- From other tables (not in query at all)
+      "OrderId",
+      "OrderDate",
+      "Total",
+      "Status",
+      "CustomerId",
+      "CompanyId",
+      "Country",
+      "CountryID",
+      "ProductId",
+      "CategoryId",
+      "Price",
+      "ProjectID",
+      "ProjectName"
     }
   }
 }
