@@ -2,6 +2,35 @@
 --- Helper functions for testing framework
 local M = {}
 
+--- Cursor marker constant (Unicode full block U+2588)
+--- Used to mark cursor position inline in test queries
+M.CURSOR_MARKER = "█"
+
+--- Parse cursor position from inline marker in query
+--- Finds the █ marker, extracts position, and returns clean query
+--- @param query string Query with █ cursor marker
+--- @return table result { query: string, cursor: { line: number, col: number } }
+function M.parse_cursor_from_query(query)
+  local lines = vim.split(query, "\n", { plain = true })
+  for line_idx, line in ipairs(lines) do
+    local col = line:find(M.CURSOR_MARKER, 1, true)
+    if col then
+      -- Remove the marker from the query
+      local clean_line = line:sub(1, col - 1) .. line:sub(col + #M.CURSOR_MARKER)
+      lines[line_idx] = clean_line
+      local clean_query = table.concat(lines, "\n")
+      return {
+        query = clean_query,
+        cursor = {
+          line = line_idx - 1, -- 0-indexed
+          col = col - 1, -- 0-indexed byte offset
+        },
+      }
+    end
+  end
+  error(string.format("No cursor marker (%s) found in query: %s", M.CURSOR_MARKER, query:sub(1, 50)))
+end
+
 --- Load test data from a .lua file
 --- Supports both single test format and multi-test array format
 --- @param filepath string Absolute path to test file
@@ -54,17 +83,20 @@ end
 function M._validate_single_test(test_data, filepath, index)
   local prefix = index and string.format("Test %d in %s", index, filepath) or filepath
 
-  -- Validate required fields
-  local required_fields = { "number", "description", "database", "query", "cursor", "expected" }
+  -- Validate required fields (cursor is now optional - can be inline in query)
+  local required_fields = { "number", "description", "database", "query", "expected" }
   for _, field in ipairs(required_fields) do
     if test_data[field] == nil then
       return false, string.format("%s missing required field: %s", prefix, field)
     end
   end
 
-  -- Validate cursor structure
-  if type(test_data.cursor) ~= "table" or test_data.cursor.line == nil or test_data.cursor.col == nil then
-    return false, string.format("%s has invalid cursor structure", prefix)
+  -- Validate cursor structure OR inline marker
+  local has_cursor_prop = type(test_data.cursor) == "table" and test_data.cursor.line ~= nil and test_data.cursor.col ~= nil
+  local has_inline_marker = test_data.query:find(M.CURSOR_MARKER, 1, true) ~= nil
+
+  if not has_cursor_prop and not has_inline_marker then
+    return false, string.format("%s has no cursor: needs cursor property or %s marker in query", prefix, M.CURSOR_MARKER)
   end
 
   -- Validate expected structure
@@ -162,18 +194,30 @@ end
 
 --- Create mock context object from test data
 --- Mimics what blink.cmp passes to source.get_completions()
+--- Supports both cursor property and inline █ marker
 --- @param test_data table Test data from test file
 --- @param bufnr number? Buffer number (defaults to fake bufnr)
 --- @return table context Mock context object
+--- @return string query Clean query (marker removed if present)
 function M.create_mock_context(test_data, bufnr)
   bufnr = bufnr or 999999 -- Fake buffer number
 
+  local query = test_data.query
+  local cursor = test_data.cursor
+
+  -- If no cursor property, parse from inline marker in query
+  if not cursor then
+    local parsed = M.parse_cursor_from_query(query)
+    query = parsed.query
+    cursor = parsed.cursor
+  end
+
   -- Split query into lines
-  local lines = vim.split(test_data.query, "\n", { plain = true })
+  local lines = vim.split(query, "\n", { plain = true })
 
   -- Get cursor position (convert 0-indexed to 1-indexed for Lua)
-  local cursor_line = test_data.cursor.line + 1 -- Convert to 1-indexed
-  local cursor_col = test_data.cursor.col -- Already byte offset
+  local cursor_line = cursor.line + 1 -- Convert to 1-indexed
+  local cursor_col = cursor.col -- Already byte offset
 
   -- Get current line
   local line = lines[cursor_line] or ""
@@ -187,14 +231,16 @@ function M.create_mock_context(test_data, bufnr)
       end_col = #line,
     },
     filetype = "sql",
-  }
+  }, query
 end
 
 --- Create mock buffer with test data
 --- Sets up a real buffer with the query text and database context
+--- Supports both cursor property and inline █ marker
 --- @param test_data table Test data from test file
 --- @param connection_info table? Connection info { server, database, connection_string }
 --- @return number bufnr The created buffer number
+--- @return string query Clean query (marker removed if present)
 function M.create_mock_buffer(test_data, connection_info)
   -- Create a new buffer
   local bufnr = vim.api.nvim_create_buf(false, true) -- Not listed, scratch buffer
@@ -202,8 +248,15 @@ function M.create_mock_buffer(test_data, connection_info)
   -- Set buffer filetype
   vim.api.nvim_buf_set_option(bufnr, "filetype", "sql")
 
+  -- Get clean query (remove marker if present)
+  local query = test_data.query
+  if not test_data.cursor and query:find(M.CURSOR_MARKER, 1, true) then
+    local parsed = M.parse_cursor_from_query(query)
+    query = parsed.query
+  end
+
   -- Set buffer lines
-  local lines = vim.split(test_data.query, "\n", { plain = true })
+  local lines = vim.split(query, "\n", { plain = true })
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
 
   -- Set database context using REAL connection
