@@ -2,11 +2,7 @@ return {
   number = 37,
   description = [[Autocomplete for columns after WHERE clause with multiple tables with aliases in FROM clause with table specified]],
   database = [[vim_dadbod_test]],
-  query = [[SELECT d.DepartmentName, e.* FROM dbo.Employees e JOIN dbo.Departments d ON e.DepartmentID = d.DepartmentID WHERE e.]],
-  cursor = {
-    line = 0,
-    col = 116
-  },
+  query = [[SELECT d.DepartmentName, e.* FROM dbo.Employees e JOIN dbo.Departments d ON e.DepartmentID = d.DepartmentID WHERE e.█]],
   expected = {
     type = [[column]],
     includes = {

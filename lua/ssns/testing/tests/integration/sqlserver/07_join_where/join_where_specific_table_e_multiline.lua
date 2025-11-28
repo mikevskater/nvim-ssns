@@ -10,11 +10,7 @@ FROM
 JOIN
     dbo.Departments d ON e.DepartmentID = d.DepartmentID
 WHERE
-    e.]],
-  cursor = {
-    line = 8,
-    col = 6
-  },
+    e.█]],
   expected = {
     type = [[column]],
     includes = {
