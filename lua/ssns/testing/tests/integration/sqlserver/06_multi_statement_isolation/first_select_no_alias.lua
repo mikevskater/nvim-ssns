@@ -19,7 +19,11 @@ SELECT * FROM dbo.Departments]],
       "DepartmentID",
       "HireDate",
       "Salary",
-      "IsActive"
+      "IsActive",
+      -- Scalar functions (available for unqualified SELECT)
+      "dbo.fn_GetEmployeeFullName",
+      "dbo.fn_CalculateYearsOfService",
+      "hr.fn_GetTotalBenefitCost"
     },
     excludes = {
       -- From Departments (different statement - should be isolated)

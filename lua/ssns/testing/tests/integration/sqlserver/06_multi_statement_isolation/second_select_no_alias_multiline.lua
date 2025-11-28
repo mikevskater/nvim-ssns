@@ -21,7 +21,11 @@ FROM
       "DepartmentID",
       "DepartmentName",
       "ManagerID",
-      "Budget"
+      "Budget",
+      -- Scalar functions (available for unqualified SELECT)
+      "dbo.fn_GetEmployeeFullName",
+      "dbo.fn_CalculateYearsOfService",
+      "hr.fn_GetTotalBenefitCost"
     },
     excludes = {
       -- From Employees (different statement - should be isolated)
