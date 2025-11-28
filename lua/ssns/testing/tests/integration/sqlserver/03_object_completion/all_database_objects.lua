@@ -1,13 +1,12 @@
 return {
   number = 10,
-  description = [[Autocomplete for Objects in database]],
+  description = [[Autocomplete for Tables/Views in FROM clause]],
   database = [[vim_dadbod_test]],
-  query = [[SELECT
- *
-FROM█]],
+  query = [[SELECT * FROM █]],
   expected = {
-    type = [[object]],
+    type = [[table]],
     items = {
+      includes = {
       -- Databases (3 total)
       "Branch_Prod",
       "TEST",
@@ -17,32 +16,37 @@ FROM█]],
       "hr",
 
       -- dbo schema tables (8 total)
-      "[dbo].[Countries]",
-      "[dbo].[Customers]",
-      "[dbo].[Departments]",
-      "[dbo].[Employees]",
-      "[dbo].[Orders]",
-      "[dbo].[Products]",
-      "[dbo].[Projects]",
-      "[dbo].[Regions]",
+      "Countries",
+      "Customers",
+      "Departments",
+      "Employees",
+      "Orders",
+      "Products",
+      "Projects",
+      "Regions",
 
-      -- hr schema table (1 total)
-      "[hr].[Benefits]",
+        -- hr schema table
+        "Benefits",
 
-      -- dbo views (3 total - FROM-selectable)
-      "[dbo].[vw_ActiveEmployees]",
-      "[dbo].[vw_DepartmentSummary]",
-      "[dbo].[vw_ProjectStatus]",
+        -- dbo views (FROM-selectable)
+        "vw_ActiveEmployees",
+        "vw_DepartmentSummary",
+        "vw_ProjectStatus",
 
-      -- dbo table-valued functions (2 total - can be used in FROM)
-      "[dbo].[fn_GetEmployeesBySalaryRange]",
-      "[dbo].[GetCustomerOrders]",
+        -- dbo table-valued functions (can be used in FROM)
+        "GetCustomerOrders",
 
-      -- dbo synonyms (4 total - FROM-selectable)
-      "[dbo].[syn_ActiveEmployees]",
-      "[dbo].[syn_Depts]",
-      "[dbo].[syn_Employees]",
-      "[dbo].[syn_HRBenefits]"
-    }
-  }
+        -- dbo synonyms (FROM-selectable)
+        "syn_ActiveEmployees",
+        "syn_Depts",
+        "syn_Employees",
+        "syn_HRBenefits",
+      },
+      excludes = {
+        -- Should NOT include procedures
+        "usp_GetEmployeesByDepartment",
+        "usp_InsertEmployee",
+      },
+    },
+  },
 }

@@ -692,6 +692,44 @@ function Context.detect(bufnr, line_num, col)
     ctx_type, mode, extra = Context._detect_type_from_line(before_cursor, chunk)
   end
 
+  -- Build tables_in_scope array from cache_ctx.tables
+  -- Format: {alias = "e", table = "dbo.EMPLOYEES", scope = "main"}
+  local tables_in_scope = {}
+  if cache_ctx and cache_ctx.tables then
+    for _, table_ref in ipairs(cache_ctx.tables) do
+      local table_name = table_ref.name
+      -- Build qualified table name if schema is present
+      if table_ref.schema then
+        table_name = table_ref.schema .. "." .. table_ref.name
+      end
+      if table_ref.database then
+        table_name = table_ref.database .. "." .. table_name
+      end
+
+      table.insert(tables_in_scope, {
+        alias = table_ref.alias,
+        table = table_name,
+        scope = "main",  -- Could be "main" or "subquery" in the future
+      })
+    end
+  end
+
+  -- Convert aliases from {alias_lower -> TableReference} to {alias_lower -> table_name_string}
+  local aliases_map = {}
+  if cache_ctx and cache_ctx.aliases then
+    for alias_lower, table_ref in pairs(cache_ctx.aliases) do
+      local table_name = table_ref.name
+      -- Build qualified table name if schema is present
+      if table_ref.schema then
+        table_name = table_ref.schema .. "." .. table_ref.name
+      end
+      if table_ref.database then
+        table_name = table_ref.database .. "." .. table_name
+      end
+      aliases_map[alias_lower] = table_name
+    end
+  end
+
   -- Build context result
   local context = {
     type = ctx_type,
@@ -702,10 +740,11 @@ function Context.detect(bufnr, line_num, col)
     -- Pass through StatementCache data
     chunk = cache_ctx and cache_ctx.chunk,
     tables = cache_ctx and cache_ctx.tables or {},
-    aliases = cache_ctx and cache_ctx.aliases or {},
+    aliases = aliases_map,  -- Converted format: alias_lower -> table_name_string
     ctes = cache_ctx and cache_ctx.ctes or {},
     temp_tables = cache_ctx and cache_ctx.temp_tables or {},
     subquery = cache_ctx and cache_ctx.subquery,
+    tables_in_scope = tables_in_scope,  -- New field for Resolver
 
     -- Extra context from type detection
     table_ref = extra.table_ref,

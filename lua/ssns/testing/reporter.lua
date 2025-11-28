@@ -17,7 +17,7 @@ function M.format_result(result)
   -- Header
   table.insert(lines, string.format("### %s Test #%d: %s",
     status,
-    result.test_number or "?",
+    result.test_number or 0,
     result.description or "Unknown"))
 
   -- Basic info
@@ -40,8 +40,12 @@ function M.format_result(result)
   if result.comparison then
     table.insert(lines, "")
     table.insert(lines, "**Results:**")
-    table.insert(lines, string.format("- Expected: %d items", result.comparison.expected_count))
-    table.insert(lines, string.format("- Actual: %d items", result.comparison.actual_count))
+    local expected_count = result.comparison.expected_count or 0
+    local actual_count = result.comparison.actual_count or 0
+    if type(expected_count) ~= "number" then expected_count = tonumber(expected_count) or 0 end
+    if type(actual_count) ~= "number" then actual_count = tonumber(actual_count) or 0 end
+    table.insert(lines, string.format("- Expected: %d items", expected_count))
+    table.insert(lines, string.format("- Actual: %d items", actual_count))
 
     if #result.comparison.missing > 0 then
       table.insert(lines, "")
@@ -285,7 +289,9 @@ function M.display_results(results)
     end)
 
     for _, result in ipairs(failed_tests) do
-      local msg = string.format("  Test #%d: %s", result.test_number or "?", result.description or "Unknown")
+      local test_num = result.test_number or 0
+      if type(test_num) ~= "number" then test_num = tonumber(test_num) or 0 end
+      local msg = string.format("  Test #%d: %s", test_num, result.description or "Unknown")
 
       if result.error then
         msg = msg .. string.format("\n    Error: %s", result.error:gsub("\n", " "))
