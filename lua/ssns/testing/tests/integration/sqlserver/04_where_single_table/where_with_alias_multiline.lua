@@ -2,13 +2,9 @@ return {
   number = 16,
   description = [[Autocomplete for columns after WHERE clause with table alias (Multi-line handling)]],
   database = [[vim_dadbod_test]],
-  query = [[SELECT * FROM dbo.EMPLOYEES e 
-WHERE 
-    e.]],
-  cursor = {
-    line = 2,
-    col = 6
-  },
+  query = [[SELECT * FROM dbo.EMPLOYEES e
+WHERE
+    e.█]],
   expected = {
     type = [[column]],
     includes = {
