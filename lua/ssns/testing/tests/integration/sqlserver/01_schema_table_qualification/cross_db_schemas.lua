@@ -10,7 +10,18 @@ return {
   expected = {
     type = [[schema]],
     items = {
-      "dbo"
+      includes = {
+        "dbo" -- TEST database only has dbo schema
+      },
+      excludes = {
+        -- Schemas from vim_dadbod_test should not appear
+        "hr",
+        "Branch",
+        -- Tables should not appear at schema level
+        "Records",
+        "Employees",
+        "Departments"
+      }
     }
   }
 }
