@@ -418,6 +418,22 @@ function Source:get_completions(ctx, callback)
       return
     end
 
+    -- Check if this is a cross-database schema completion ("TEST.█" pattern)
+    -- potential_database is set when we have a single identifier + dot that could be a database name
+    if context_result.potential_database then
+      local server = connection_ctx and connection_ctx.server
+      if server then
+        local check_db = server:get_database(context_result.potential_database)
+        if check_db then
+          -- This is a database name - return schemas from that database instead of tables
+          Debug.log(string.format("[COMPLETION] Calling SchemasProvider for cross-db: %s", context_result.potential_database))
+          local SchemasProvider = require('ssns.completion.providers.schemas')
+          SchemasProvider.get_completions(provider_ctx, wrapped_callback)
+          return
+        end
+      end
+    end
+
     -- Table/view/synonym completion (Phase 10.2)
     Debug.log("[COMPLETION] Calling TablesProvider")
     local TablesProvider = require('ssns.completion.providers.tables')

@@ -62,6 +62,39 @@ function M.run_all_tests(opts)
   return results
 end
 
+--- Run tests in a specific category folder
+--- @param category_folder string Category folder name (e.g., "01_schema_table_qualification")
+--- @param opts table|nil Optional run configuration
+--- @return table Test results
+function M.run_category_tests(category_folder, opts)
+  opts = opts or {}
+
+  vim.notify(string.format("Running tests for category: %s", category_folder), vim.log.levels.INFO)
+
+  -- Run category tests via runner
+  local results = runner.run_category_tests(category_folder, opts)
+
+  if #results == 0 then
+    vim.notify(string.format("No tests found for category: %s", category_folder), vim.log.levels.WARN)
+    return results
+  end
+
+  -- Display results
+  reporter.display_results(results)
+
+  -- Write markdown report
+  local output_path = vim.fn.stdpath("data") .. "/ssns/test_results.md"
+  local success = reporter.write_markdown(results, output_path)
+
+  if success then
+    vim.notify(string.format("Test results written to: %s", output_path), vim.log.levels.INFO)
+  else
+    vim.notify("Failed to write test results to file", vim.log.levels.ERROR)
+  end
+
+  return results
+end
+
 --- Run a specific test by number
 --- @param test_number number The test number to run
 --- @param opts table|nil Optional run configuration

@@ -104,7 +104,19 @@ function DbClass:get_schemas()
   if not self.is_loaded then
     self:load()
   end
-  return self.children
+
+  -- Find the SCHEMAS group in children
+  if not self.children then
+    return {}
+  end
+
+  for _, child in ipairs(self.children) do
+    if child.object_type == "schemas_group" and child.children then
+      return child.children
+    end
+  end
+
+  return {}
 end
 
 ---Get the default schema for this database type

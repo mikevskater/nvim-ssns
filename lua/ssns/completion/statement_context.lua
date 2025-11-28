@@ -115,6 +115,7 @@ end
 ---@return {database: string?, schema: string?, table: string?, alias: string?}
 function Context._parse_qualified_name(before_cursor)
   local parts = {}
+  local has_trailing_dot = before_cursor:match("%.$") ~= nil
 
   -- Split by dots
   for part in before_cursor:gmatch("[^%.]+") do
@@ -130,20 +131,38 @@ function Context._parse_qualified_name(before_cursor)
     alias = nil,
   }
 
-  if #parts == 1 then
-    result.alias = parts[1]
-  elseif #parts == 2 then
-    result.schema = parts[1]
-    result.table = parts[2]
-  elseif #parts == 3 then
-    result.database = parts[1]
-    result.schema = parts[2]
-    result.table = parts[3]
-  elseif #parts >= 4 then
-    -- 4-part name: server.database.schema.table (ignore server for now)
-    result.database = parts[2]
-    result.schema = parts[3]
-    result.table = parts[4]
+  -- Adjust interpretation based on trailing dot (completion context)
+  if has_trailing_dot then
+    -- Trailing dot means we're completing the NEXT level
+    if #parts == 1 then
+      -- "schema." -> complete tables in schema
+      result.schema = parts[1]
+    elseif #parts == 2 then
+      -- "database.schema." -> complete tables in database.schema
+      result.database = parts[1]
+      result.schema = parts[2]
+    elseif #parts >= 3 then
+      -- "server.database.schema." -> complete tables (ignore server)
+      result.database = parts[2]
+      result.schema = parts[3]
+    end
+  else
+    -- No trailing dot - original behavior for complete references
+    if #parts == 1 then
+      result.alias = parts[1]
+    elseif #parts == 2 then
+      result.schema = parts[1]
+      result.table = parts[2]
+    elseif #parts == 3 then
+      result.database = parts[1]
+      result.schema = parts[2]
+      result.table = parts[3]
+    elseif #parts >= 4 then
+      -- 4-part name: server.database.schema.table (ignore server for now)
+      result.database = parts[2]
+      result.schema = parts[3]
+      result.table = parts[4]
+    end
   end
 
   return result
@@ -222,18 +241,7 @@ function Context._detect_type_from_line(before_cursor, chunk)
   local trimmed = before_cursor:match("^%s*(.-)%s*$") or ""
   local upper_trimmed = trimmed:upper()
 
-  -- Check for qualified column reference (alias.column, table.column)
-  if before_cursor:match("%.%s*$") or before_cursor:match("%.[%w_]*$") then
-    local ref = Context._get_reference_before_dot(before_cursor)
-    if ref then
-      extra.table_ref = ref
-      extra.filter_table = ref
-      extra.omit_table = true
-      return Context.Type.COLUMN, "qualified", extra
-    end
-  end
-
-  -- TABLE contexts
+  -- TABLE contexts (CHECK THESE FIRST before dot pattern)
   if upper_trimmed:match("FROM%s+$") or upper:match("FROM%s+[%w_#@%.%[%]]*$") then
     -- Check for qualified table after FROM
     local after_from = trimmed:match("FROM%s+(.*)$")
@@ -242,9 +250,16 @@ function Context._detect_type_from_line(before_cursor, chunk)
       if qualified.database then
         extra.database = qualified.database
         extra.schema = qualified.schema
+        extra.filter_database = qualified.database
+        extra.filter_schema = qualified.schema
+        extra.omit_schema = true
         return Context.Type.TABLE, "from_cross_db_qualified", extra
       elseif qualified.schema then
+        -- Could be "schema." or "database." - set potential_database for provider to check
+        extra.potential_database = qualified.schema
         extra.schema = qualified.schema
+        extra.filter_schema = qualified.schema
+        extra.omit_schema = true
         return Context.Type.TABLE, "from_qualified", extra
       end
     end
@@ -259,9 +274,16 @@ function Context._detect_type_from_line(before_cursor, chunk)
       if qualified.database then
         extra.database = qualified.database
         extra.schema = qualified.schema
+        extra.filter_database = qualified.database
+        extra.filter_schema = qualified.schema
+        extra.omit_schema = true
         return Context.Type.TABLE, "join_cross_db_qualified", extra
       elseif qualified.schema then
+        -- Could be "schema." or "database." - set potential_database for provider to check
+        extra.potential_database = qualified.schema
         extra.schema = qualified.schema
+        extra.filter_schema = qualified.schema
+        extra.omit_schema = true
         return Context.Type.TABLE, "join_qualified", extra
       end
     end
@@ -273,6 +295,18 @@ function Context._detect_type_from_line(before_cursor, chunk)
      upper_trimmed:match("RIGHT%s+JOIN%s+$") or upper_trimmed:match("FULL%s+JOIN%s+$") or
      upper_trimmed:match("CROSS%s+JOIN%s+$") or upper_trimmed:match("OUTER%s+JOIN%s+$") then
     return Context.Type.TABLE, "join", extra
+  end
+
+  -- Check for qualified column reference (alias.column, table.column)
+  -- This check comes AFTER FROM/JOIN checks to avoid misinterpreting "FROM dbo." as a column reference
+  if before_cursor:match("%.%s*$") or before_cursor:match("%.[%w_]*$") then
+    local ref = Context._get_reference_before_dot(before_cursor)
+    if ref then
+      extra.table_ref = ref
+      extra.filter_table = ref
+      extra.omit_table = true
+      return Context.Type.COLUMN, "qualified", extra
+    end
   end
 
   if upper_trimmed:match("UPDATE%s+$") or upper:match("UPDATE%s+[%w_#@%.%[%]]*$") then
@@ -484,9 +518,65 @@ function Context.detect(bufnr, line_num, col)
       elseif clause == "from" then
         ctx_type = Context.Type.TABLE
         mode = "from"
+        -- Parse qualified name from line (e.g., "FROM dbo.█" or "FROM TEST.dbo.█")
+        -- First try to find FROM on this line
+        local after_from = before_cursor:match("[Ff][Rr][Oo][Mm]%s+(.*)$")
+        -- If no FROM on this line, check if we have a qualified pattern (multi-line case)
+        local qualified_text = after_from
+        if not qualified_text then
+          -- Multi-line: before_cursor might be just "dbo." or "TEST.dbo."
+          qualified_text = before_cursor:match("^%s*([%w_%[%]]+%.[%w_%[%]%.]*)$")
+        end
+        if qualified_text and qualified_text:match("%.") then
+          local qualified = Context._parse_qualified_name(qualified_text)
+          if qualified.database then
+            extra.database = qualified.database
+            extra.schema = qualified.schema
+            extra.filter_database = qualified.database
+            extra.filter_schema = qualified.schema
+            extra.omit_schema = true
+            mode = "from_cross_db_qualified"
+          elseif qualified.schema then
+            -- Check if this single identifier is a database name (cross-db schema completion)
+            -- For "TEST.█", qualified.schema would be "TEST"
+            -- We need to check if TEST is a known database on the server
+            -- Pass potential_database so providers can validate it
+            local potential_db = qualified.schema
+            extra.potential_database = potential_db
+            extra.schema = qualified.schema
+            extra.filter_schema = qualified.schema
+            extra.omit_schema = true
+            mode = "from_qualified"
+          end
+        end
       elseif clause == "join" then
         ctx_type = Context.Type.TABLE
         mode = "join"
+        -- Parse qualified name from line (e.g., "JOIN dbo.█" or "JOIN TEST.dbo.█")
+        -- First try to find JOIN on this line
+        local after_join = before_cursor:match("[Jj][Oo][Ii][Nn]%s+(.*)$")
+        -- If no JOIN on this line, check if we have a qualified pattern (multi-line case)
+        local qualified_text = after_join
+        if not qualified_text then
+          -- Multi-line: before_cursor might be just "dbo." or "TEST.dbo."
+          qualified_text = before_cursor:match("^%s*([%w_%[%]]+%.[%w_%[%]%.]*)$")
+        end
+        if qualified_text and qualified_text:match("%.") then
+          local qualified = Context._parse_qualified_name(qualified_text)
+          if qualified.database then
+            extra.database = qualified.database
+            extra.schema = qualified.schema
+            extra.filter_database = qualified.database
+            extra.filter_schema = qualified.schema
+            extra.omit_schema = true
+            mode = "join_cross_db_qualified"
+          elseif qualified.schema then
+            extra.schema = qualified.schema
+            extra.filter_schema = qualified.schema
+            extra.omit_schema = true
+            mode = "join_qualified"
+          end
+        end
       elseif clause == "on" then
         ctx_type = Context.Type.COLUMN
         mode = "on"
@@ -525,7 +615,9 @@ function Context.detect(bufnr, line_num, col)
       end
 
       -- Check for qualified column reference (alias.column, table.column)
-      if before_cursor:match("%.%s*$") or before_cursor:match("%.[%w_]*$") then
+      -- BUT: Don't override FROM/JOIN context - those are qualified table references
+      if (before_cursor:match("%.%s*$") or before_cursor:match("%.[%w_]*$")) and
+         clause ~= "from" and clause ~= "join" then
         local ref = Context._get_reference_before_dot(before_cursor)
         if ref then
           extra.table_ref = ref
@@ -536,8 +628,64 @@ function Context.detect(bufnr, line_num, col)
         end
       end
     else
-      -- Fallback to line-based detection
-      ctx_type, mode, extra = Context._detect_type_from_line(before_cursor, chunk)
+      -- Clause detection returned nil - check if we're just past a FROM or JOIN clause
+      -- This handles cases like "SELECT\n*\nFROM\ndbo.█" where the cursor is at col 5
+      -- but FROM clause ends at col 4 (the position of "." in "dbo.")
+      extra = {}
+      local from_pos = chunk.clause_positions and chunk.clause_positions["from"]
+      local join_pos = nil
+      if chunk.clause_positions then
+        -- Find most recent join clause
+        for k, v in pairs(chunk.clause_positions) do
+          if k:match("^join_%d+$") or k == "join" then
+            if not join_pos or v.end_line > join_pos.end_line or
+               (v.end_line == join_pos.end_line and v.end_col > join_pos.end_col) then
+              join_pos = v
+            end
+          end
+        end
+      end
+
+      -- Check if cursor is on the same line as FROM clause end or immediately after
+      local in_from_context = from_pos and
+        (line_num == from_pos.end_line or
+         (line_num == from_pos.end_line + 1 and col <= 50)) -- Allow continuation on next line
+      local in_join_context = join_pos and
+        (line_num == join_pos.end_line or
+         (line_num == join_pos.end_line + 1 and col <= 50))
+
+      if in_from_context or in_join_context then
+        -- We're continuing a FROM or JOIN clause - check for qualified name
+        local qualified_text = before_cursor:match("^%s*([%w_%[%]]+%.[%w_%[%]%.]*)$")
+        if qualified_text and qualified_text:match("%.") then
+          local qualified = Context._parse_qualified_name(qualified_text)
+          if qualified.database then
+            extra.database = qualified.database
+            extra.schema = qualified.schema
+            extra.filter_database = qualified.database
+            extra.filter_schema = qualified.schema
+            extra.omit_schema = true
+            ctx_type = Context.Type.TABLE
+            mode = in_join_context and "join_cross_db_qualified" or "from_cross_db_qualified"
+          elseif qualified.schema then
+            extra.potential_database = qualified.schema
+            extra.schema = qualified.schema
+            extra.filter_schema = qualified.schema
+            extra.omit_schema = true
+            ctx_type = Context.Type.TABLE
+            mode = in_join_context and "join_qualified" or "from_qualified"
+          else
+            ctx_type = Context.Type.TABLE
+            mode = in_join_context and "join" or "from"
+          end
+        else
+          ctx_type = Context.Type.TABLE
+          mode = in_join_context and "join" or "from"
+        end
+      else
+        -- Fallback to line-based detection
+        ctx_type, mode, extra = Context._detect_type_from_line(before_cursor, chunk)
+      end
     end
   else
     -- No chunk, use line-based detection
@@ -564,7 +712,9 @@ function Context.detect(bufnr, line_num, col)
     schema = extra.schema,
     database = extra.database,
     filter_schema = extra.filter_schema,
+    filter_database = extra.filter_database,
     filter_table = extra.filter_table,
+    potential_database = extra.potential_database,
     omit_schema = extra.omit_schema,
     omit_table = extra.omit_table,
     value_position = extra.value_position,

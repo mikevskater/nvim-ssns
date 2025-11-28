@@ -99,6 +99,21 @@ function TablesProvider._get_completions_impl(ctx)
   local sql_context = ctx.sql_context or {}
   local omit_schema = sql_context.omit_schema or false -- Don't include schema in insertText if already typed
   local filter_schema = sql_context.filter_schema -- Only show objects from this schema
+  local filter_database = sql_context.filter_database -- Cross-database completion
+
+  -- Resolve target database (for cross-db completion like TEST.dbo.█)
+  local target_db = database
+  if filter_database and server then
+    target_db = server:get_database(filter_database)
+    if target_db and not target_db.is_loaded then
+      target_db:load()
+    end
+  end
+
+  -- If we couldn't find the target database, return empty
+  if not target_db then
+    return {}
+  end
 
   -- Determine what types to include based on context mode
   local mode = sql_context.mode or "unknown"
@@ -114,22 +129,21 @@ function TablesProvider._get_completions_impl(ctx)
     include_synonyms = false
     include_functions = false
   elseif mode:match("^from") or mode:match("^join") then
-    -- FROM/JOIN: tables, views, synonyms - NOT functions
-    -- (Functions can't be selected from unless they're table-valued, which is rare)
-    include_functions = false
+    -- FROM/JOIN: tables, views, synonyms, AND table-valued functions
+    include_functions = true
   elseif mode == "qualified_partial" or mode == "qualified_bracket" then
     -- Qualified context (schema.): include all queryable types
-    include_functions = false  -- Still no scalar functions in FROM context
+    include_functions = true
   end
 
   local items = {}
 
   -- Get database adapter to check features
-  local adapter = database:get_adapter()
+  local adapter = target_db:get_adapter()
 
   -- Collect tables (if enabled)
   if include_tables then
-    local tables = TablesProvider._collect_tables(database, show_schema_prefix, omit_schema, filter_schema)
+    local tables = TablesProvider._collect_tables(target_db, show_schema_prefix, omit_schema, filter_schema)
     for _, item in ipairs(tables) do
       table.insert(items, item)
     end
@@ -137,7 +151,7 @@ function TablesProvider._get_completions_impl(ctx)
 
   -- Collect views (if enabled and supported)
   if include_views and adapter.features and adapter.features.views then
-    local views = TablesProvider._collect_views(database, show_schema_prefix, omit_schema, filter_schema)
+    local views = TablesProvider._collect_views(target_db, show_schema_prefix, omit_schema, filter_schema)
     for _, item in ipairs(views) do
       table.insert(items, item)
     end
@@ -145,7 +159,7 @@ function TablesProvider._get_completions_impl(ctx)
 
   -- Collect synonyms (if enabled and supported)
   if include_synonyms and adapter.features and adapter.features.synonyms then
-    local synonyms = TablesProvider._collect_synonyms(database, show_schema_prefix, omit_schema, filter_schema)
+    local synonyms = TablesProvider._collect_synonyms(target_db, show_schema_prefix, omit_schema, filter_schema)
     for _, item in ipairs(synonyms) do
       table.insert(items, item)
     end
@@ -153,7 +167,7 @@ function TablesProvider._get_completions_impl(ctx)
 
   -- Collect functions (if enabled and supported)
   if include_functions and adapter.features and adapter.features.functions then
-    local functions = TablesProvider._collect_functions(database, show_schema_prefix, omit_schema, filter_schema)
+    local functions = TablesProvider._collect_functions(target_db, show_schema_prefix, omit_schema, filter_schema)
     for _, item in ipairs(functions) do
       table.insert(items, item)
     end
@@ -370,6 +384,11 @@ function TablesProvider._collect_functions(database, show_schema_prefix, omit_sc
       if obj_schema ~= filter_schema:lower() then
         goto continue
       end
+    end
+
+    -- Only include table-valued functions (skip scalar functions)
+    if func_obj.is_table_valued and not func_obj:is_table_valued() then
+      goto continue
     end
 
     local item = Utils.format_procedure(func_obj, {

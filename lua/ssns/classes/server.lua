@@ -343,10 +343,11 @@ function ServerClass:get_database(database_name)
     return nil
   end
 
-  -- Search the DatabasesGroup's children for the database by name
+  -- Search the DatabasesGroup's children for the database by name (case-insensitive)
   if databases_group.children then
+    local lower_database_name = database_name:lower()
     for _, db in ipairs(databases_group.children) do
-      if db.name == database_name then
+      if db.name:lower() == lower_database_name then
         return db
       end
     end

@@ -217,7 +217,7 @@ function M.create_mock_context(test_data, bufnr)
 
   -- Get cursor position (convert 0-indexed to 1-indexed for Lua)
   local cursor_line = cursor.line + 1 -- Convert to 1-indexed
-  local cursor_col = cursor.col -- Already byte offset
+  local cursor_col = cursor.col + 1 -- Convert to 1-indexed (detect() expects 1-indexed)
 
   -- Get current line
   local line = lines[cursor_line] or ""
@@ -258,6 +258,14 @@ function M.create_mock_buffer(test_data, connection_info)
   -- Set buffer lines
   local lines = vim.split(query, "\n", { plain = true })
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+
+  -- Mark as SQL buffer for StatementCache
+  vim.b[bufnr].ssns_sql_buffer = true
+
+  -- Force StatementCache to build for this buffer
+  local StatementCache = require('ssns.completion.statement_cache')
+  StatementCache.invalidate(bufnr)
+  StatementCache.get_or_build_cache(bufnr)
 
   -- Set database context using REAL connection
   if connection_info then

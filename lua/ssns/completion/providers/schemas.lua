@@ -67,17 +67,37 @@ function SchemasProvider._get_completions_impl(ctx)
     return {}
   end
 
+  local server = connection.server
   local database = connection.database
 
+  -- Check if we need to get schemas from a different database (cross-db)
+  local sql_context = ctx.sql_context or {}
+  local filter_database = sql_context.filter_database
+  local potential_database = sql_context.potential_database
+
+  -- Resolve target database
+  -- For "TEST.█" pattern, potential_database contains the database name
+  local target_db = database
+  local target_db_name = filter_database or potential_database
+  if target_db_name and server then
+    local check_db = server:get_database(target_db_name)
+    if check_db then
+      target_db = check_db
+      if not target_db.is_loaded then
+        target_db:load()
+      end
+    end
+  end
+
   -- Verify we have a valid database
-  if not database then
+  if not target_db then
     return {}
   end
 
   local items = {}
 
-  -- Get all schemas from database
-  local schemas = database:get_schemas()
+  -- Get all schemas from target database
+  local schemas = target_db:get_schemas()
 
   if not schemas then
     return {}

@@ -2005,7 +2005,12 @@ function StatementParser.get_chunk_at_position(chunks, line, col)
       if line == chunk.start_line and col < chunk.start_col then
         goto continue
       end
-      if line == chunk.end_line and col > chunk.end_col then
+      -- For completion purposes, allow cursor to be past the end_col on the last line
+      -- This handles the case where user is typing at the end of a statement (e.g., "dbo.█")
+      -- The cache records end_col as the last parsed character, but the cursor is naturally
+      -- positioned one character ahead when typing. Allow up to 50 chars past end_col to
+      -- still be considered part of this chunk for context detection.
+      if line == chunk.end_line and col > chunk.end_col + 50 then
         goto continue
       end
       return chunk
@@ -2086,9 +2091,10 @@ function StatementParser.get_clause_at_position(chunk, line, col)
 
   -- Check each clause position to find which one contains this position
   -- A position is "in" a clause if it's >= start and <= end
+  -- Allow cursor to be 1 past end_col for completion context (e.g., after typing "dbo.")
   for clause_name, pos in pairs(chunk.clause_positions) do
     if line > pos.start_line or (line == pos.start_line and col >= pos.start_col) then
-      if line < pos.end_line or (line == pos.end_line and col <= pos.end_col) then
+      if line < pos.end_line or (line == pos.end_line and col <= pos.end_col + 1) then
         -- Normalize join_N and on_N to just "join" and "on"
         if clause_name:match("^join_%d+$") then
           return "join"
