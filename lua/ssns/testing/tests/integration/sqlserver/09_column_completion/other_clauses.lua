@@ -10,8 +10,7 @@ return {
     number = 4191,
     description = "ORDER BY - basic column completion",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees ORDER BY ]],
-    cursor = { line = 0, col = 34 },
+    query = [[SELECT * FROM Employees ORDER BY █]],
     expected = {
       type = "column",
       items = {
@@ -28,8 +27,7 @@ return {
     number = 4192,
     description = "ORDER BY - with prefix",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees ORDER BY First]],
-    cursor = { line = 0, col = 39 },
+    query = [[SELECT * FROM Employees ORDER BY First█]],
     expected = {
       type = "column",
       items = {
@@ -43,8 +41,7 @@ return {
     number = 4193,
     description = "ORDER BY - alias-qualified",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e ORDER BY e.]],
-    cursor = { line = 0, col = 38 },
+    query = [[SELECT * FROM Employees e ORDER BY e.█]],
     expected = {
       type = "column",
       items = {
@@ -59,8 +56,7 @@ return {
     number = 4194,
     description = "ORDER BY - second column after comma",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees ORDER BY LastName, ]],
-    cursor = { line = 0, col = 43 },
+    query = [[SELECT * FROM Employees ORDER BY LastName, █]],
     expected = {
       type = "column",
       items = {
@@ -75,8 +71,7 @@ return {
     number = 4195,
     description = "ORDER BY - after ASC",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees ORDER BY LastName ASC, ]],
-    cursor = { line = 0, col = 47 },
+    query = [[SELECT * FROM Employees ORDER BY LastName ASC, █]],
     expected = {
       type = "column",
       items = {
@@ -90,8 +85,7 @@ return {
     number = 4196,
     description = "ORDER BY - after DESC",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees ORDER BY LastName DESC, ]],
-    cursor = { line = 0, col = 48 },
+    query = [[SELECT * FROM Employees ORDER BY LastName DESC, █]],
     expected = {
       type = "column",
       items = {
@@ -105,8 +99,7 @@ return {
     number = 4197,
     description = "ORDER BY - multi-table JOIN",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID ORDER BY ]],
-    cursor = { line = 0, col = 92 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID ORDER BY █]],
     expected = {
       type = "column",
       items = {
@@ -121,8 +114,7 @@ return {
     number = 4198,
     description = "ORDER BY - qualified from joined table",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID ORDER BY d.]],
-    cursor = { line = 0, col = 94 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID ORDER BY d.█]],
     expected = {
       type = "column",
       items = {
@@ -141,8 +133,7 @@ return {
     database = "vim_dadbod_test",
     query = [[SELECT *
 FROM Employees
-ORDER BY ]],
-    cursor = { line = 2, col = 9 },
+ORDER BY █]],
     expected = {
       type = "column",
       items = {
@@ -157,8 +148,7 @@ ORDER BY ]],
     number = 4200,
     description = "ORDER BY - after WHERE clause",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees WHERE DepartmentID = 1 ORDER BY ]],
-    cursor = { line = 0, col = 58 },
+    query = [[SELECT * FROM Employees WHERE DepartmentID = 1 ORDER BY █]],
     expected = {
       type = "column",
       items = {
@@ -177,8 +167,7 @@ ORDER BY ]],
     number = 4201,
     description = "GROUP BY - basic column completion",
     database = "vim_dadbod_test",
-    query = [[SELECT DepartmentID, COUNT(*) FROM Employees GROUP BY ]],
-    cursor = { line = 0, col = 55 },
+    query = [[SELECT DepartmentID, COUNT(*) FROM Employees GROUP BY █]],
     expected = {
       type = "column",
       items = {
@@ -193,8 +182,7 @@ ORDER BY ]],
     number = 4202,
     description = "GROUP BY - second column",
     database = "vim_dadbod_test",
-    query = [[SELECT DepartmentID, Email, COUNT(*) FROM Employees GROUP BY DepartmentID, ]],
-    cursor = { line = 0, col = 76 },
+    query = [[SELECT DepartmentID, Email, COUNT(*) FROM Employees GROUP BY DepartmentID, █]],
     expected = {
       type = "column",
       items = {
@@ -209,8 +197,7 @@ ORDER BY ]],
     number = 4203,
     description = "GROUP BY - alias-qualified",
     database = "vim_dadbod_test",
-    query = [[SELECT e.DepartmentID, COUNT(*) FROM Employees e GROUP BY e.]],
-    cursor = { line = 0, col = 61 },
+    query = [[SELECT e.DepartmentID, COUNT(*) FROM Employees e GROUP BY e.█]],
     expected = {
       type = "column",
       items = {
@@ -224,8 +211,7 @@ ORDER BY ]],
     number = 4204,
     description = "GROUP BY - multi-table",
     database = "vim_dadbod_test",
-    query = [[SELECT d.DepartmentName, COUNT(*) FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID GROUP BY ]],
-    cursor = { line = 0, col = 116 },
+    query = [[SELECT d.DepartmentName, COUNT(*) FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID GROUP BY █]],
     expected = {
       type = "column",
       items = {
@@ -240,8 +226,7 @@ ORDER BY ]],
     number = 4205,
     description = "GROUP BY - qualified from specific table",
     database = "vim_dadbod_test",
-    query = [[SELECT d.DepartmentName, COUNT(*) FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID GROUP BY d.]],
-    cursor = { line = 0, col = 118 },
+    query = [[SELECT d.DepartmentName, COUNT(*) FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID GROUP BY d.█]],
     expected = {
       type = "column",
       items = {
@@ -260,8 +245,7 @@ ORDER BY ]],
     database = "vim_dadbod_test",
     query = [[SELECT DepartmentID, COUNT(*)
 FROM Employees
-GROUP BY ]],
-    cursor = { line = 2, col = 9 },
+GROUP BY █]],
     expected = {
       type = "column",
       items = {
@@ -275,8 +259,7 @@ GROUP BY ]],
     number = 4207,
     description = "GROUP BY - with WHERE",
     database = "vim_dadbod_test",
-    query = [[SELECT DepartmentID, COUNT(*) FROM Employees WHERE Salary > 50000 GROUP BY ]],
-    cursor = { line = 0, col = 76 },
+    query = [[SELECT DepartmentID, COUNT(*) FROM Employees WHERE Salary > 50000 GROUP BY █]],
     expected = {
       type = "column",
       items = {
@@ -290,8 +273,7 @@ GROUP BY ]],
     number = 4208,
     description = "GROUP BY - multiple grouping columns",
     database = "vim_dadbod_test",
-    query = [[SELECT DepartmentID, Email, COUNT(*) FROM Employees GROUP BY DepartmentID, Email, ]],
-    cursor = { line = 0, col = 85 },
+    query = [[SELECT DepartmentID, Email, COUNT(*) FROM Employees GROUP BY DepartmentID, Email, █]],
     expected = {
       type = "column",
       items = {
@@ -306,8 +288,7 @@ GROUP BY ]],
     number = 4209,
     description = "GROUP BY - with prefix filter",
     database = "vim_dadbod_test",
-    query = [[SELECT DepartmentID, COUNT(*) FROM Employees GROUP BY Dep]],
-    cursor = { line = 0, col = 58 },
+    query = [[SELECT DepartmentID, COUNT(*) FROM Employees GROUP BY Dep█]],
     expected = {
       type = "column",
       items = {
@@ -321,8 +302,7 @@ GROUP BY ]],
     number = 4210,
     description = "GROUP BY - ROLLUP clause",
     database = "vim_dadbod_test",
-    query = [[SELECT DepartmentID, COUNT(*) FROM Employees GROUP BY ROLLUP()]],
-    cursor = { line = 0, col = 62 },
+    query = [[SELECT DepartmentID, COUNT(*) FROM Employees GROUP BY ROLLUP()█]],
     expected = {
       type = "column",
       items = {
@@ -340,8 +320,7 @@ GROUP BY ]],
     number = 4211,
     description = "HAVING - basic column completion",
     database = "vim_dadbod_test",
-    query = [[SELECT DepartmentID, COUNT(*) FROM Employees GROUP BY DepartmentID HAVING ]],
-    cursor = { line = 0, col = 75 },
+    query = [[SELECT DepartmentID, COUNT(*) FROM Employees GROUP BY DepartmentID HAVING █]],
     expected = {
       type = "column",
       items = {
@@ -355,8 +334,7 @@ GROUP BY ]],
     number = 4212,
     description = "HAVING - after aggregate function",
     database = "vim_dadbod_test",
-    query = [[SELECT DepartmentID, COUNT(*) FROM Employees GROUP BY DepartmentID HAVING COUNT() > 5]],
-    cursor = { line = 0, col = 81 },
+    query = [[SELECT DepartmentID, COUNT(*) FROM Employees GROUP BY DepartmentID HAVING COUNT()█ > 5]],
     expected = {
       type = "column",
       items = {
@@ -371,8 +349,7 @@ GROUP BY ]],
     number = 4213,
     description = "HAVING - SUM function",
     database = "vim_dadbod_test",
-    query = [[SELECT DepartmentID, SUM(Salary) FROM Employees GROUP BY DepartmentID HAVING SUM() > 100000]],
-    cursor = { line = 0, col = 81 },
+    query = [[SELECT DepartmentID, SUM(Salary) FROM Employees GROUP BY DepartmentID HAVING SUM(█) > 100000]],
     expected = {
       type = "column",
       items = {
@@ -386,8 +363,7 @@ GROUP BY ]],
     number = 4214,
     description = "HAVING - alias-qualified",
     database = "vim_dadbod_test",
-    query = [[SELECT e.DepartmentID, COUNT(*) FROM Employees e GROUP BY e.DepartmentID HAVING e.]],
-    cursor = { line = 0, col = 81 },
+    query = [[SELECT e.DepartmentID, COUNT(*) FROM Employees e GROUP BY e.DepartmentID HAVING e█.]],
     expected = {
       type = "column",
       items = {
@@ -401,8 +377,7 @@ GROUP BY ]],
     number = 4215,
     description = "HAVING - multi-table",
     database = "vim_dadbod_test",
-    query = [[SELECT d.DepartmentName, COUNT(*) FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID GROUP BY d.DepartmentName HAVING ]],
-    cursor = { line = 0, col = 139 },
+    query = [[SELECT d.DepartmentName, COUNT(*) FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID GROUP BY d.DepartmentName HAVING █]],
     expected = {
       type = "column",
       items = {
@@ -416,8 +391,7 @@ GROUP BY ]],
     number = 4216,
     description = "HAVING - AND condition",
     database = "vim_dadbod_test",
-    query = [[SELECT DepartmentID, COUNT(*) FROM Employees GROUP BY DepartmentID HAVING COUNT(*) > 5 AND ]],
-    cursor = { line = 0, col = 93 },
+    query = [[SELECT DepartmentID, COUNT(*) FROM Employees GROUP BY DepartmentID HAVING COUNT(*) > 5 AND █]],
     expected = {
       type = "column",
       items = {
@@ -431,8 +405,7 @@ GROUP BY ]],
     number = 4217,
     description = "HAVING - complex aggregate",
     database = "vim_dadbod_test",
-    query = [[SELECT DepartmentID FROM Employees GROUP BY DepartmentID HAVING AVG() > 50000]],
-    cursor = { line = 0, col = 71 },
+    query = [[SELECT DepartmentID FROM Employees GROUP BY DepartmentID HAVING AVG() >█ 50000]],
     expected = {
       type = "column",
       items = {
@@ -449,8 +422,7 @@ GROUP BY ]],
     query = [[SELECT DepartmentID, COUNT(*)
 FROM Employees
 GROUP BY DepartmentID
-HAVING ]],
-    cursor = { line = 3, col = 7 },
+HAVING █]],
     expected = {
       type = "column",
       items = {
@@ -464,8 +436,7 @@ HAVING ]],
     number = 4219,
     description = "HAVING - MIN/MAX function",
     database = "vim_dadbod_test",
-    query = [[SELECT DepartmentID FROM Employees GROUP BY DepartmentID HAVING MAX() < '2020-01-01']],
-    cursor = { line = 0, col = 71 },
+    query = [[SELECT DepartmentID FROM Employees GROUP BY DepartmentID HAVING MAX() <█ '2020-01-01']],
     expected = {
       type = "column",
       items = {
@@ -479,8 +450,7 @@ HAVING ]],
     number = 4220,
     description = "HAVING - nested aggregate",
     database = "vim_dadbod_test",
-    query = [[SELECT DepartmentID FROM Employees GROUP BY DepartmentID HAVING COUNT(DISTINCT ) > 1]],
-    cursor = { line = 0, col = 80 },
+    query = [[SELECT DepartmentID FROM Employees GROUP BY DepartmentID HAVING COUNT(DISTINCT )█ > 1]],
     expected = {
       type = "column",
       items = {
@@ -499,8 +469,7 @@ HAVING ]],
     number = 4221,
     description = "UPDATE SET - column list",
     database = "vim_dadbod_test",
-    query = [[UPDATE Employees SET ]],
-    cursor = { line = 0, col = 21 },
+    query = [[UPDATE Employees SET █]],
     expected = {
       type = "column",
       items = {
@@ -516,8 +485,7 @@ HAVING ]],
     number = 4222,
     description = "UPDATE SET - second column",
     database = "vim_dadbod_test",
-    query = [[UPDATE Employees SET FirstName = 'John', ]],
-    cursor = { line = 0, col = 42 },
+    query = [[UPDATE Employees SET FirstName = 'John', █]],
     expected = {
       type = "column",
       items = {
@@ -532,8 +500,7 @@ HAVING ]],
     number = 4223,
     description = "UPDATE SET - value side from same table",
     database = "vim_dadbod_test",
-    query = [[UPDATE Employees SET Salary = Salary + ]],
-    cursor = { line = 0, col = 40 },
+    query = [[UPDATE Employees SET Salary = Salary + █]],
     expected = {
       type = "column",
       items = {
@@ -547,8 +514,7 @@ HAVING ]],
     number = 4224,
     description = "UPDATE FROM - column from joined table",
     database = "vim_dadbod_test",
-    query = [[UPDATE e SET e.Salary = d. FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID]],
-    cursor = { line = 0, col = 26 },
+    query = [[UPDATE e SET e.Salary = d.█ FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID]],
     expected = {
       type = "column",
       items = {
@@ -563,8 +529,7 @@ HAVING ]],
     number = 4225,
     description = "INSERT columns - column list",
     database = "vim_dadbod_test",
-    query = [[INSERT INTO Employees (]],
-    cursor = { line = 0, col = 23 },
+    query = [[INSERT INTO Employees (█]],
     expected = {
       type = "column",
       items = {
@@ -580,8 +545,7 @@ HAVING ]],
     number = 4226,
     description = "INSERT columns - second column",
     database = "vim_dadbod_test",
-    query = [[INSERT INTO Employees (FirstName, ]],
-    cursor = { line = 0, col = 34 },
+    query = [[INSERT INTO Employees (FirstName, █]],
     expected = {
       type = "column",
       items = {
@@ -596,8 +560,7 @@ HAVING ]],
     number = 4227,
     description = "INSERT columns - schema-qualified table",
     database = "vim_dadbod_test",
-    query = [[INSERT INTO dbo.Employees (]],
-    cursor = { line = 0, col = 27 },
+    query = [[INSERT INTO dbo.Employees (█]],
     expected = {
       type = "column",
       items = {
@@ -612,8 +575,7 @@ HAVING ]],
     number = 4228,
     description = "INSERT SELECT - columns in subquery",
     database = "vim_dadbod_test",
-    query = [[INSERT INTO Employees (FirstName, LastName) SELECT  FROM Employees]],
-    cursor = { line = 0, col = 51 },
+    query = [[INSERT INTO Employees (FirstName, LastName) SELECT █ FROM Employees]],
     expected = {
       type = "column",
       items = {
@@ -630,8 +592,7 @@ HAVING ]],
     database = "vim_dadbod_test",
     query = [[INSERT INTO Employees
   (FirstName,
-   ]],
-    cursor = { line = 2, col = 3 },
+   █]],
     expected = {
       type = "column",
       items = {
@@ -646,8 +607,7 @@ HAVING ]],
     number = 4230,
     description = "DELETE WHERE - column completion",
     database = "vim_dadbod_test",
-    query = [[DELETE FROM Employees WHERE ]],
-    cursor = { line = 0, col = 28 },
+    query = [[DELETE FROM Employees WHERE █]],
     expected = {
       type = "column",
       items = {

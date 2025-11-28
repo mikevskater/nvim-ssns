@@ -10,8 +10,7 @@ return {
     number = 4161,
     description = "ON clause - basic left side completion",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON ]],
-    cursor = { line = 0, col = 48 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON █]],
     expected = {
       type = "column",
       items = {
@@ -26,8 +25,7 @@ return {
     number = 4162,
     description = "ON clause - alias-qualified left side",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.]],
-    cursor = { line = 0, col = 50 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.█]],
     expected = {
       type = "column",
       items = {
@@ -45,8 +43,7 @@ return {
     number = 4163,
     description = "ON clause - right side after =",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = ]],
-    cursor = { line = 0, col = 65 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = █]],
     expected = {
       type = "column",
       items = {
@@ -60,8 +57,7 @@ return {
     number = 4164,
     description = "ON clause - right side alias-qualified",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.]],
-    cursor = { line = 0, col = 67 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.█]],
     expected = {
       type = "column",
       items = {
@@ -78,8 +74,7 @@ return {
     number = 4165,
     description = "ON clause - compound condition AND",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID AND e.]],
-    cursor = { line = 0, col = 85 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID AND e█.]],
     expected = {
       type = "column",
       items = {
@@ -98,8 +93,7 @@ return {
 FROM Employees e
 JOIN Departments d
   ON e.DepartmentID = d.DepartmentID
-  AND e. = d.ManagerID]],
-    cursor = { line = 4, col = 8 },
+  AND e.█ = d.ManagerID]],
     expected = {
       type = "column",
       items = {
@@ -113,8 +107,7 @@ JOIN Departments d
     number = 4167,
     description = "ON clause - LEFT JOIN",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e LEFT JOIN Departments d ON e.]],
-    cursor = { line = 0, col = 55 },
+    query = [[SELECT * FROM Employees e LEFT JOIN Departments d ON e.█]],
     expected = {
       type = "column",
       items = {
@@ -128,8 +121,7 @@ JOIN Departments d
     number = 4168,
     description = "ON clause - RIGHT JOIN",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Departments d RIGHT JOIN Employees e ON e.]],
-    cursor = { line = 0, col = 56 },
+    query = [[SELECT * FROM Departments d RIGHT JOIN Employees e ON e.█]],
     expected = {
       type = "column",
       items = {
@@ -143,8 +135,7 @@ JOIN Departments d
     number = 4169,
     description = "ON clause - FULL OUTER JOIN",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e FULL OUTER JOIN Departments d ON e.]],
-    cursor = { line = 0, col = 61 },
+    query = [[SELECT * FROM Employees e FULL OUTER JOIN Departments d ON e.█]],
     expected = {
       type = "column",
       items = {
@@ -158,8 +149,7 @@ JOIN Departments d
     number = 4170,
     description = "ON clause - schema-qualified tables",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM dbo.Employees e JOIN dbo.Departments d ON e.]],
-    cursor = { line = 0, col = 58 },
+    query = [[SELECT * FROM dbo.Employees e JOIN dbo.Departments d ON e.█]],
     expected = {
       type = "column",
       items = {
@@ -177,8 +167,7 @@ JOIN Departments d
     number = 4171,
     description = "ON clause - second JOIN left side",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Projects p ON ]],
-    cursor = { line = 0, col = 101 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Projects p ON █]],
     expected = {
       type = "column",
       items = {
@@ -193,8 +182,7 @@ JOIN Departments d
     number = 4172,
     description = "ON clause - second JOIN alias-qualified",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Projects p ON p.]],
-    cursor = { line = 0, col = 103 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Projects p ON p.█]],
     expected = {
       type = "column",
       items = {
@@ -212,8 +200,7 @@ JOIN Departments d
     number = 4173,
     description = "ON clause - second JOIN linking to first table",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Projects p ON p.ProjectID = e.]],
-    cursor = { line = 0, col = 118 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Projects p ON p.ProjectID = e.█]],
     expected = {
       type = "column",
       items = {
@@ -227,8 +214,7 @@ JOIN Departments d
     number = 4174,
     description = "ON clause - second JOIN linking to second table",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Projects p ON p.DepartmentID = d.]],
-    cursor = { line = 0, col = 118 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Projects p ON p.DepartmentID = d.█]],
     expected = {
       type = "column",
       items = {
@@ -246,8 +232,7 @@ JOIN Departments d
 FROM Employees e
 JOIN Departments d ON e.DepartmentID = d.DepartmentID
 JOIN Projects p ON p.DepartmentID = d.DepartmentID
-JOIN Customers c ON c.Id = ]],
-    cursor = { line = 4, col = 28 },
+JOIN Customers c ON c.Id = █]],
     expected = {
       type = "column",
       items = {
@@ -262,8 +247,7 @@ JOIN Customers c ON c.Id = ]],
     number = 4176,
     description = "ON clause - all tables available",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Projects p ON ]],
-    cursor = { line = 0, col = 101 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Projects p ON █]],
     expected = {
       type = "column",
       items = {
@@ -286,8 +270,7 @@ INNER JOIN Departments d
   ON e.DepartmentID = d.DepartmentID
 LEFT JOIN Projects p
   ON d.DepartmentID = p.DepartmentID
-  AND p. > 0]],
-    cursor = { line = 6, col = 8 },
+  AND p.█ > 0]],
     expected = {
       type = "column",
       items = {
@@ -302,8 +285,7 @@ LEFT JOIN Projects p
     number = 4178,
     description = "ON clause - self-join",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Employees m ON e.ManagerID = m.]],
-    cursor = { line = 0, col = 62 },
+    query = [[SELECT * FROM Employees e JOIN Employees m ON e.ManagerID = m.█]],
     expected = {
       type = "column",
       items = {
@@ -317,8 +299,7 @@ LEFT JOIN Projects p
     number = 4179,
     description = "ON clause - self-join second alias",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Employees m ON m.]],
-    cursor = { line = 0, col = 48 },
+    query = [[SELECT * FROM Employees e JOIN Employees m ON m.█]],
     expected = {
       type = "column",
       items = {
@@ -333,8 +314,7 @@ LEFT JOIN Projects p
     number = 4180,
     description = "ON clause - cross-schema join",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM dbo.Employees e JOIN hr.Benefits b ON e.EmployeeID = b.]],
-    cursor = { line = 0, col = 69 },
+    query = [[SELECT * FROM dbo.Employees e JOIN hr.Benefits b ON e.EmployeeID = b.█]],
     expected = {
       type = "column",
       items = {
@@ -353,8 +333,7 @@ LEFT JOIN Projects p
     number = 4181,
     description = "ON clause - FK column suggestion (DepartmentID)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.]],
-    cursor = { line = 0, col = 67 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.█]],
     expected = {
       type = "column",
       items = {
@@ -368,8 +347,7 @@ LEFT JOIN Projects p
     number = 4182,
     description = "ON clause - FK column suggestion priority",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Orders o JOIN Customers c ON o.CustomerId = c.]],
-    cursor = { line = 0, col = 60 },
+    query = [[SELECT * FROM Orders o JOIN Customers c ON o.CustomerId = c.█]],
     expected = {
       type = "column",
       items = {
@@ -383,8 +361,7 @@ LEFT JOIN Projects p
     number = 4183,
     description = "ON clause - type-compatible numeric columns",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.]],
-    cursor = { line = 0, col = 67 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.█]],
     expected = {
       type = "column",
       items = {
@@ -399,8 +376,7 @@ LEFT JOIN Projects p
     number = 4184,
     description = "ON clause - fuzzy name matching (ID vs _ID)",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.]],
-    cursor = { line = 0, col = 69 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.█]],
     expected = {
       type = "column",
       items = {
@@ -414,8 +390,7 @@ LEFT JOIN Projects p
     number = 4185,
     description = "ON clause - fuzzy matching EmployeeID vs EmpID",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Orders o ON e.EmployeeID = o.]],
-    cursor = { line = 0, col = 60 },
+    query = [[SELECT * FROM Employees e JOIN Orders o ON e.EmployeeID = o.█]],
     expected = {
       type = "column",
       items = {
@@ -429,8 +404,7 @@ LEFT JOIN Projects p
     number = 4186,
     description = "ON clause - should not suggest incompatible types",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.FirstName = d.]],
-    cursor = { line = 0, col = 64 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.FirstName = d.█]],
     expected = {
       type = "column",
       items = {
@@ -448,8 +422,7 @@ LEFT JOIN Projects p
     number = 4187,
     description = "ON clause - numeric left side suggests numeric right",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.Salary = d.]],
-    cursor = { line = 0, col = 60 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.Salary = d█.]],
     expected = {
       type = "column",
       items = {
@@ -464,8 +437,7 @@ LEFT JOIN Projects p
     number = 4188,
     description = "ON clause - date type compatibility",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Projects p ON e.HireDate = p.]],
-    cursor = { line = 0, col = 60 },
+    query = [[SELECT * FROM Employees e JOIN Projects p ON e.HireDate = p.█]],
     expected = {
       type = "column",
       items = {
@@ -480,8 +452,7 @@ LEFT JOIN Projects p
     number = 4189,
     description = "ON clause - complex condition with mixed types",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID AND e.EmployeeID = d.]],
-    cursor = { line = 0, col = 101 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID AND e.EmployeeID = d.█]],
     expected = {
       type = "column",
       items = {
@@ -496,8 +467,7 @@ LEFT JOIN Projects p
     number = 4190,
     description = "ON clause - OR condition type compatibility",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID OR e.EmployeeID = d.]],
-    cursor = { line = 0, col = 101 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID OR e.EmployeeID = d.█]],
     expected = {
       type = "column",
       items = {
