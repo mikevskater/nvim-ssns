@@ -3,14 +3,10 @@ return {
   description = [[Autocomplete for columns with multiple tables in FROM clause (Multi-line handling)]],
   database = [[vim_dadbod_test]],
   query = [[SELECT
-
+█
 FROM
     dbo.Employees
     JOIN dbo.Departments ON Employees.DepartmentID = Departments.DepartmentID]],
-  cursor = {
-    line = 1,
-    col = 4
-  },
   expected = {
     type = [[column]],
     includes = {

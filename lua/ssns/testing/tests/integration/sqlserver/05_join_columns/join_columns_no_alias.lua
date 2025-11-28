@@ -2,11 +2,7 @@ return {
   number = 17,
   description = [[Autocomplete for columns with multiple tables in FROM clause]],
   database = [[vim_dadbod_test]],
-  query = [[SELECT  FROM dbo.Employees JOIN dbo.Departments ON Employees.DepartmentID = Departments.DepartmentID]],
-  cursor = {
-    line = 0,
-    col = 7
-  },
+  query = [[SELECT █ FROM dbo.Employees JOIN dbo.Departments ON Employees.DepartmentID = Departments.DepartmentID]],
   expected = {
     type = [[column]],
     includes = {
