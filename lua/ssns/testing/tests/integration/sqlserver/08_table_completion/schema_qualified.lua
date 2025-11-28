@@ -19,6 +19,11 @@ return {
           "Employees",
           "Departments",
           "Projects",
+          "Customers",
+          "Orders",
+          "Products",
+          "Regions",
+          "Countries",
           "vw_ActiveEmployees",
           "syn_Employees",
         },
@@ -40,7 +45,6 @@ return {
       items = {
         includes = {
           "Benefits",
-          "vw_EmployeeBenefits",
         },
         excludes = {
           -- dbo schema objects should NOT appear
@@ -152,18 +156,19 @@ FROM dbo.]],
   },
   {
     number = 4029,
-    description = "Schema-qualified - Branch schema tables",
+    description = "Schema-qualified - Branch_Prod database tables",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Branch.]],
-    cursor = { line = 0, col = 21 },
+    query = [[SELECT * FROM Branch_Prod.dbo.]],
+    cursor = { line = 0, col = 30 },
     expected = {
       type = "table",
       items = {
         includes = {
-          "AllDivisions",
-          "CentralDivision",
-          "EasternDivision",
-          "WesternDivision",
+          "central_division",
+          "eastern_division",
+          "western_division",
+          "division_metrics",
+          "vw_all_divisions",
         },
       },
     },

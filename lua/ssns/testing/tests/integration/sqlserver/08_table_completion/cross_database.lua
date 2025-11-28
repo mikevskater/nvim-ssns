@@ -64,8 +64,7 @@ return {
       items = {
         -- Tables in TEST.dbo schema
         includes_any = {
-          "TestTable",
-          "SomeTable",
+          "Records",
         },
       },
     },
@@ -96,7 +95,7 @@ return {
       items = {
         -- Tables in [TEST].[dbo] schema
         includes_any = {
-          "TestTable",
+          "Records",
         },
       },
     },
@@ -135,13 +134,13 @@ return {
     number = 4049,
     description = "Cross-database - full three-part name completion",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM TEST.dbo.T]],
+    query = [[SELECT * FROM TEST.dbo.R]],
     cursor = { line = 0, col = 24 },
     expected = {
       type = "table",
       items = {
         includes_any = {
-          "TestTable",
+          "Records",
         },
       },
     },
@@ -177,7 +176,7 @@ return {
       type = "table",
       items = {
         includes_any = {
-          "TestTable",
+          "Records",
         },
       },
     },
@@ -194,7 +193,7 @@ JOIN TEST.dbo.]],
       type = "table",
       items = {
         includes_any = {
-          "TestTable",
+          "Records",
         },
       },
     },
@@ -211,7 +210,6 @@ JOIN TEST.dbo.]],
         includes = {
           "dbo",
           "hr",
-          "Branch",
         },
       },
     },
@@ -259,7 +257,7 @@ SELECT * FROM TEST.dbo.]],
       type = "table",
       items = {
         includes_any = {
-          "TestTable",
+          "Records",
         },
       },
     },
@@ -274,7 +272,7 @@ SELECT * FROM TEST.dbo.]],
       type = "table",
       items = {
         includes_any = {
-          "TestTable",
+          "Records",
         },
       },
     },
@@ -289,7 +287,7 @@ SELECT * FROM TEST.dbo.]],
       type = "table",
       items = {
         includes_any = {
-          "TestTable",
+          "Records",
         },
       },
     },
@@ -304,7 +302,7 @@ SELECT * FROM TEST.dbo.]],
       type = "table",
       items = {
         includes_any = {
-          "TestTable",
+          "Records",
         },
       },
     },

@@ -133,8 +133,8 @@ JOIN ]],
     number = 4069,
     description = "JOIN - second JOIN in chain",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DeptID = d.ID JOIN ]],
-    cursor = { line = 0, col = 69 },
+    query = [[SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN ]],
+    cursor = { line = 0, col = 82 },
     expected = {
       type = "table",
       items = {
@@ -150,8 +150,8 @@ JOIN ]],
     database = "vim_dadbod_test",
     query = [[SELECT *
 FROM Employees e
-JOIN Departments d ON e.DeptID = d.ID
-JOIN Projects p ON p.DeptID = d.ID
+JOIN Departments d ON e.DepartmentID = d.DepartmentID
+JOIN Projects p ON p.DepartmentID = d.DepartmentID
 JOIN ]],
     cursor = { line = 4, col = 5 },
     expected = {
@@ -221,8 +221,8 @@ JOIN ]],
     number = 4074,
     description = "JOIN - multi-hop FK: Orders -> Customers -> Countries",
     database = "vim_dadbod_test",
-    query = [[SELECT * FROM Orders o JOIN Customers c ON o.CustomerID = c.CustomerID JOIN ]],
-    cursor = { line = 0, col = 76 },
+    query = [[SELECT * FROM Orders o JOIN Customers c ON o.CustomerId = c.Id JOIN ]],
+    cursor = { line = 0, col = 69 },
     expected = {
       type = "join_suggestion",
       items = {
@@ -327,7 +327,7 @@ LEFT JOIN ]],
       type = "table",
       items = {
         includes_any = {
-          "TestTable",
+          "Records",
         },
       },
     },

@@ -99,7 +99,7 @@ return {
       type = "table",
       items = {
         includes_any = {
-          "TestTable",
+          "Records",
         },
       },
     },
