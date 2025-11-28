@@ -4,11 +4,7 @@ return {
   database = [[vim_dadbod_test]],
   query = [[SELECT
  *
-FROM]],
-  cursor = {
-    line = 3,
-    col = 4
-  },
+FROM█]],
   expected = {
     type = [[object]],
     items = {
