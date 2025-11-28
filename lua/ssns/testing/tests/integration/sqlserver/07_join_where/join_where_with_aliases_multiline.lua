@@ -2,12 +2,12 @@ return {
   number = 36,
   description = [[Autocomplete for columns after WHERE clause with multiple tables with aliases in FROM clause (Multi-line handling)]],
   database = [[vim_dadbod_test]],
-  query = [[SELECT 
+  query = [[SELECT
     *
 FROM
-    dbo.EMPLOYEES e
+    dbo.Employees e
 JOIN
-    dbo.DEPARTMENTS d ON e.DepartmentID = d.DepartmentID
+    dbo.Departments d ON e.DepartmentID = d.DepartmentID
 WHERE]],
   cursor = {
     line = 6,
@@ -15,7 +15,8 @@ WHERE]],
   },
   expected = {
     type = [[column]],
-    items = {
+    includes = {
+      -- From Employees
       "EmployeeID",
       "FirstName",
       "LastName",
@@ -24,10 +25,30 @@ WHERE]],
       "HireDate",
       "Salary",
       "IsActive",
+      -- From Departments
       "DepartmentID",
       "DepartmentName",
       "ManagerID",
       "Budget"
+    },
+    excludes = {
+      -- From Orders table (not in query)
+      "OrderId",
+      "OrderDate",
+      "Total",
+      "Status",
+      -- From Customers table (not in query)
+      "CustomerId",
+      "CompanyId",
+      "Country",
+      "CountryID",
+      -- From Products table (not in query)
+      "ProductId",
+      "CategoryId",
+      "Price",
+      -- From Projects table (not in query)
+      "ProjectID",
+      "ProjectName"
     }
   }
 }

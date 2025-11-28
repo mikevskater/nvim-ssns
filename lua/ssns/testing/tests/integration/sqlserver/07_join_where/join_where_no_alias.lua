@@ -2,14 +2,15 @@ return {
   number = 33,
   description = [[Autocomplete for columns after WHERE clause with multiple tables in FROM clause]],
   database = [[vim_dadbod_test]],
-  query = [[SELECT * FROM dbo.EMPLOYEES JOIN dbo.DEPARTMENTS ON EMPLOYEES.DepartmentID = DEPARTMENTS.DepartmentID WHERE]],
+  query = [[SELECT * FROM dbo.Employees JOIN dbo.Departments ON Employees.DepartmentID = Departments.DepartmentID WHERE]],
   cursor = {
     line = 0,
     col = 108
   },
   expected = {
     type = [[column]],
-    items = {
+    includes = {
+      -- From Employees
       "EmployeeID",
       "FirstName",
       "LastName",
@@ -18,10 +19,30 @@ return {
       "HireDate",
       "Salary",
       "IsActive",
+      -- From Departments
       "DepartmentID",
       "DepartmentName",
       "ManagerID",
       "Budget"
+    },
+    excludes = {
+      -- From Orders table (not in query)
+      "OrderId",
+      "OrderDate",
+      "Total",
+      "Status",
+      -- From Customers table (not in query)
+      "CustomerId",
+      "CompanyId",
+      "Country",
+      "CountryID",
+      -- From Products table (not in query)
+      "ProductId",
+      "CategoryId",
+      "Price",
+      -- From Projects table (not in query)
+      "ProjectID",
+      "ProjectName"
     }
   }
 }
