@@ -213,10 +213,12 @@ function ColumnsProvider._get_qualified_columns(sql_context, connection, context
         local sq_name = table_info.name or table_info.alias
         if sq_name and sq_name:lower() == reference:lower() then
           local sq_columns = table_info.columns or {}
+          -- Expand star columns (SELECT * in subquery) to actual columns from source table
+          local expanded_columns = StatementCache.expand_star_columns(sq_columns, connection)
           local items = {}
-          for _, col_info in ipairs(sq_columns) do
+          for _, col_info in ipairs(expanded_columns) do
             local col_name = type(col_info) == "table" and col_info.name or col_info
-            if col_name then
+            if col_name and col_name ~= "*" then  -- Skip unexpanded stars
               table.insert(items, {
                 label = col_name,
                 kind = vim.lsp.protocol.CompletionItemKind.Field,

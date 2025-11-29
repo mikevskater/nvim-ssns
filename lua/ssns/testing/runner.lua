@@ -72,10 +72,20 @@ function M._run_single_test_case(test_data, opts)
     database = test_data.database,
     expected_type = test_data.expected.type,
     passed = false,
+    skipped = false,
+    skip_reason = nil,
     error = nil,
     comparison = nil,
     duration_ms = 0,
   }
+
+  -- Check if test is marked as skipped
+  if test_data.skip then
+    result.skipped = true
+    result.passed = true -- Skipped tests count as passed
+    result.skip_reason = test_data.skip_reason or "Test marked as skipped"
+    return result
+  end
 
   -- Extract database_type from path (e.g., tests/sqlserver/01_category/test.lua -> sqlserver)
   -- Also handle integration subfolder: tests/integration/sqlserver/...
