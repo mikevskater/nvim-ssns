@@ -252,25 +252,54 @@ function Resolver.resolve_all_tables_in_query(connection, context)
 
   for _, table_info in ipairs(context.tables_in_scope) do
     -- table_info structure: {alias = "e", table = "dbo.EMPLOYEES", scope = "main"}
-    local table_name = table_info.table or table_info.alias or table_info
+    -- or for CTEs: {name = "CTE_Name", is_cte = true, columns = {...}}
+    local table_name = table_info.table or table_info.name or table_info.alias or table_info
     local table_name_lower = type(table_name) == "string" and table_name:lower() or ""
 
     if table_name and not seen_tables[table_name_lower] then
-      -- Try pre-resolved scope first, then on-demand resolution
-      local resolved_table = nil
-      if context.resolved_scope then
-        resolved_table = Resolver.get_resolved(context.resolved_scope, table_name)
-      end
-      if not resolved_table then
-        resolved_table = Resolver.resolve_table(table_name, connection, context)
-      end
-
-      if resolved_table then
-        table.insert(resolved_tables, resolved_table)
+      -- Handle CTEs specially - use pre-stored columns instead of database lookup
+      if table_info.is_cte then
+        local cte_columns = table_info.columns or {}
+        -- Create pseudo-table object with get_columns method for CTE
+        local cte_table = {
+          name = table_info.name or table_name,
+          is_cte = true,
+          get_columns = function()
+            -- Convert CTE ColumnInfo objects to column format expected by completion
+            local cols = {}
+            for _, col_info in ipairs(cte_columns) do
+              local col_name = type(col_info) == "table" and col_info.name or col_info
+              if col_name then
+                table.insert(cols, {
+                  name = col_name,
+                  column_name = col_name,
+                  data_type = "unknown",
+                })
+              end
+            end
+            return cols
+          end
+        }
+        table.insert(resolved_tables, cte_table)
         seen_tables[table_name_lower] = true
-        debug_log(string.format("[RESOLVER] Resolved table '%s'", table_name))
+        debug_log(string.format("[RESOLVER] Added CTE '%s' with %d columns", table_name, #cte_columns))
       else
-        debug_log(string.format("[RESOLVER] Failed to resolve table '%s'", table_name))
+        -- Try pre-resolved scope first, then on-demand resolution
+        local resolved_table = nil
+        if context.resolved_scope then
+          resolved_table = Resolver.get_resolved(context.resolved_scope, table_name)
+        end
+        if not resolved_table then
+          resolved_table = Resolver.resolve_table(table_name, connection, context)
+        end
+
+        if resolved_table then
+          table.insert(resolved_tables, resolved_table)
+          seen_tables[table_name_lower] = true
+          debug_log(string.format("[RESOLVER] Resolved table '%s'", table_name))
+        else
+          debug_log(string.format("[RESOLVER] Failed to resolve table '%s'", table_name))
+        end
       end
     end
   end

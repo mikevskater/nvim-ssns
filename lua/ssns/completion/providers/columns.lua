@@ -128,6 +128,10 @@ function ColumnsProvider._get_completions_impl(ctx)
 
   elseif sql_context.mode == "on" then
     -- Pattern: JOIN table ON left.col = | (show columns from other tables with fuzzy matching)
+    -- But if user typed table_ref. (e.g., d.), use qualified completion instead
+    if sql_context.table_ref then
+      return ColumnsProvider._get_qualified_columns(sql_context, connection, sql_context)
+    end
     return ColumnsProvider._get_on_clause_columns(connection, sql_context)
 
   elseif sql_context.mode == "where" then
@@ -136,8 +140,8 @@ function ColumnsProvider._get_completions_impl(ctx)
 
   elseif sql_context.mode == "select" or
          sql_context.mode == "order_by" or sql_context.mode == "group_by" or
-         sql_context.mode == "set" then
-    -- Pattern: SELECT | or ORDER BY | or GROUP BY | or UPDATE SET | (show columns from all tables in query)
+         sql_context.mode == "having" or sql_context.mode == "set" then
+    -- Pattern: SELECT | or ORDER BY | or GROUP BY | or HAVING | or UPDATE SET | (show columns from all tables in query)
     return ColumnsProvider._get_all_columns_from_query(connection, sql_context)
 
   elseif sql_context.mode == "qualified_bracket" then
@@ -174,16 +178,26 @@ function ColumnsProvider._get_qualified_columns(sql_context, connection, context
 
   -- Try CTE columns first using pre-built context
   if context and context.ctes then
-    local cte_info = context.ctes[reference] or context.ctes[reference:lower()]
+    -- Reference could be CTE name directly or an alias to a CTE
+    local cte_name = reference
+    -- If reference is an alias, resolve it to the actual table/CTE name
+    if context.aliases and context.aliases[reference:lower()] then
+      cte_name = context.aliases[reference:lower()]
+    end
+    local cte_info = context.ctes[cte_name] or context.ctes[cte_name:lower()]
     if cte_info and cte_info.columns and #cte_info.columns > 0 then
       local items = {}
-      for _, col_name in ipairs(cte_info.columns) do
-        table.insert(items, {
-          label = col_name,
-          kind = vim.lsp.protocol.CompletionItemKind.Field,
-          detail = "CTE column",
-          insertText = col_name,
-        })
+      for _, col_info in ipairs(cte_info.columns) do
+        -- CTE columns are ColumnInfo objects with a 'name' property
+        local col_name = type(col_info) == "table" and col_info.name or col_info
+        if col_name then
+          table.insert(items, {
+            label = col_name,
+            kind = vim.lsp.protocol.CompletionItemKind.Field,
+            detail = "CTE column",
+            insertText = col_name,
+          })
+        end
       end
       return items
     end
@@ -400,10 +414,8 @@ function ColumnsProvider._get_on_clause_columns(connection, context)
     local table_name = table_info.table or table_info.name
     local display_ref = alias or table_name
 
-    -- Skip the left-side table (don't suggest e.col = e.col)
-    if left_table_ref and display_ref and display_ref:lower() == left_table_ref:lower() then
-      goto continue_table
-    end
+    -- Check if this is the left-side table (for deprioritizing same-table suggestions)
+    local is_left_table = left_table_ref and display_ref and display_ref:lower() == left_table_ref:lower()
 
     -- Resolve table to get columns
     local table_obj = nil
@@ -421,6 +433,16 @@ function ColumnsProvider._get_on_clause_columns(connection, context)
       goto continue_table
     end
 
+    -- Build table path for usage weight lookup
+    local schema = table_obj.schema or table_obj.schema_name
+    local tbl_name = table_obj.name or table_obj.table_name or table_obj.view_name
+    local table_path = nil
+    if schema and tbl_name then
+      table_path = string.format("%s.%s", schema, tbl_name)
+    elseif tbl_name then
+      table_path = tbl_name
+    end
+
     -- Get columns for this table
     local columns = Resolver.get_columns(table_obj, connection)
     if not columns then
@@ -436,7 +458,7 @@ function ColumnsProvider._get_on_clause_columns(connection, context)
       -- Build qualified name
       local qualified_name = display_ref and (display_ref .. "." .. col_name) or col_name
 
-      -- Calculate fuzzy match score
+      -- Calculate fuzzy match score and base priority
       local priority = 5000  -- Default priority
       local match_indicator = ""
 
@@ -454,6 +476,23 @@ function ColumnsProvider._get_on_clause_columns(connection, context)
             priority = 300 + math.floor((1 - score) * 1000)
             match_indicator = string.format(" ~%.0f%%", score * 100)
           end
+        end
+      end
+
+      -- Deprioritize same-table columns (e.g., e.col = e.col) but still show them
+      if is_left_table then
+        priority = priority + 1000
+      end
+
+      -- Apply usage weight adjustment
+      local weight = 0
+      if table_path then
+        local column_path = string.format("%s.%s", table_path, col_name)
+        weight = get_usage_weight(connection, "column", column_path)
+        -- Adjust priority based on usage (lower number = higher priority)
+        if weight > 0 and priority >= 1000 then
+          -- For non-fuzzy-matched columns, usage can boost priority
+          priority = priority - math.min(weight, 500)
         end
       end
 
@@ -483,6 +522,8 @@ function ColumnsProvider._get_on_clause_columns(connection, context)
           table_ref = display_ref,
           column_name = col_name,
           data_type = col.data_type,
+          weight = weight,
+          table_path = table_path,
         },
       }
 
@@ -632,16 +673,26 @@ function ColumnsProvider._get_qualified_bracket_columns(sql_context, connection,
 
   -- Try CTE columns first using pre-built context
   if context and context.ctes then
-    local cte_info = context.ctes[reference] or context.ctes[reference:lower()]
+    -- Reference could be CTE name directly or an alias to a CTE
+    local cte_name = reference
+    -- If reference is an alias, resolve it to the actual table/CTE name
+    if context.aliases and context.aliases[reference:lower()] then
+      cte_name = context.aliases[reference:lower()]
+    end
+    local cte_info = context.ctes[cte_name] or context.ctes[cte_name:lower()]
     if cte_info and cte_info.columns and #cte_info.columns > 0 then
       local items = {}
-      for _, col_name in ipairs(cte_info.columns) do
-        table.insert(items, {
-          label = col_name,
-          kind = vim.lsp.protocol.CompletionItemKind.Field,
-          detail = "CTE column",
-          insertText = col_name,
-        })
+      for _, col_info in ipairs(cte_info.columns) do
+        -- CTE columns are ColumnInfo objects with a 'name' property
+        local col_name = type(col_info) == "table" and col_info.name or col_info
+        if col_name then
+          table.insert(items, {
+            label = col_name,
+            kind = vim.lsp.protocol.CompletionItemKind.Field,
+            detail = "CTE column",
+            insertText = col_name,
+          })
+        end
       end
       return items
     end

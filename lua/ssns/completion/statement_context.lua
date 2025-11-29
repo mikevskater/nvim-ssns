@@ -851,23 +851,46 @@ function Context.detect(bufnr, line_num, col)
 
   -- Build tables_in_scope array from cache_ctx.tables
   -- Format: {alias = "e", table = "dbo.EMPLOYEES", scope = "main"}
+  -- or for CTEs: {name = "CTE_Name", is_cte = true, columns = {...}}
   local tables_in_scope = {}
+  local seen_ctes = {} -- Track which CTEs have been added to avoid duplicates
   if cache_ctx and cache_ctx.tables then
     for _, table_ref in ipairs(cache_ctx.tables) do
-      local table_name = table_ref.name
-      -- Build qualified table name if schema is present
-      if table_ref.schema then
-        table_name = table_ref.schema .. "." .. table_ref.name
-      end
-      if table_ref.database then
-        table_name = table_ref.database .. "." .. table_name
-      end
+      -- Preserve CTE entries with their columns
+      if table_ref.is_cte then
+        local cte_name = table_ref.name
+        if not seen_ctes[cte_name:lower()] then
+          seen_ctes[cte_name:lower()] = true
+          -- Look up columns from the CTE definition if not present on table_ref
+          local cte_columns = table_ref.columns
+          if (not cte_columns or #cte_columns == 0) and cache_ctx.ctes then
+            local cte_def = cache_ctx.ctes[cte_name] or cache_ctx.ctes[cte_name:lower()]
+            if cte_def then
+              cte_columns = cte_def.columns
+            end
+          end
+          table.insert(tables_in_scope, {
+            name = cte_name,
+            is_cte = true,
+            columns = cte_columns,
+          })
+        end
+      else
+        local table_name = table_ref.name
+        -- Build qualified table name if schema is present
+        if table_ref.schema then
+          table_name = table_ref.schema .. "." .. table_ref.name
+        end
+        if table_ref.database then
+          table_name = table_ref.database .. "." .. table_name
+        end
 
-      table.insert(tables_in_scope, {
-        alias = table_ref.alias,
-        table = table_name,
-        scope = "main",  -- Could be "main" or "subquery" in the future
-      })
+        table.insert(tables_in_scope, {
+          alias = table_ref.alias,
+          table = table_name,
+          scope = "main",  -- Could be "main" or "subquery" in the future
+        })
+      end
     end
   end
 
