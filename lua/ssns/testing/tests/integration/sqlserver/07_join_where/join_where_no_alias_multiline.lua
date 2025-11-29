@@ -8,7 +8,7 @@ FROM
     dbo.Employees
 JOIN
     dbo.Departments ON Employees.DepartmentID = Departments.DepartmentID
-WHER█E]],
+WHERE █]],
   expected = {
     type = [[column]],
     includes = {
