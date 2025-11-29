@@ -527,10 +527,19 @@ function Context.detect(bufnr, line_num, col)
         ctx_type = Context.Type.TABLE
         mode = "from"
         -- Parse qualified name from line (e.g., "FROM dbo.█" or "FROM TEST.dbo.█")
-        -- First try to find FROM on this line
-        local after_from = before_cursor:match("[Ff][Rr][Oo][Mm]%s+(.*)$")
+        -- Handle comma-separated tables: "FROM Table1, dbo.█" should extract "dbo."
+        -- Look for the last segment that could be a qualified name
+        local qualified_text = nil
+        -- Try after last comma first (handles comma-separated tables)
+        local after_comma = before_cursor:match(",[ \t]*([%w_%[%]%.]+)$")
+        if after_comma then
+          qualified_text = after_comma
+        else
+          -- No comma - try after FROM
+          local after_from = before_cursor:match("[Ff][Rr][Oo][Mm]%s+([%w_%[%]%.]+)$")
+          qualified_text = after_from
+        end
         -- If no FROM on this line, check if we have a qualified pattern (multi-line case)
-        local qualified_text = after_from
         if not qualified_text then
           -- Multi-line: before_cursor might be just "dbo." or "TEST.dbo."
           qualified_text = before_cursor:match("^%s*([%w_%[%]]+%.[%w_%[%]%.]*)$")
@@ -561,10 +570,12 @@ function Context.detect(bufnr, line_num, col)
         ctx_type = Context.Type.TABLE
         mode = "join"
         -- Parse qualified name from line (e.g., "JOIN dbo.█" or "JOIN TEST.dbo.█")
-        -- First try to find JOIN on this line
-        local after_join = before_cursor:match("[Jj][Oo][Ii][Nn]%s+(.*)$")
+        -- Look for the last segment that could be a qualified name
+        local qualified_text = nil
+        -- Try after JOIN keyword
+        local after_join = before_cursor:match("[Jj][Oo][Ii][Nn]%s+([%w_%[%]%.]+)$")
+        qualified_text = after_join
         -- If no JOIN on this line, check if we have a qualified pattern (multi-line case)
-        local qualified_text = after_join
         if not qualified_text then
           -- Multi-line: before_cursor might be just "dbo." or "TEST.dbo."
           qualified_text = before_cursor:match("^%s*([%w_%[%]]+%.[%w_%[%]%.]*)$")
