@@ -8,8 +8,9 @@ return {
   expected = {
     items = {
       includes = {
-        "EmployeeID",
-        "DepartmentID",
+        "e.EmployeeID",
+        "e.DepartmentID",
+        "d.DepartmentID",
       },
     },
     type = "column",

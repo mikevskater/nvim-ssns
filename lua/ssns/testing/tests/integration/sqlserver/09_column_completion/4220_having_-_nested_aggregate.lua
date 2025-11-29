@@ -8,7 +8,7 @@ return {
   expected = {
     items = {
       includes = {
-        "ManagerID",
+        "Salary",
         "FirstName",
       },
     },

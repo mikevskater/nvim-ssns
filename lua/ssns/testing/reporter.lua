@@ -65,6 +65,13 @@ function M.format_result(result)
       table.insert(lines, "**Unexpected Items:**")
       table.insert(lines, string.format("- %s", utils.format_item_list(result.comparison.unexpected)))
     end
+
+    -- Always show actual items for debugging failed tests
+    if not result.passed and result.comparison.actual_items and #result.comparison.actual_items > 0 then
+      table.insert(lines, "")
+      table.insert(lines, "**Actual Items:**")
+      table.insert(lines, string.format("- %s", utils.format_item_list(result.comparison.actual_items, 20)))
+    end
   end
 
   table.insert(lines, "")
@@ -225,8 +232,8 @@ function M.write_markdown(results, output_path)
     end)
 
     for _, result in ipairs(failed_tests) do
-      table.insert(lines, string.format("- **Test #%d**: %s (Category: %s)",
-        result.test_number or "?",
+      table.insert(lines, string.format("- **Test #%s**: %s (Category: %s)",
+        tostring(result.test_number or "?"),
         result.description or "Unknown",
         utils.clean_category_name(result.category or "uncategorized")))
 

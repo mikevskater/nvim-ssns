@@ -386,6 +386,33 @@ function Context._detect_type_from_line(before_cursor, chunk)
     return Context.Type.COLUMN, "values", extra
   end
 
+  -- INSERT INTO table ( column list: INSERT INTO Employees (█ or INSERT INTO Employees (col1, █
+  -- This must come BEFORE INSERT INTO table check to detect column list context
+  local insert_columns_match = before_cursor:match("[Ii][Nn][Ss][Ee][Rr][Tt]%s+[Ii][Nn][Tt][Oo]%s+([%w_%[%]%.]+)%s*%(")
+  if insert_columns_match then
+    -- Extract table name (handles schema.table and bracketed names)
+    local table_name = insert_columns_match:gsub("^%[", ""):gsub("%]$", "")
+    -- Handle schema-qualified names
+    if table_name:match("%.") then
+      local parts = {}
+      for part in table_name:gmatch("[^%.]+") do
+        -- Note: Use parentheses to discard the second return value from gsub (count)
+        table.insert(parts, (part:gsub("^%[", ""):gsub("%]$", "")))
+      end
+      if #parts >= 2 then
+        extra.schema = parts[#parts - 1]
+        extra.table = parts[#parts]
+      else
+        extra.table = parts[1]
+      end
+    else
+      extra.table = table_name
+    end
+    extra.insert_table = extra.table
+    extra.insert_schema = extra.schema
+    return Context.Type.COLUMN, "insert_columns", extra
+  end
+
   if upper_trimmed:match("INSERT%s+INTO%s+$") or upper:match("INSERT%s+INTO%s+[%w_#@%.%[%]]*$") then
     return Context.Type.TABLE, "insert", extra
   end
@@ -543,6 +570,62 @@ function Context.detect(bufnr, line_num, col)
   -- Detect type using clause positions first, fallback to line-based detection
   local ctx_type, mode, extra
   local chunk = cache_ctx and cache_ctx.chunk
+  -- Pre-compute upper case version of before_cursor for pattern matching
+  -- Must be declared before any goto statements to avoid scope issues
+  local upper = before_cursor:upper()
+
+  -- Special case: INSERT column list detection (incomplete parens case)
+  -- Must check BEFORE clause-based routing because incomplete INSERT INTO table (
+  -- returns "into" clause but we need "insert_columns" context
+  local insert_columns_match = before_cursor:match("[Ii][Nn][Ss][Ee][Rr][Tt]%s+[Ii][Nn][Tt][Oo]%s+([%w_%[%]%.]+)%s*%(")
+  if insert_columns_match then
+    extra = {}
+    local table_name = insert_columns_match:gsub("^%[", ""):gsub("%]$", "")
+    if table_name:match("%.") then
+      local parts = {}
+      for part in table_name:gmatch("[^%.]+") do
+        -- Note: Use parentheses to discard the second return value from gsub (count)
+        -- otherwise table.insert interprets it as a position argument
+        table.insert(parts, (part:gsub("^%[", ""):gsub("%]$", "")))
+      end
+      if #parts >= 2 then
+        extra.schema = parts[#parts - 1]
+        extra.table = parts[#parts]
+      else
+        extra.table = parts[1]
+      end
+    else
+      extra.table = table_name
+    end
+    extra.insert_table = extra.table
+    extra.insert_schema = extra.schema
+    ctx_type = Context.Type.COLUMN
+    mode = "insert_columns"
+    -- Skip clause-based routing, jump to final context building
+    goto build_context
+  end
+
+  -- Special case: ON clause detection
+  -- Must check BEFORE clause-based routing because ON is not tracked separately
+  -- by StatementParser - it's considered part of FROM clause
+  -- Patterns: "... ON █" or "... ON alias.█" or "... ON col1 = █"
+  if upper:match("%s+ON%s+$") or
+     upper:match("%s+ON%s+[%w_%.]+$") or
+     upper:match("%s+ON%s+[%w_%.]+%s*[=<>!]+%s*$") or
+     upper:match("%s+ON%s+[%w_%.]+%s*[=<>!]+%s*[%w_%.]*$") or
+     upper:match("%s+ON%s+[%w_%.]+%s+AND%s+$") or
+     upper:match("%s+ON%s+[%w_%.]+%s*[=<>!]+%s*[%w_%.]+%s+AND%s+$") or
+     upper:match("%s+ON%s+[%w_%.]+%s+AND%s+[%w_%.]*$") or
+     upper:match("%s+ON%s+[%w_%.]+%s*[=<>!]+%s*[%w_%.]+%s+AND%s+[%w_%.]*$") then
+    extra = {}
+    local left_side = extract_left_side_column(before_cursor)
+    if left_side then
+      extra.left_side = left_side
+    end
+    ctx_type = Context.Type.COLUMN
+    mode = "on"
+    goto build_context
+  end
 
   if chunk then
     local StatementParser = require('ssns.completion.statement_parser')
@@ -763,6 +846,9 @@ function Context.detect(bufnr, line_num, col)
     ctx_type, mode, extra = Context._detect_type_from_line(before_cursor, chunk)
   end
 
+  -- Label for goto from INSERT column list detection
+  ::build_context::
+
   -- Build tables_in_scope array from cache_ctx.tables
   -- Format: {alias = "e", table = "dbo.EMPLOYEES", scope = "main"}
   local tables_in_scope = {}
@@ -829,6 +915,10 @@ function Context.detect(bufnr, line_num, col)
     omit_table = extra.omit_table,
     value_position = extra.value_position,
     left_side = extra.left_side,
+    -- INSERT column list context
+    insert_table = extra.insert_table,
+    insert_schema = extra.insert_schema,
+    table = extra.table,
   }
 
   Debug.log(string.format("[statement_context] detected type=%s, mode=%s, prefix=%s", ctx_type, mode, prefix))

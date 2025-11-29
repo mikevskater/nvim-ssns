@@ -327,6 +327,7 @@ function M.compare_results(actual, expected)
     details_parts = {},
     expected_count = nil,
     actual_count = #actual_labels,
+    actual_items = actual_labels,  -- For debugging failed tests
   }
 
   local items = expected.items
