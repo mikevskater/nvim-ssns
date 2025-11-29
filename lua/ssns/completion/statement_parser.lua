@@ -736,12 +736,21 @@ function ParserState:parse_select_columns(paren_depth, known_ctes, subqueries, s
     })
   end
 
-  -- Update clause end position to the last token processed (before FROM/INTO)
+  -- Update clause end position to just before FROM/INTO keyword
+  -- This ensures cursor at "SELECT █ FROM" is still in SELECT clause
   if clause_pos then
-    local last_token = self.pos > 1 and self.tokens[self.pos - 1] or select_start_token
-    if last_token then
-      clause_pos.end_line = last_token.line
-      clause_pos.end_col = last_token.col + #last_token.text - 1
+    local next_keyword_token = self:current()  -- FROM or INTO token
+    if next_keyword_token then
+      -- Set end to just before the FROM/INTO token
+      clause_pos.end_line = next_keyword_token.line
+      clause_pos.end_col = next_keyword_token.col - 1
+    else
+      -- No FROM/INTO found, use last token processed
+      local last_token = self.pos > 1 and self.tokens[self.pos - 1] or select_start_token
+      if last_token then
+        clause_pos.end_line = last_token.line
+        clause_pos.end_col = last_token.col + #last_token.text - 1
+      end
     end
   end
 
@@ -2089,21 +2098,38 @@ function StatementParser.get_clause_at_position(chunk, line, col)
     return nil
   end
 
-  -- Check each clause position to find which one contains this position
-  -- A position is "in" a clause if it's >= start and <= end
-  -- Allow cursor to be 1 past end_col for completion context (e.g., after typing "dbo.")
+  -- Find the last clause that started before (or at) the cursor position
+  -- This handles trailing spaces, newlines, and incomplete statements naturally
+  -- The cursor is considered to be in a clause until a new clause starts
+  local best_match = nil
+  local best_start_line = -1
+  local best_start_col = -1
+
   for clause_name, pos in pairs(chunk.clause_positions) do
-    if line > pos.start_line or (line == pos.start_line and col >= pos.start_col) then
-      if line < pos.end_line or (line == pos.end_line and col <= pos.end_col + 1) then
-        -- Normalize join_N and on_N to just "join" and "on"
-        if clause_name:match("^join_%d+$") then
-          return "join"
-        elseif clause_name:match("^on_%d+$") then
-          return "on"
-        end
-        return clause_name
+    -- Check if this clause started before or at the cursor
+    local clause_before_cursor = (pos.start_line < line) or
+                                   (pos.start_line == line and pos.start_col <= col)
+
+    if clause_before_cursor then
+      -- Keep the clause that started latest (closest to cursor)
+      local is_later = (pos.start_line > best_start_line) or
+                       (pos.start_line == best_start_line and pos.start_col > best_start_col)
+      if is_later then
+        best_start_line = pos.start_line
+        best_start_col = pos.start_col
+        best_match = clause_name
       end
     end
+  end
+
+  if best_match then
+    -- Normalize join_N and on_N to just "join" and "on"
+    if best_match:match("^join_%d+$") then
+      return "join"
+    elseif best_match:match("^on_%d+$") then
+      return "on"
+    end
+    return best_match
   end
 
   return nil
