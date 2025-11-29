@@ -2008,7 +2008,11 @@ end
 ---@param col number 1-indexed column
 ---@return StatementChunk? chunk The chunk at position, or nil
 function StatementParser.get_chunk_at_position(chunks, line, col)
+  local best_match = nil
+  local best_end_line = -1
+
   for _, chunk in ipairs(chunks) do
+    -- Check if cursor is within chunk boundaries
     if line >= chunk.start_line and line <= chunk.end_line then
       -- Check column boundaries for first/last line
       if line == chunk.start_line and col < chunk.start_col then
@@ -2024,9 +2028,24 @@ function StatementParser.get_chunk_at_position(chunks, line, col)
       end
       return chunk
     end
+
+    -- Also check if cursor is on lines AFTER chunk.end_line (within 5 lines)
+    -- This handles multiline continuation like "FROM Table,\n  █" where the cursor
+    -- is on a new line but still logically part of the previous statement
+    -- Only consider this if there's no next chunk that starts before the cursor
+    if line > chunk.end_line and line <= chunk.end_line + 5 then
+      -- Track the chunk that ends closest to the cursor line
+      if chunk.end_line > best_end_line then
+        best_end_line = chunk.end_line
+        best_match = chunk
+      end
+    end
+
     ::continue::
   end
-  return nil
+
+  -- Return the best match from "continuation" chunks (if no direct match was found)
+  return best_match
 end
 
 ---Check if position is within bounds
