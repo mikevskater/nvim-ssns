@@ -291,9 +291,16 @@ function Context._detect_type_from_line(before_cursor, chunk)
   end
 
   -- Handle JOIN modifiers (INNER JOIN, LEFT JOIN, etc.)
-  if upper_trimmed:match("INNER%s+JOIN%s+$") or upper_trimmed:match("LEFT%s+JOIN%s+$") or
-     upper_trimmed:match("RIGHT%s+JOIN%s+$") or upper_trimmed:match("FULL%s+JOIN%s+$") or
-     upper_trimmed:match("CROSS%s+JOIN%s+$") or upper_trimmed:match("OUTER%s+JOIN%s+$") then
+  -- Check both trimmed (ends with JOIN) and untrimmed (ends with JOIN + space)
+  if upper_trimmed:match("INNER%s+JOIN$") or upper:match("INNER%s+JOIN%s+$") or
+     upper_trimmed:match("LEFT%s+JOIN$") or upper:match("LEFT%s+JOIN%s+$") or
+     upper_trimmed:match("LEFT%s+OUTER%s+JOIN$") or upper:match("LEFT%s+OUTER%s+JOIN%s+$") or
+     upper_trimmed:match("RIGHT%s+JOIN$") or upper:match("RIGHT%s+JOIN%s+$") or
+     upper_trimmed:match("RIGHT%s+OUTER%s+JOIN$") or upper:match("RIGHT%s+OUTER%s+JOIN%s+$") or
+     upper_trimmed:match("FULL%s+JOIN$") or upper:match("FULL%s+JOIN%s+$") or
+     upper_trimmed:match("FULL%s+OUTER%s+JOIN$") or upper:match("FULL%s+OUTER%s+JOIN%s+$") or
+     upper_trimmed:match("CROSS%s+JOIN$") or upper:match("CROSS%s+JOIN%s+$") or
+     upper_trimmed:match("OUTER%s+JOIN$") or upper:match("OUTER%s+JOIN%s+$") then
     return Context.Type.TABLE, "join", extra
   end
 
@@ -403,7 +410,8 @@ function Context._detect_type_from_line(before_cursor, chunk)
     return Context.Type.COLUMN, "where", extra
   end
 
-  if upper_trimmed:match("AND%s+$") or upper_trimmed:match("OR%s+$") then
+  if upper:match("AND%s+$") or upper:match("OR%s+$") or
+     upper_trimmed:match("AND$") or upper_trimmed:match("OR$") then
     -- Could be in WHERE clause
     return Context.Type.COLUMN, "where", extra
   end
@@ -634,6 +642,11 @@ function Context.detect(bufnr, line_num, col)
       extra = {}
       local from_pos = chunk.clause_positions and chunk.clause_positions["from"]
       local join_pos = nil
+      local where_pos = chunk.clause_positions and chunk.clause_positions["where"]
+      local group_by_pos = chunk.clause_positions and chunk.clause_positions["group_by"]
+      local having_pos = chunk.clause_positions and chunk.clause_positions["having"]
+      local order_by_pos = chunk.clause_positions and chunk.clause_positions["order_by"]
+
       if chunk.clause_positions then
         -- Find most recent join clause
         for k, v in pairs(chunk.clause_positions) do
@@ -646,11 +659,25 @@ function Context.detect(bufnr, line_num, col)
         end
       end
 
+      -- Helper to check if cursor is past a clause start
+      local function cursor_past_clause_start(clause_pos)
+        if not clause_pos then return false end
+        return line_num > clause_pos.start_line or
+               (line_num == clause_pos.start_line and col > clause_pos.start_col)
+      end
+
+      -- Don't consider FROM/JOIN context if cursor is past WHERE/GROUP BY/HAVING/ORDER BY
+      local past_where = cursor_past_clause_start(where_pos)
+      local past_group_by = cursor_past_clause_start(group_by_pos)
+      local past_having = cursor_past_clause_start(having_pos)
+      local past_order_by = cursor_past_clause_start(order_by_pos)
+      local in_later_clause = past_where or past_group_by or past_having or past_order_by
+
       -- Check if cursor is on the same line as FROM clause end or immediately after
-      local in_from_context = from_pos and
+      local in_from_context = from_pos and not in_later_clause and
         (line_num == from_pos.end_line or
          (line_num == from_pos.end_line + 1 and col <= 50)) -- Allow continuation on next line
-      local in_join_context = join_pos and
+      local in_join_context = join_pos and not in_later_clause and
         (line_num == join_pos.end_line or
          (line_num == join_pos.end_line + 1 and col <= 50))
 
