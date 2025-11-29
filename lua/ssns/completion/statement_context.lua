@@ -717,6 +717,14 @@ function Context.detect(bufnr, line_num, col)
         if left_side then
           extra.left_side = left_side
         end
+        -- Check for qualified column reference in ON clause (e.g., d.█)
+        if before_cursor:match("%.%s*$") or before_cursor:match("%.[%w_]*$") then
+          local ref = Context._get_reference_before_dot(before_cursor)
+          if ref then
+            extra.table_ref = ref
+            mode = "qualified"
+          end
+        end
       elseif clause == "where" then
         ctx_type = Context.Type.COLUMN
         mode = "where"

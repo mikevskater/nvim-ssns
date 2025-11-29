@@ -191,6 +191,30 @@ function TablesProvider._get_completions_impl(ctx)
     end
   end
 
+  -- Collect CTEs (Common Table Expressions) from the current query context
+  -- CTEs should be available as table sources in FROM/JOIN clauses
+  if sql_context.ctes then
+    for cte_name, cte_info in pairs(sql_context.ctes) do
+      table.insert(items, {
+        label = cte_name,
+        kind = Utils.CompletionItemKind.Module,  -- Use Module kind for CTEs (distinguish from tables)
+        detail = "CTE",
+        documentation = {
+          kind = "markdown",
+          value = string.format("**Common Table Expression**\n\nDefined in the WITH clause of the current query.\n\nColumns: %d", #(cte_info.columns or {})),
+        },
+        insertText = cte_name,
+        filterText = cte_name,
+        sortText = "00001_" .. cte_name,  -- Sort CTEs at the top since they're query-local
+        data = {
+          type = "cte",
+          name = cte_name,
+          is_cte = true,
+        },
+      })
+    end
+  end
+
   -- Inject usage weights into sortText for all items
   for idx, item in ipairs(items) do
     local item_data = item.data
