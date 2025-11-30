@@ -289,89 +289,81 @@ function Classifier._find_in_tree_cache(name)
   local Cache = require('ssns.cache')
   local name_lower = name:lower()
 
-  -- Scan all servers
+  -- Scan all servers using accessor methods
   for _, server in ipairs(Cache.servers or {}) do
-    -- Find databases_group
-    if server.children then
-      for _, server_child in ipairs(server.children) do
-        if server_child.object_type == "databases_group" and server_child.children then
-          -- Check each database
-          for _, db in ipairs(server_child.children) do
-            if db.object_type == "database" then
-              local db_name = db.db_name or db.name
-              if db_name and db_name:lower() == name_lower then
-                return "database", db, server
-              end
+    -- Check each database
+    for _, db in ipairs(server:get_databases()) do
+      local db_name = db.db_name or db.name
+      if db_name and db_name:lower() == name_lower then
+        return "database", db, server
+      end
 
-              -- Check inside database for tables/views/procedures/functions
-              if db.children then
-                for _, db_child in ipairs(db.children) do
-                  -- Check tables_group
-                  if db_child.object_type == "tables_group" and db_child.children then
-                    for _, tbl in ipairs(db_child.children) do
-                      local tbl_name = tbl.table_name or tbl.name
-                      if tbl_name and tbl_name:lower() == name_lower then
-                        return "table", tbl, db
-                      end
-                      -- Also check if name matches a schema_name (schema is a property, not an object)
-                      local schema_name = tbl.schema_name
-                      if schema_name and schema_name:lower() == name_lower then
-                        return "schema", db, server  -- Return db as the object for schema context
-                      end
-                    end
-                  -- Check views_group
-                  elseif db_child.object_type == "views_group" and db_child.children then
-                    for _, view in ipairs(db_child.children) do
-                      local view_name = view.view_name or view.name
-                      if view_name and view_name:lower() == name_lower then
-                        return "view", view, db
-                      end
-                      local schema_name = view.schema_name
-                      if schema_name and schema_name:lower() == name_lower then
-                        return "schema", db, server
-                      end
-                    end
-                  -- Check procedures_group
-                  elseif db_child.object_type == "procedures_group" and db_child.children then
-                    for _, proc in ipairs(db_child.children) do
-                      local proc_name = proc.procedure_name or proc.name
-                      if proc_name and proc_name:lower() == name_lower then
-                        return "procedure", proc, db
-                      end
-                      local schema_name = proc.schema_name
-                      if schema_name and schema_name:lower() == name_lower then
-                        return "schema", db, server
-                      end
-                    end
-                  -- Check functions_group
-                  elseif db_child.object_type == "functions_group" and db_child.children then
-                    for _, func in ipairs(db_child.children) do
-                      local func_name = func.function_name or func.name
-                      if func_name and func_name:lower() == name_lower then
-                        return "function", func, db
-                      end
-                      local schema_name = func.schema_name
-                      if schema_name and schema_name:lower() == name_lower then
-                        return "schema", db, server
-                      end
-                    end
-                  -- Check synonyms_group
-                  elseif db_child.object_type == "synonyms_group" and db_child.children then
-                    for _, syn in ipairs(db_child.children) do
-                      local syn_name = syn.synonym_name or syn.name
-                      if syn_name and syn_name:lower() == name_lower then
-                        return "synonym", syn, db
-                      end
-                      local schema_name = syn.schema_name
-                      if schema_name and schema_name:lower() == name_lower then
-                        return "schema", db, server
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end
+      -- Check schemas (for schema-based servers)
+      for _, schema in ipairs(db:get_schemas()) do
+        local schema_name = schema.schema_name or schema.name
+        if schema_name and schema_name:lower() == name_lower then
+          return "schema", db, server
+        end
+      end
+
+      -- Check tables
+      for _, tbl in ipairs(db:get_tables()) do
+        local tbl_name = tbl.table_name or tbl.name
+        if tbl_name and tbl_name:lower() == name_lower then
+          return "table", tbl, db
+        end
+        -- Also check if name matches a schema_name
+        local schema_name = tbl.schema_name or tbl.schema
+        if schema_name and schema_name:lower() == name_lower then
+          return "schema", db, server
+        end
+      end
+
+      -- Check views
+      for _, view in ipairs(db:get_views()) do
+        local view_name = view.view_name or view.name
+        if view_name and view_name:lower() == name_lower then
+          return "view", view, db
+        end
+        local schema_name = view.schema_name or view.schema
+        if schema_name and schema_name:lower() == name_lower then
+          return "schema", db, server
+        end
+      end
+
+      -- Check procedures
+      for _, proc in ipairs(db:get_procedures()) do
+        local proc_name = proc.procedure_name or proc.name
+        if proc_name and proc_name:lower() == name_lower then
+          return "procedure", proc, db
+        end
+        local schema_name = proc.schema_name or proc.schema
+        if schema_name and schema_name:lower() == name_lower then
+          return "schema", db, server
+        end
+      end
+
+      -- Check functions
+      for _, func in ipairs(db:get_functions()) do
+        local func_name = func.function_name or func.name
+        if func_name and func_name:lower() == name_lower then
+          return "function", func, db
+        end
+        local schema_name = func.schema_name or func.schema
+        if schema_name and schema_name:lower() == name_lower then
+          return "schema", db, server
+        end
+      end
+
+      -- Check synonyms
+      for _, syn in ipairs(db:get_synonyms()) do
+        local syn_name = syn.synonym_name or syn.name
+        if syn_name and syn_name:lower() == name_lower then
+          return "synonym", syn, db
+        end
+        local schema_name = syn.schema_name or syn.schema
+        if schema_name and schema_name:lower() == name_lower then
+          return "schema", db, server
         end
       end
     end
@@ -386,41 +378,51 @@ end
 ---@return boolean found True if schema exists in this database
 function Classifier._find_schema_in_db(db, name)
   local name_lower = name:lower()
-  if db.children then
-    for _, db_child in ipairs(db.children) do
-      if db_child.object_type == "tables_group" and db_child.children then
-        for _, tbl in ipairs(db_child.children) do
-          if tbl.schema_name and tbl.schema_name:lower() == name_lower then
-            return true
-          end
-        end
-      elseif db_child.object_type == "views_group" and db_child.children then
-        for _, view in ipairs(db_child.children) do
-          if view.schema_name and view.schema_name:lower() == name_lower then
-            return true
-          end
-        end
-      elseif db_child.object_type == "procedures_group" and db_child.children then
-        for _, proc in ipairs(db_child.children) do
-          if proc.schema_name and proc.schema_name:lower() == name_lower then
-            return true
-          end
-        end
-      elseif db_child.object_type == "functions_group" and db_child.children then
-        for _, func in ipairs(db_child.children) do
-          if func.schema_name and func.schema_name:lower() == name_lower then
-            return true
-          end
-        end
-      elseif db_child.object_type == "synonyms_group" and db_child.children then
-        for _, syn in ipairs(db_child.children) do
-          if syn.schema_name and syn.schema_name:lower() == name_lower then
-            return true
-          end
-        end
-      end
+
+  -- First check actual schema objects (for schema-based servers)
+  for _, schema in ipairs(db:get_schemas()) do
+    local schema_name = schema.schema_name or schema.name
+    if schema_name and schema_name:lower() == name_lower then
+      return true
     end
   end
+
+  -- Also check schema_name property on objects (fallback)
+  for _, tbl in ipairs(db:get_tables()) do
+    local schema_name = tbl.schema_name or tbl.schema
+    if schema_name and schema_name:lower() == name_lower then
+      return true
+    end
+  end
+
+  for _, view in ipairs(db:get_views()) do
+    local schema_name = view.schema_name or view.schema
+    if schema_name and schema_name:lower() == name_lower then
+      return true
+    end
+  end
+
+  for _, proc in ipairs(db:get_procedures()) do
+    local schema_name = proc.schema_name or proc.schema
+    if schema_name and schema_name:lower() == name_lower then
+      return true
+    end
+  end
+
+  for _, func in ipairs(db:get_functions()) do
+    local schema_name = func.schema_name or func.schema
+    if schema_name and schema_name:lower() == name_lower then
+      return true
+    end
+  end
+
+  for _, syn in ipairs(db:get_synonyms()) do
+    local schema_name = syn.schema_name or syn.schema
+    if schema_name and schema_name:lower() == name_lower then
+      return true
+    end
+  end
+
   return false
 end
 
@@ -434,30 +436,29 @@ function Classifier._find_table_in_db(db, name, schema_name)
   local name_lower = name:lower()
   local schema_lower = schema_name and schema_name:lower()
 
-  if db.children then
-    for _, db_child in ipairs(db.children) do
-      if db_child.object_type == "tables_group" and db_child.children then
-        for _, tbl in ipairs(db_child.children) do
-          local tbl_name = tbl.table_name or tbl.name
-          if tbl_name and tbl_name:lower() == name_lower then
-            -- If schema filter provided, check it matches
-            if not schema_lower or (tbl.schema_name and tbl.schema_name:lower() == schema_lower) then
-              return "table", tbl
-            end
-          end
-        end
-      elseif db_child.object_type == "views_group" and db_child.children then
-        for _, view in ipairs(db_child.children) do
-          local view_name = view.view_name or view.name
-          if view_name and view_name:lower() == name_lower then
-            if not schema_lower or (view.schema_name and view.schema_name:lower() == schema_lower) then
-              return "view", view
-            end
-          end
-        end
+  -- Search tables using accessor (schema filter handled by accessor)
+  for _, tbl in ipairs(db:get_tables(schema_name)) do
+    local tbl_name = tbl.table_name or tbl.name
+    if tbl_name and tbl_name:lower() == name_lower then
+      -- If schema filter provided, verify it matches
+      local tbl_schema = tbl.schema_name or tbl.schema
+      if not schema_lower or (tbl_schema and tbl_schema:lower() == schema_lower) then
+        return "table", tbl
       end
     end
   end
+
+  -- Search views using accessor
+  for _, view in ipairs(db:get_views(schema_name)) do
+    local view_name = view.view_name or view.name
+    if view_name and view_name:lower() == name_lower then
+      local view_schema = view.schema_name or view.schema
+      if not schema_lower or (view_schema and view_schema:lower() == schema_lower) then
+        return "view", view
+      end
+    end
+  end
+
   return nil, nil
 end
 
@@ -471,29 +472,28 @@ function Classifier._find_routine_in_db(db, name, schema_name)
   local name_lower = name:lower()
   local schema_lower = schema_name and schema_name:lower()
 
-  if db.children then
-    for _, db_child in ipairs(db.children) do
-      if db_child.object_type == "procedures_group" and db_child.children then
-        for _, proc in ipairs(db_child.children) do
-          local proc_name = proc.procedure_name or proc.name
-          if proc_name and proc_name:lower() == name_lower then
-            if not schema_lower or (proc.schema_name and proc.schema_name:lower() == schema_lower) then
-              return "procedure", proc
-            end
-          end
-        end
-      elseif db_child.object_type == "functions_group" and db_child.children then
-        for _, func in ipairs(db_child.children) do
-          local func_name = func.function_name or func.name
-          if func_name and func_name:lower() == name_lower then
-            if not schema_lower or (func.schema_name and func.schema_name:lower() == schema_lower) then
-              return "function", func
-            end
-          end
-        end
+  -- Search procedures using accessor
+  for _, proc in ipairs(db:get_procedures(schema_name)) do
+    local proc_name = proc.procedure_name or proc.name
+    if proc_name and proc_name:lower() == name_lower then
+      local proc_schema = proc.schema_name or proc.schema
+      if not schema_lower or (proc_schema and proc_schema:lower() == schema_lower) then
+        return "procedure", proc
       end
     end
   end
+
+  -- Search functions using accessor
+  for _, func in ipairs(db:get_functions(schema_name)) do
+    local func_name = func.function_name or func.name
+    if func_name and func_name:lower() == name_lower then
+      local func_schema = func.schema_name or func.schema
+      if not schema_lower or (func_schema and func_schema:lower() == schema_lower) then
+        return "function", func
+      end
+    end
+  end
+
   return nil, nil
 end
 
@@ -506,17 +506,13 @@ function Classifier._find_synonym_in_db(db, name, schema_name)
   local name_lower = name:lower()
   local schema_lower = schema_name and schema_name:lower()
 
-  if db.children then
-    for _, db_child in ipairs(db.children) do
-      if db_child.object_type == "synonyms_group" and db_child.children then
-        for _, syn in ipairs(db_child.children) do
-          local syn_name = syn.synonym_name or syn.name
-          if syn_name and syn_name:lower() == name_lower then
-            if not schema_lower or (syn.schema_name and syn.schema_name:lower() == schema_lower) then
-              return syn
-            end
-          end
-        end
+  -- Search synonyms using accessor
+  for _, syn in ipairs(db:get_synonyms(schema_name)) do
+    local syn_name = syn.synonym_name or syn.name
+    if syn_name and syn_name:lower() == name_lower then
+      local syn_schema = syn.schema_name or syn.schema
+      if not schema_lower or (syn_schema and syn_schema:lower() == schema_lower) then
+        return syn
       end
     end
   end
@@ -528,38 +524,16 @@ end
 ---@param column_name string Column name to find
 ---@return boolean found True if column exists
 function Classifier._find_column_in_object(obj, column_name)
-  if not obj then
+  if not obj or not obj.columns then
     return false
   end
 
   local name_lower = column_name:lower()
 
-  -- Check columns array (may need to be loaded)
-  if obj.columns then
-    for _, col in ipairs(obj.columns) do
-      local col_name = col.column_name or col.name
-      if col_name and col_name:lower() == name_lower then
-        return true
-      end
-    end
-  end
-
-  -- Check children for column_group containing columns
-  if obj.children then
-    for _, child in ipairs(obj.children) do
-      if child.object_type == "column_group" and child.children then
-        for _, col in ipairs(child.children) do
-          local col_name = col.column_name or col.name
-          if col_name and col_name:lower() == name_lower then
-            return true
-          end
-        end
-      elseif child.object_type == "column" then
-        local col_name = child.column_name or child.name
-        if col_name and col_name:lower() == name_lower then
-          return true
-        end
-      end
+  for _, col in ipairs(obj.columns) do
+    local col_name = col.column_name or col.name
+    if col_name and col_name:lower() == name_lower then
+      return true
     end
   end
 
@@ -571,33 +545,22 @@ end
 ---@return boolean found True if column exists anywhere
 function Classifier._find_column_in_cache(column_name)
   local Cache = require('ssns.cache')
-  local name_lower = column_name:lower()
 
   for _, server in ipairs(Cache.servers or {}) do
-    if server.children then
-      for _, server_child in ipairs(server.children) do
-        if server_child.object_type == "databases_group" and server_child.children then
-          for _, db in ipairs(server_child.children) do
-            if db.object_type == "database" and db.children then
-              for _, db_child in ipairs(db.children) do
-                -- Check tables
-                if db_child.object_type == "tables_group" and db_child.children then
-                  for _, tbl in ipairs(db_child.children) do
-                    if Classifier._find_column_in_object(tbl, column_name) then
-                      return true
-                    end
-                  end
-                -- Check views
-                elseif db_child.object_type == "views_group" and db_child.children then
-                  for _, view in ipairs(db_child.children) do
-                    if Classifier._find_column_in_object(view, column_name) then
-                      return true
-                    end
-                  end
-                end
-              end
-            end
-          end
+    local databases = server:get_databases()
+    for _, db in ipairs(databases) do
+      -- Check tables
+      local tables = db:get_tables()
+      for _, tbl in ipairs(tables) do
+        if Classifier._find_column_in_object(tbl, column_name) then
+          return true
+        end
+      end
+      -- Check views
+      local views = db:get_views()
+      for _, view in ipairs(views) do
+        if Classifier._find_column_in_object(view, column_name) then
+          return true
         end
       end
     end

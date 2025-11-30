@@ -10,6 +10,54 @@ UiTree.line_map = {}
 ---@type table<BaseDbObject, number>
 UiTree.object_map = {}
 
+---Create an ephemeral UI group for display (not stored in data model)
+---@param parent BaseDbObject Parent object
+---@param name string Base name for the group (e.g., "TABLES")
+---@param object_type string Group type (e.g., "tables_group")
+---@param items table[] Array of child objects
+---@return table group Ephemeral group object
+local function create_ui_group(parent, name, object_type, items)
+  local BaseDbObject = require('ssns.classes.base')
+
+  -- Create a minimal group object for UI display
+  local group = setmetatable({}, { __index = BaseDbObject })
+  group.name = name
+  group.object_type = object_type
+  group.parent = parent
+  group.children = items or {}
+  group.is_loaded = true
+  group._is_ephemeral = true  -- Mark as ephemeral for special handling
+
+  -- Initialize UI state
+  group.ui_state = {
+    expanded = parent["_ui_" .. object_type .. "_expanded"] or false,
+    visible = true,
+    icon = nil,
+    highlight = nil,
+    loading = false,
+    error = nil,
+  }
+
+  -- Add minimal methods needed for rendering
+  function group:has_children()
+    return #self.children > 0
+  end
+
+  function group:get_children()
+    return self.children
+  end
+
+  function group:toggle_expand()
+    self.ui_state.expanded = not self.ui_state.expanded
+    -- Store expansion state on parent for persistence
+    if self.parent then
+      self.parent["_ui_" .. self.object_type .. "_expanded"] = self.ui_state.expanded
+    end
+  end
+
+  return group
+end
+
 ---Get icon for object type
 ---@param object_type string
 ---@param icons table
@@ -144,16 +192,13 @@ function UiTree.render_server(server, lines, line_number, indent_level)
       -- Show loading indicator
       local loading_icon = icons.connecting or "⋯"
       table.insert(lines, indent .. "    " .. loading_icon .. " Loading...")
-    elseif server.is_loaded and server:has_children() then
-      -- Render server children (Databases group, New Query, Saved Queries)
-      for _, child in ipairs(server.children) do
-        if child.object_type == "databases_group" then
-          -- Render databases group
-          UiTree.render_object(child, lines, indent_level + 1)
-        else
-          -- Render other server-level items (New Query, Saved Queries - Phase 6)
-          UiTree.render_object(child, lines, indent_level + 1)
-        end
+    elseif server.is_loaded then
+      -- Get databases using typed array accessor
+      local databases = server:get_databases()
+      if #databases > 0 then
+        -- Create ephemeral databases group for UI
+        local databases_group = create_ui_group(server, "Databases", "databases_group", databases)
+        UiTree.render_object(databases_group, lines, indent_level + 1)
       end
     elseif server:is_connected() and not server.is_loaded then
       -- Show loading indicator (fallback if loading flag not set)
@@ -194,10 +239,51 @@ function UiTree.render_database(db, lines, indent_level)
       -- Show loading indicator
       local loading_icon = icons.connecting or "⋯"
       table.insert(lines, indent .. "    " .. loading_icon .. " Loading...")
-    elseif db.is_loaded and db:has_children() then
-      -- Render each object type group
-      for _, group in ipairs(db.children) do
-        UiTree.render_object(group, lines, indent_level + 1)
+    elseif db.is_loaded then
+      -- Check if this is a schema-based server (SQL Server, PostgreSQL)
+      local schemas = db:get_schemas()
+      if #schemas > 0 then
+        -- Schema-based server: render schemas, each schema has object groups
+        for _, schema in ipairs(schemas) do
+          UiTree.render_schema(schema, lines, indent_level + 1)
+        end
+      else
+        -- Non-schema server (MySQL): render object groups directly under database
+        local adapter = db:get_adapter()
+
+        -- TABLES group
+        local tables = db:get_tables()
+        if #tables > 0 then
+          local tables_group = create_ui_group(db, "TABLES", "tables_group", tables)
+          UiTree.render_object(tables_group, lines, indent_level + 1)
+        end
+
+        -- VIEWS group
+        if adapter.features and adapter.features.views then
+          local views = db:get_views()
+          if #views > 0 then
+            local views_group = create_ui_group(db, "VIEWS", "views_group", views)
+            UiTree.render_object(views_group, lines, indent_level + 1)
+          end
+        end
+
+        -- PROCEDURES group
+        if adapter.features and adapter.features.procedures then
+          local procedures = db:get_procedures()
+          if #procedures > 0 then
+            local procedures_group = create_ui_group(db, "PROCEDURES", "procedures_group", procedures)
+            UiTree.render_object(procedures_group, lines, indent_level + 1)
+          end
+        end
+
+        -- FUNCTIONS group
+        if adapter.features and adapter.features.functions then
+          local functions = db:get_functions()
+          if #functions > 0 then
+            local functions_group = create_ui_group(db, "FUNCTIONS", "functions_group", functions)
+            UiTree.render_object(functions_group, lines, indent_level + 1)
+          end
+        end
       end
     else
       local loading_icon = icons.connecting or "⋯"
@@ -226,11 +312,52 @@ function UiTree.render_schema(schema, lines, indent_level)
   UiTree.line_map[#lines] = schema
   UiTree.object_map[schema] = #lines
 
-  -- If expanded, render object groups
+  -- If expanded, render object groups from typed arrays
   if schema.ui_state.expanded then
-    if schema.is_loaded and schema:has_children() then
-      for _, group in ipairs(schema:get_children()) do
-        UiTree.render_object_group(group, lines, indent_level + 1)
+    if schema.is_loaded then
+      local adapter = schema:get_adapter()
+
+      -- TABLES group
+      local tables = schema:get_tables()
+      if #tables > 0 then
+        local tables_group = create_ui_group(schema, "TABLES", "tables_group", tables)
+        UiTree.render_object_group(tables_group, lines, indent_level + 1)
+      end
+
+      -- VIEWS group
+      if adapter.features and adapter.features.views then
+        local views = schema:get_views()
+        if #views > 0 then
+          local views_group = create_ui_group(schema, "VIEWS", "views_group", views)
+          UiTree.render_object_group(views_group, lines, indent_level + 1)
+        end
+      end
+
+      -- PROCEDURES group
+      if adapter.features and adapter.features.procedures then
+        local procedures = schema:get_procedures()
+        if #procedures > 0 then
+          local procedures_group = create_ui_group(schema, "PROCEDURES", "procedures_group", procedures)
+          UiTree.render_object_group(procedures_group, lines, indent_level + 1)
+        end
+      end
+
+      -- FUNCTIONS group
+      if adapter.features and adapter.features.functions then
+        local functions = schema:get_functions()
+        if #functions > 0 then
+          local functions_group = create_ui_group(schema, "FUNCTIONS", "functions_group", functions)
+          UiTree.render_object_group(functions_group, lines, indent_level + 1)
+        end
+      end
+
+      -- SYNONYMS group
+      if adapter.features and adapter.features.synonyms then
+        local synonyms = schema:get_synonyms()
+        if #synonyms > 0 then
+          local synonyms_group = create_ui_group(schema, "SYNONYMS", "synonyms_group", synonyms)
+          UiTree.render_object_group(synonyms_group, lines, indent_level + 1)
+        end
       end
     else
       local loading_icon = icons.connecting or "⋯"
@@ -1023,76 +1150,35 @@ function UiTree.navigate_to_object(target_object)
     return
   end
 
-  -- Verify object exists in cached data before expanding groups
+  -- Verify object exists in cached data using typed arrays
   local group_type = nil
   local object_exists = false
 
+  -- Helper to check if object exists in a collection
+  local function find_in_collection(collection)
+    for _, obj in ipairs(collection or {}) do
+      if obj == target_object then
+        return true
+      end
+    end
+    return false
+  end
+
   if target_object.object_type == "table" then
     group_type = "tables_group"
-    -- Check in TABLES group's children
-    for _, child in ipairs(database.children) do
-      if child.object_type == "tables_group" then
-        for _, table_obj in ipairs(child.children) do
-          if table_obj == target_object then
-            object_exists = true
-            break
-          end
-        end
-        break
-      end
-    end
+    object_exists = find_in_collection(database:get_tables())
   elseif target_object.object_type == "view" then
     group_type = "views_group"
-    for _, child in ipairs(database.children) do
-      if child.object_type == "views_group" then
-        for _, view_obj in ipairs(child.children) do
-          if view_obj == target_object then
-            object_exists = true
-            break
-          end
-        end
-        break
-      end
-    end
+    object_exists = find_in_collection(database:get_views())
   elseif target_object.object_type == "procedure" then
     group_type = "procedures_group"
-    for _, child in ipairs(database.children) do
-      if child.object_type == "procedures_group" then
-        for _, proc_obj in ipairs(child.children) do
-          if proc_obj == target_object then
-            object_exists = true
-            break
-          end
-        end
-        break
-      end
-    end
+    object_exists = find_in_collection(database:get_procedures())
   elseif target_object.object_type == "function" then
     group_type = "functions_group"
-    for _, child in ipairs(database.children) do
-      if child.object_type == "functions_group" then
-        for _, func_obj in ipairs(child.children) do
-          if func_obj == target_object then
-            object_exists = true
-            break
-          end
-        end
-        break
-      end
-    end
+    object_exists = find_in_collection(database:get_functions())
   elseif target_object.object_type == "synonym" then
     group_type = "synonyms_group"
-    for _, child in ipairs(database.children) do
-      if child.object_type == "synonyms_group" then
-        for _, syn_obj in ipairs(child.children) do
-          if syn_obj == target_object then
-            object_exists = true
-            break
-          end
-        end
-        break
-      end
-    end
+    object_exists = find_in_collection(database:get_synonyms())
   end
 
   -- Object doesn't exist in cached data - don't expand
@@ -1101,16 +1187,18 @@ function UiTree.navigate_to_object(target_object)
     return
   end
 
-  -- Object exists - expand the group
+  -- Object exists - store expansion state for the ephemeral group
+  -- (The ephemeral group will read this when created during render)
   if group_type then
-    for _, child in ipairs(database.children) do
-      if child.object_type == group_type then
-        child.ui_state.expanded = true
-        if not child.is_loaded and child.load then
-          child:load()
-        end
-        break
-      end
+    -- Get the schema if object has one (for schema-based servers)
+    local schema = target_object.parent
+    if schema and schema.object_type == "schema" then
+      -- Expand the schema and its group
+      schema.ui_state.expanded = true
+      schema["_ui_" .. group_type .. "_expanded"] = true
+    else
+      -- Non-schema server: expand database's group
+      database["_ui_" .. group_type .. "_expanded"] = true
     end
   end
 
