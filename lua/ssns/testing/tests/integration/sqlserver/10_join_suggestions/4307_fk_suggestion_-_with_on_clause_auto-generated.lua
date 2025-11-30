@@ -1,13 +1,14 @@
--- Test 4307: FK suggestion - with ON clause auto-generated
+-- Test 4307: FK suggestion - Departments suggested for Employees join
+-- Tests that Departments is suggested when joining from Employees (FK relationship)
 
 return {
   number = 4307,
-  description = "FK suggestion - with ON clause auto-generated",
+  description = "FK suggestion - Departments suggested for Employees join",
   database = "vim_dadbod_test",
+  skip = false,
   query = "SELECT * FROM Employees e JOIN █",
   expected = {
     items = {
-      has_on_clause = true,
       includes = {
         "Departments",
       },

@@ -4,7 +4,7 @@ return {
   number = 4391,
   description = "ON clause - table alias same as column name",
   database = "vim_dadbod_test",
-  query = "SELECT * FROM Employees EmployeeID JOIN Departments d ON EmployeeID█.",
+  query = "SELECT * FROM Employees EmployeeID JOIN Departments d ON EmployeeID.█",
   expected = {
     items = {
       includes = {

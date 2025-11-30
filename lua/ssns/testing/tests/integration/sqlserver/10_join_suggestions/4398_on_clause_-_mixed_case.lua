@@ -4,7 +4,7 @@ return {
   number = 4398,
   description = "ON clause - mixed case",
   database = "vim_dadbod_test",
-  query = "SELECT * FROM Employees E JOIN Departments D ON E.departmentid = █D.",
+  query = "SELECT * FROM Employees E JOIN Departments D ON E.departmentid = D.█",
   expected = {
     items = {
       includes = {

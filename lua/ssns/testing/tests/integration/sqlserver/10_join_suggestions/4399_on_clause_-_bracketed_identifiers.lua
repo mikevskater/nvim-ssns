@@ -4,7 +4,7 @@ return {
   number = 4399,
   description = "ON clause - bracketed identifiers",
   database = "vim_dadbod_test",
-  query = "SELECT * FROM Employees e JOIN [Departments] d ON e.DepartmentID = d█.",
+  query = "SELECT * FROM Employees e JOIN [Departments] d ON e.DepartmentID = d.█",
   expected = {
     items = {
       includes = {

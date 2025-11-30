@@ -8,7 +8,7 @@ return {
 FROM Employees e
 JOIN Departments d ON e.DepartmentID = d.DepartmentID
 JOIN Projects p ON p.ProjectID = e.EmployeeID
-JOIN Customers c ON c█.]],
+JOIN Customers c ON c.█]],
   expected = {
     items = {
       includes = {
