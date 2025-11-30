@@ -258,7 +258,7 @@ function Source.new(opts)
   -- Merge user options with defaults
   self.opts = vim.tbl_deep_extend('force', {
     cache_ttl = 30,              -- Cache completions for 30 seconds
-    max_items = 100,             -- Limit completion items
+    max_items = 0,               -- Limit completion items (0 = unlimited)
     show_system_objects = false, -- Hide sys.* objects
     debug = false,               -- Enable debug logging
   }, opts or {})

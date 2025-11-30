@@ -38,14 +38,46 @@ function UiFilterInput.show_input(group, current_filters, callback)
   -- Determine if this is a schema node (needs object type filters)
   local is_schema_node = group.object_type == "schema" or group.object_type == "schema_view"
 
+  -- Check if this group supports system schema filtering
+  local supports_sys_schema_filter = group.object_type == "tables_group"
+    or group.object_type == "views_group"
+    or group.object_type == "procedures_group"
+    or group.object_type == "functions_group"
+    or group.object_type == "synonyms_group"
+    or group.object_type == "schemas_group"
+    or group.object_type == "schema"
+    or group.object_type == "schema_view"
+
+  -- Get default for hide_system_schemas from config
+  local Config = require('ssns.config')
+  local filter_config = Config.get_filters()
+  local default_hide_system = filter_config and filter_config.hide_system_schemas or false
+
   -- Build field list
   local fields = {
     { name = "name_include", label = "Include Name (regex)", type = "text", value = current_filters.name_include or "" },
     { name = "name_exclude", label = "Exclude Name (regex)", type = "text", value = current_filters.name_exclude or "" },
     { name = "schema_include", label = "Include Schema (regex)", type = "text", value = current_filters.schema_include or "" },
     { name = "schema_exclude", label = "Exclude Schema (regex)", type = "text", value = current_filters.schema_exclude or "" },
-    { name = "case_sensitive", label = "Case Sensitive", type = "checkbox", value = current_filters.case_sensitive or false },
   }
+
+  -- Add "Hide System Schemas" checkbox for supported groups (before Case Sensitive)
+  if supports_sys_schema_filter then
+    table.insert(fields, {
+      name = "hide_system_schemas",
+      label = "Hide System Schemas",
+      type = "checkbox",
+      value = current_filters.hide_system_schemas ~= nil and current_filters.hide_system_schemas or default_hide_system,
+    })
+  end
+
+  -- Add Case Sensitive checkbox
+  table.insert(fields, {
+    name = "case_sensitive",
+    label = "Case Sensitive",
+    type = "checkbox",
+    value = current_filters.case_sensitive or false,
+  })
 
   -- Add object type checkboxes for schema nodes
   local object_types_map = nil
@@ -361,14 +393,21 @@ function UiFilterInput._toggle_checkbox()
   UiFilterInput._apply_live_preview()  -- Apply filters immediately
 end
 
----Clear all filter values
+---Clear all filter values (restore defaults)
 function UiFilterInput._clear_all()
+  -- Get default for hide_system_schemas from config
+  local Config = require('ssns.config')
+  local filter_config = Config.get_filters()
+  local default_hide_system = filter_config and filter_config.hide_system_schemas or false
+
   for _, field in ipairs(state.fields) do
     if field.type == "text" then
       field.value = ""
     elseif field.type == "checkbox" then
       if field.name == "case_sensitive" then
         field.value = false
+      elseif field.name == "hide_system_schemas" then
+        field.value = default_hide_system  -- Restore to config default
       else
         field.value = true  -- Object types default to true
       end
@@ -402,6 +441,8 @@ function UiFilterInput._build_filter_state()
       filter_state[field.name] = field.value
     elseif field.type == "checkbox" and field.name == "case_sensitive" then
       filter_state.case_sensitive = field.value
+    elseif field.type == "checkbox" and field.name == "hide_system_schemas" then
+      filter_state.hide_system_schemas = field.value
     elseif field.type == "checkbox" and field.object_type_key then
       table.insert(object_type_fields, field)
     end

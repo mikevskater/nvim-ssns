@@ -122,8 +122,7 @@ SET NOCOUNT ON;
 
 SELECT name
 FROM sys.databases
-WHERE database_id > 4  -- Exclude system databases (master, tempdb, model, msdb)
-  AND state_desc = 'ONLINE'
+WHERE state_desc = 'ONLINE'
   AND HAS_DBACCESS(name) = 1  -- User has access
 ORDER BY name;
 ]]
@@ -139,8 +138,7 @@ SET NOCOUNT ON;
 
 SELECT s.name
 FROM sys.schemas s
-WHERE s.schema_id < 16384  -- Exclude system schemas
-  AND s.name NOT IN ('guest', 'INFORMATION_SCHEMA', 'sys')
+WHERE s.principal_id IS NOT NULL
 ORDER BY s.name;
 ]], database_name)
 end
@@ -165,7 +163,7 @@ SELECT
   t.type_desc AS table_type
 FROM sys.tables t
 INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
-WHERE t.is_ms_shipped = 0  -- Exclude system tables
+WHERE 1=1
 %sORDER BY s.name, t.name;
 ]], database_name, where_clause)
 end
@@ -180,6 +178,8 @@ function SqlServerAdapter:get_views_query(database_name, schema_name)
     where_clause = string.format("  AND s.name = '%s'\n", schema_name)
   end
 
+  -- Always use sys.all_views to include system catalog views (sys.objects, sys.columns, etc.)
+  -- This allows completion to work with sys.█ queries
   return string.format([[
 USE [%s];
 SET NOCOUNT ON;
@@ -187,9 +187,9 @@ SET NOCOUNT ON;
 SELECT
   s.name AS schema_name,
   v.name AS view_name
-FROM sys.views v
+FROM sys.all_views v
 INNER JOIN sys.schemas s ON v.schema_id = s.schema_id
-WHERE v.is_ms_shipped = 0  -- Exclude system views
+WHERE 1=1
 %sORDER BY s.name, v.name;
 ]], database_name, where_clause)
 end
@@ -213,7 +213,7 @@ SELECT
   p.name AS procedure_name
 FROM sys.procedures p
 INNER JOIN sys.schemas s ON p.schema_id = s.schema_id
-WHERE p.is_ms_shipped = 0  -- Exclude system procedures
+WHERE 1=1
 %sORDER BY s.name, p.name;
 ]], database_name, where_clause)
 end
@@ -239,7 +239,6 @@ SELECT
 FROM sys.objects o
 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
 WHERE o.type IN ('FN', 'IF', 'TF')  -- Scalar, Inline Table-Valued, Table-Valued
-  AND o.is_ms_shipped = 0  -- Exclude system functions
 %sORDER BY s.name, o.name;
 ]], database_name, where_clause)
 end
@@ -264,7 +263,7 @@ SELECT
   syn.base_object_name
 FROM sys.synonyms syn
 INNER JOIN sys.schemas s ON syn.schema_id = s.schema_id
-WHERE syn.is_ms_shipped = 0
+WHERE 1=1
 %sORDER BY s.name, syn.name;
 ]], database_name, where_clause)
 end
@@ -291,7 +290,7 @@ SELECT
   seq.current_value
 FROM sys.sequences seq
 INNER JOIN sys.schemas s ON seq.schema_id = s.schema_id
-WHERE seq.is_ms_shipped = 0
+WHERE 1=1
 %sORDER BY s.name, seq.name;
 ]], database_name, where_clause)
 end
@@ -328,6 +327,37 @@ WHERE o.name = '%s'
   %s
 ORDER BY c.column_id;
 ]], database_name, table_name, schema_filter)
+end
+
+---Get query to list columns of a table-valued function (TVF)
+---@param database_name string
+---@param schema_name string?
+---@param function_name string
+---@return string query
+function SqlServerAdapter:get_tvf_columns_query(database_name, schema_name, function_name)
+  local schema_filter = schema_name and string.format("AND s.name = '%s'", schema_name) or ""
+
+  return string.format([[
+USE [%s];
+SET NOCOUNT ON;
+
+SELECT
+  c.name AS column_name,
+  t.name AS data_type,
+  c.max_length,
+  c.precision,
+  c.scale,
+  c.is_nullable,
+  c.column_id AS ordinal_position
+FROM sys.columns c
+INNER JOIN sys.types t ON c.user_type_id = t.user_type_id
+INNER JOIN sys.objects o ON c.object_id = o.object_id
+INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+WHERE o.name = '%s'
+  AND o.type IN ('IF', 'TF')  -- IF = Inline Table-Valued, TF = Multi-Statement Table-Valued
+  %s
+ORDER BY c.column_id;
+]], database_name, function_name, schema_filter)
 end
 
 ---Get query to list all indexes on a table
@@ -458,7 +488,6 @@ SELECT
 FROM sys.objects o WITH (NOWAIT)
 JOIN sys.schemas s WITH (NOWAIT) ON o.[schema_id] = s.[schema_id]
 WHERE o.[type] NOT IN ('S', 'IT', 'PK', 'U')
-    AND o.is_ms_shipped = 0
     %s
     %s;
 ]], database_name, schema_filter, name_filter)
@@ -487,8 +516,7 @@ SELECT
 FROM sys.objects o WITH (NOWAIT)
 JOIN sys.schemas s WITH (NOWAIT) ON o.[schema_id] = s.[schema_id]
 WHERE s.name + '.' + o.name = @table_name
-    AND o.[type] = 'U'
-    AND o.is_ms_shipped = 0;
+    AND o.[type] = 'U';
 
 DECLARE @SQL NVARCHAR(MAX) = N'';
 

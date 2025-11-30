@@ -22,6 +22,11 @@
 ---@field show_result_set_info boolean Show divider/info before first result set and single result sets (default: false)
 ---@field show_help boolean Show help text at top of tree buffer (default: true)
 ---@field icons IconsConfig Icon configuration
+---@field filters FiltersConfig Default filter configuration
+
+---@class FiltersConfig
+---@field hide_system_schemas boolean Hide system schemas by default (sys, INFORMATION_SCHEMA, etc.)
+---@field system_schemas string[] List of schema names to consider as "system" schemas
 
 ---@class IconsConfig
 ---@field server string Server icon
@@ -142,6 +147,25 @@ local default_config = {
     --   "%fit%-\n---- Batch %batch_number% (%row_count% rows in %run_time%, total: %total_time%) ----\n%fit%-"
     result_set_divider = "",
     show_result_set_info = false,  -- Show divider/info before first result set and single result sets
+
+    -- Default filter settings for tree groups
+    filters = {
+      hide_system_schemas = true,  -- Hide system schemas by default (sys, INFORMATION_SCHEMA, etc.)
+      system_schemas = {           -- Schemas considered as "system" (case-insensitive matching)
+        "sys",
+        "INFORMATION_SCHEMA",
+        "guest",
+        "db_owner",
+        "db_accessadmin",
+        "db_securityadmin",
+        "db_ddladmin",
+        "db_backupoperator",
+        "db_datareader",
+        "db_datawriter",
+        "db_denydatareader",
+        "db_denydatawriter",
+      },
+    },
 
     icons = {
       -- Nerd Font icons (safe Unicode encoding)
@@ -318,7 +342,7 @@ local default_config = {
     enabled = true,              -- Enable/disable completion globally
     timeout_ms = 200,            -- Completion timeout in milliseconds
     cache_ttl = 300,             -- Cache TTL in seconds (5 minutes)
-    max_items = 100,             -- Maximum completion items to return (0 = unlimited)
+    max_items = 0,               -- Maximum completion items to return (0 = unlimited)
     show_documentation = true,   -- Show documentation in completion popup
     eager_load = true,           -- Eagerly load tables/views/procedures on connection
     min_keyword_length = 2,      -- Minimum keyword length for completion
@@ -426,6 +450,12 @@ end
 ---@return CompletionConfig
 function Config.get_completion()
   return Config.current.completion
+end
+
+---Get filter configuration
+---@return FiltersConfig
+function Config.get_filters()
+  return Config.current.ui.filters
 end
 
 ---Validate configuration
