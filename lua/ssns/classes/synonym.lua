@@ -170,21 +170,9 @@ function SynonymClass:resolve()
         server:load()
       end
 
-      -- Find the databases group
-      local databases_group
-      for _, child in ipairs(server.children) do
-        if child.object_type == "databases_group" then
-          databases_group = child
-          break
-        end
-      end
-
-      if not databases_group then
-        return nil, "Could not find databases group on server"
-      end
-
-      -- Find target database in the databases group
-      for _, db in ipairs(databases_group.children) do
+      -- Find target database using accessor
+      local databases = server:get_databases()
+      for _, db in ipairs(databases) do
         if db.db_name == parts.database then
           database = db
           break
@@ -214,28 +202,12 @@ function SynonymClass:resolve()
       end
     end
 
-    -- In flat structure, we need to search all loaded object groups
-    -- Get the tables/views/procedures/functions from the database's children groups
-    local tables = {}
-    local views = {}
-    local procedures = {}
-    local functions = {}
-    local synonyms = {}
-
-    -- Extract objects from database's group children
-    for _, child in ipairs(database.children) do
-      if child.object_type == "tables_group" then
-        tables = child.children
-      elseif child.object_type == "views_group" then
-        views = child.children
-      elseif child.object_type == "procedures_group" then
-        procedures = child.children
-      elseif child.object_type == "functions_group" then
-        functions = child.children
-      elseif child.object_type == "synonyms_group" then
-        synonyms = child.children
-      end
-    end
+    -- Get objects using database accessor methods
+    local tables = database:get_tables()
+    local views = database:get_views()
+    local procedures = database:get_procedures()
+    local functions = database:get_functions()
+    local synonyms = database:get_synonyms()
 
     -- Try to find base object matching both schema and name
     -- Check tables first
