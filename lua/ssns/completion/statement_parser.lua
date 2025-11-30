@@ -69,6 +69,7 @@
 ---@field columns ColumnInfo[] Columns in the temp table
 ---@field created_in_batch number GO batch index where it was created
 ---@field is_global boolean Whether it's a global temp table (##)
+---@field dropped_at_line number? Line number where dropped (nil if not dropped)
 
 local StatementParser = {}
 
@@ -793,7 +794,7 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries, from
       paren_depth = paren_depth + 1
       self:advance()
 
-      -- Check for subquery
+      -- Check for subquery or VALUES table constructor
       if self:is_keyword("SELECT") then
         -- Parse the subquery
         local subquery = self:parse_subquery(known_ctes)
@@ -810,6 +811,81 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries, from
           end
         end
         -- Continue parsing FROM clause (may have more tables/subqueries)
+      elseif self:is_keyword("VALUES") then
+        -- Parse VALUES table constructor: (VALUES (row1), (row2), ...) AS alias(col1, col2)
+        self:advance() -- consume VALUES
+
+        -- Skip value rows - count parens to find end
+        local values_depth = 0
+        while self:current() do
+          local vtok = self:current()
+          if vtok.type == "paren_open" then
+            values_depth = values_depth + 1
+          elseif vtok.type == "paren_close" then
+            if values_depth == 0 then
+              break -- Found the closing ) for (VALUES ...)
+            end
+            values_depth = values_depth - 1
+          end
+          self:advance()
+        end
+
+        -- Consume closing paren
+        if self:is_type("paren_close") then
+          paren_depth = paren_depth - 1
+          self:advance()
+        end
+
+        -- Parse alias with column list: AS v(ID, Letter)
+        local values_alias = self:parse_alias()
+        if values_alias then
+          -- Check for column list
+          local column_list = {}
+          if self:is_type("paren_open") then
+            self:advance() -- consume (
+            while self:current() do
+              local col_tok = self:current()
+              if col_tok.type == "paren_close" then
+                self:advance()
+                break
+              elseif col_tok.type == "comma" then
+                self:advance()
+              elseif col_tok.type == "identifier" or col_tok.type == "bracket_id" or col_tok.type == "keyword" then
+                table.insert(column_list, strip_brackets(col_tok.text))
+                self:advance()
+              else
+                self:advance()
+              end
+            end
+          end
+
+          -- Create a virtual subquery for the VALUES table
+          local values_subquery = {
+            alias = values_alias,
+            columns = {},
+            tables = {},
+            subqueries = {},
+            parameters = {},
+            is_values = true,
+            start_pos = { line = token.line, col = token.col },
+            end_pos = { line = token.line, col = token.col },
+            clause_positions = {},
+          }
+
+          -- Add columns from column list
+          for _, col_name in ipairs(column_list) do
+            table.insert(values_subquery.columns, {
+              name = col_name,
+              source_table = values_alias,
+              is_star = false,
+            })
+          end
+
+          -- Add to subqueries collection
+          if subqueries then
+            table.insert(subqueries, values_subquery)
+          end
+        end
       end
     elseif token.type == "paren_close" then
       paren_depth = paren_depth - 1
@@ -840,6 +916,11 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries, from
         -- Track new JOIN start (use the first modifier token as start)
         if upper_text ~= "JOIN" and JOIN_MODIFIERS[upper_text] then
           current_join_start = token  -- INNER, LEFT, etc.
+        elseif upper_text == "JOIN" then
+          -- Plain JOIN keyword (not preceded by modifier)
+          -- Must track it here before advancing past it
+          current_join_start = token
+          join_count = join_count + 1
         end
       end
 
@@ -871,6 +952,15 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries, from
             -- Parse as subquery
             local subquery = self:parse_subquery(known_ctes)
             if subquery then
+              -- parse_subquery stops AT the closing ) - consume it
+              if self:is_type("paren_close") then
+                self:advance()
+              end
+              -- Parse the alias BEFORE adding to subqueries, so we can assign it
+              local apply_alias = self:parse_alias()
+              if apply_alias then
+                subquery.alias = apply_alias
+              end
               table.insert(subqueries, subquery)
             end
           else
@@ -884,11 +974,13 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries, from
               end
               self:advance()
             end
+            -- Skip optional alias for VALUES/function
+            self:parse_alias()
           end
         else
           -- Table-valued function without subquery: CROSS APPLY dbo.GetOrders(e.Id) AS o
-          -- Skip the function name
-          self:parse_qualified_identifier()
+          -- Parse the function name and track it as a TVF
+          local tvf_qualified = self:parse_qualified_identifier()
           -- Skip function arguments if present
           if self:is_type("paren_open") then
             local paren_depth_apply = 1
@@ -902,10 +994,22 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries, from
               self:advance()
             end
           end
+          -- Parse alias for table-valued function
+          local tvf_alias = self:parse_alias()
+          -- Track TVF as a table reference (columns will be looked up from metadata)
+          if tvf_qualified then
+            local tvf_ref = {
+              name = tvf_qualified.name,
+              schema = tvf_qualified.schema or "dbo",
+              database = tvf_qualified.database,
+              alias = tvf_alias or tvf_qualified.name,
+              is_tvf = true,
+              function_name = tvf_qualified.name,
+            }
+            table.insert(tables, tvf_ref)
+          end
         end
-        -- Skip optional alias
-        self:parse_alias()
-        -- Don't add to tables - APPLY is handled, continue to next token
+        -- TVF is handled, continue to next token
         goto continue_from_loop
       end
 
@@ -981,6 +1085,38 @@ function ParserState:parse_from_clause(known_ctes, paren_depth, subqueries, from
       -- FROM clause terminators (WHERE, GROUP BY, ORDER BY, etc.)
       -- Stop parsing FROM clause, let caller handle the rest of the statement
       break
+    elseif paren_depth == 0 and self:is_keyword("ON") then
+      -- ON keyword after table reference (standard SQL: JOIN Table ON condition)
+      -- End any current JOIN position
+      if current_join_start then
+        local prev_token = self.tokens[self.pos - 1]
+        if prev_token then
+          table.insert(join_positions, {
+            start_line = current_join_start.line,
+            start_col = current_join_start.col,
+            end_line = prev_token.line,
+            end_col = prev_token.col + #prev_token.text - 1,
+          })
+        end
+        current_join_start = nil
+      end
+
+      -- If there was a previous ON clause, end it here
+      if current_on_start then
+        local prev_token = self.tokens[self.pos - 1]
+        if prev_token then
+          table.insert(on_positions, {
+            start_line = current_on_start.line,
+            start_col = current_on_start.col,
+            end_line = prev_token.line,
+            end_col = prev_token.col + #prev_token.text - 1,
+          })
+        end
+      end
+
+      -- Start tracking new ON clause
+      current_on_start = self:current()
+      self:advance()  -- Move past ON
     else
       self:advance()
     end
@@ -1261,8 +1397,15 @@ function ParserState:parse_with_clause()
 
   while self:current() do
     -- Parse CTE name
+    -- CTE names can be identifiers, bracket_ids, or keywords (since keywords can be valid CTE names)
     local cte_name_token = self:current()
-    if not cte_name_token or (cte_name_token.type ~= "identifier" and cte_name_token.type ~= "bracket_id") then
+    if not cte_name_token or (cte_name_token.type ~= "identifier" and cte_name_token.type ~= "bracket_id" and cte_name_token.type ~= "keyword") then
+      break
+    end
+    -- Skip actual SQL keywords that wouldn't be valid CTE names
+    local upper_text = cte_name_token.text:upper()
+    if upper_text == "SELECT" or upper_text == "INSERT" or upper_text == "UPDATE" or
+       upper_text == "DELETE" or upper_text == "FROM" or upper_text == "WHERE" then
       break
     end
 
@@ -1528,6 +1671,7 @@ function ParserState:parse_statement(known_ctes, temp_tables)
     if self:is_type("paren_open") then
       local col_start = self:current()
       local insert_columns = {}
+      local last_token = col_start
       self:advance()  -- consume (
 
       while self:current() and not self:is_type("paren_close") do
@@ -1540,6 +1684,7 @@ function ParserState:parse_statement(known_ctes, temp_tables)
           end
           table.insert(insert_columns, col_name)
         end
+        last_token = tok
         self:advance()
       end
 
@@ -1558,6 +1703,17 @@ function ParserState:parse_statement(known_ctes, temp_tables)
         chunk.insert_columns = insert_columns
 
         self:advance()  -- consume )
+      else
+        -- Incomplete column list (no closing paren yet)
+        -- Still track position for context detection during typing
+        -- Use a very high end position to include cursor after last token
+        chunk.clause_positions["insert_columns"] = {
+          start_line = col_start.line,
+          start_col = col_start.col,
+          end_line = last_token.line,
+          end_col = last_token.col + #last_token.text + 1000,  -- Include cursor position
+        }
+        chunk.insert_columns = insert_columns
       end
     end
 
@@ -1659,6 +1815,28 @@ function ParserState:parse_statement(known_ctes, temp_tables)
     chunk.statement_type = "UPDATE"
     self:advance()
 
+    -- Handle UPDATE TOP (n) clause
+    if self:is_keyword("TOP") then
+      self:advance()  -- consume TOP
+      -- Skip the (n) or (n) PERCENT
+      if self:is_type("paren_open") then
+        local top_depth = 1
+        self:advance()
+        while self:current() and top_depth > 0 do
+          if self:is_type("paren_open") then
+            top_depth = top_depth + 1
+          elseif self:is_type("paren_close") then
+            top_depth = top_depth - 1
+          end
+          self:advance()
+        end
+      end
+      -- Skip optional PERCENT keyword
+      if self:is_keyword("PERCENT") then
+        self:advance()
+      end
+    end
+
     -- Extract UPDATE target (could be table in simple UPDATE, or alias in extended UPDATE with FROM)
     -- We'll hold onto it temporarily and only add it if there's no FROM clause
     local update_target = self:parse_table_reference(known_ctes)
@@ -1667,13 +1845,45 @@ function ParserState:parse_statement(known_ctes, temp_tables)
     chunk.statement_type = "DELETE"
     self:advance()
 
-    -- Extract DELETE FROM table
+    -- Handle DELETE TOP (n) clause
+    if self:is_keyword("TOP") then
+      self:advance()  -- consume TOP
+      -- Skip the (n) or (n) PERCENT
+      if self:is_type("paren_open") then
+        local top_depth = 1
+        self:advance()
+        while self:current() and top_depth > 0 do
+          if self:is_type("paren_open") then
+            top_depth = top_depth + 1
+          elseif self:is_type("paren_close") then
+            top_depth = top_depth - 1
+          end
+          self:advance()
+        end
+      end
+      -- Skip optional PERCENT keyword
+      if self:is_keyword("PERCENT") then
+        self:advance()
+      end
+    end
+
+    -- Handle DELETE syntax variants:
+    -- 1. DELETE FROM table WHERE ... (simple)
+    -- 2. DELETE alias FROM table alias WHERE ... (extended with alias)
+    -- 3. DELETE table FROM table alias WHERE ... (table name as target)
     if self:is_keyword("FROM") then
+      -- Simple DELETE FROM table
       self:advance()
       local table_ref = self:parse_table_reference(known_ctes)
       if table_ref then
         table.insert(chunk.tables, table_ref)
       end
+    elseif self:current() and self:current().type == "identifier" then
+      -- Extended DELETE: DELETE alias/table FROM table alias
+      -- Parse the delete target (could be alias or table name)
+      local delete_target = self:parse_table_reference(known_ctes)
+      chunk.delete_target = delete_target
+      -- The FROM clause will be parsed later in the main loop (like UPDATE)
     end
   elseif self:is_keyword("MERGE") then
     chunk.statement_type = "MERGE"
@@ -1771,13 +1981,442 @@ function ParserState:parse_statement(known_ctes, temp_tables)
   elseif self:is_keyword("DECLARE") then
     chunk.statement_type = "DECLARE"
     self:advance()
+
+    -- Check for table variable declaration: DECLARE @var TABLE (col1 type, ...)
+    -- Note: Tokenizer splits @var into two tokens: @ (type=at) and var (type=identifier)
+    local token = self:current()
+    local var_name = nil
+    if token and token.type == "at" then
+      self:advance()  -- consume @
+      local name_token = self:current()
+      if name_token and name_token.type == "identifier" then
+        var_name = "@" .. name_token.text
+        self:advance()  -- consume variable name
+      end
+    end
+
+    -- Check for TABLE keyword (only if we found a valid variable name)
+    if var_name and self:is_keyword("TABLE") then
+        self:advance()  -- consume TABLE
+
+        -- Check for column definitions: DECLARE @var TABLE (col1 type, col2 type, ...)
+        if self:is_type("paren_open") then
+          self:advance()  -- consume (
+          local var_columns = {}
+
+          while self:current() and not self:is_type("paren_close") do
+            local col_token = self:current()
+
+            -- Skip keywords like PRIMARY, KEY, CONSTRAINT, etc. that define constraints
+            if col_token.type == "keyword" then
+              local kw = col_token.text:upper()
+              if kw == "PRIMARY" or kw == "FOREIGN" or kw == "UNIQUE" or
+                 kw == "CHECK" or kw == "CONSTRAINT" or kw == "INDEX" or
+                 kw == "CLUSTERED" or kw == "NONCLUSTERED" then
+                -- Skip constraint definition until comma or closing paren
+                while self:current() and not self:is_type("comma") and not self:is_type("paren_close") do
+                  if self:is_type("paren_open") then
+                    local pd = 1
+                    self:advance()
+                    while self:current() and pd > 0 do
+                      if self:is_type("paren_open") then pd = pd + 1
+                      elseif self:is_type("paren_close") then pd = pd - 1
+                      end
+                      self:advance()
+                    end
+                  else
+                    self:advance()
+                  end
+                end
+                if self:is_type("comma") then
+                  self:advance()
+                end
+                goto continue_var_col
+              end
+            end
+
+            -- Parse column name
+            if col_token.type == "identifier" or col_token.type == "bracket_id" then
+              local col_name = strip_brackets(col_token.text)
+              self:advance()
+
+              -- Parse data type
+              local data_type = nil
+              local type_token = self:current()
+              if type_token and (type_token.type == "keyword" or type_token.type == "identifier") then
+                data_type = type_token.text:upper()
+                self:advance()
+
+                -- Handle parameterized types like VARCHAR(50), DECIMAL(10,2)
+                if self:is_type("paren_open") then
+                  self:advance()  -- consume (
+                  local type_pd = 1
+                  while self:current() and type_pd > 0 do
+                    if self:is_type("paren_open") then type_pd = type_pd + 1
+                    elseif self:is_type("paren_close") then type_pd = type_pd - 1
+                    end
+                    self:advance()
+                  end
+                end
+              end
+
+              -- Add column to list
+              table.insert(var_columns, {
+                name = col_name,
+                data_type = data_type,
+                is_star = false,
+              })
+
+              -- Skip remaining column modifiers (NULL, NOT NULL, DEFAULT, IDENTITY, etc.)
+              while self:current() and not self:is_type("comma") and not self:is_type("paren_close") do
+                if self:is_type("paren_open") then
+                  local mod_pd = 1
+                  self:advance()
+                  while self:current() and mod_pd > 0 do
+                    if self:is_type("paren_open") then mod_pd = mod_pd + 1
+                    elseif self:is_type("paren_close") then mod_pd = mod_pd - 1
+                    end
+                    self:advance()
+                  end
+                else
+                  self:advance()
+                end
+              end
+
+              -- Skip comma if present
+              if self:is_type("comma") then
+                self:advance()
+              end
+            else
+              -- Unknown token, skip it
+              self:advance()
+            end
+
+            ::continue_var_col::
+          end
+
+          -- Consume closing paren
+          if self:is_type("paren_close") then
+            self:advance()
+          end
+
+          -- Store table variable info
+          if #var_columns > 0 then
+            temp_tables[var_name] = {
+              name = var_name,
+              columns = var_columns,
+              created_in_batch = self.go_batch_index,
+              is_table_variable = true,
+            }
+          end
+        end
+    end
+
     self:consume_until_statement_end()
   elseif self:is_keyword("SET") then
     chunk.statement_type = "SET"
     self:advance()
     self:consume_until_statement_end()
+  elseif self:is_keyword("CREATE") then
+    chunk.statement_type = "CREATE"
+    self:advance()
+
+    -- Check for CREATE TABLE
+    if self:is_keyword("TABLE") then
+      self:advance()  -- consume TABLE
+
+      -- Parse table name (could be temp table #name or ##name)
+      local qualified = self:parse_qualified_identifier()
+      if qualified and is_temp_table(qualified.name) then
+        chunk.temp_table_name = qualified.name
+        chunk.is_global_temp = is_global_temp_table(qualified.name)
+
+        -- Check for column definitions: CREATE TABLE #temp (col1 type, col2 type, ...)
+        if self:is_type("paren_open") then
+          self:advance()  -- consume (
+          local temp_columns = {}
+
+          while self:current() and not self:is_type("paren_close") do
+            local token = self:current()
+
+            -- Skip keywords like PRIMARY, KEY, CONSTRAINT, etc. that define constraints
+            if token.type == "keyword" then
+              local kw = token.text:upper()
+              if kw == "PRIMARY" or kw == "FOREIGN" or kw == "UNIQUE" or
+                 kw == "CHECK" or kw == "CONSTRAINT" or kw == "INDEX" or
+                 kw == "CLUSTERED" or kw == "NONCLUSTERED" then
+                -- Skip constraint definition until comma or closing paren
+                while self:current() and not self:is_type("comma") and not self:is_type("paren_close") do
+                  if self:is_type("paren_open") then
+                    -- Skip parenthesized content (column list, etc.)
+                    local pd = 1
+                    self:advance()
+                    while self:current() and pd > 0 do
+                      if self:is_type("paren_open") then pd = pd + 1
+                      elseif self:is_type("paren_close") then pd = pd - 1
+                      end
+                      self:advance()
+                    end
+                  else
+                    self:advance()
+                  end
+                end
+                -- Skip comma if present
+                if self:is_type("comma") then
+                  self:advance()
+                end
+                goto continue_create_col
+              end
+            end
+
+            -- Parse column name
+            if token.type == "identifier" or token.type == "bracket_id" then
+              local col_name = strip_brackets(token.text)
+              self:advance()
+
+              -- Parse data type (next token should be type keyword or identifier)
+              local data_type = nil
+              local type_token = self:current()
+              if type_token and (type_token.type == "keyword" or type_token.type == "identifier") then
+                data_type = type_token.text:upper()
+                self:advance()
+
+                -- Handle parameterized types like VARCHAR(50), DECIMAL(10,2)
+                if self:is_type("paren_open") then
+                  self:advance()  -- consume (
+                  -- Skip until closing paren
+                  local type_pd = 1
+                  while self:current() and type_pd > 0 do
+                    if self:is_type("paren_open") then type_pd = type_pd + 1
+                    elseif self:is_type("paren_close") then type_pd = type_pd - 1
+                    end
+                    self:advance()
+                  end
+                end
+              end
+
+              -- Add column to list
+              table.insert(temp_columns, {
+                name = col_name,
+                data_type = data_type,
+                is_star = false,
+              })
+
+              -- Skip remaining column modifiers (NULL, NOT NULL, DEFAULT, IDENTITY, etc.)
+              while self:current() and not self:is_type("comma") and not self:is_type("paren_close") do
+                if self:is_type("paren_open") then
+                  -- Skip parenthesized content (DEFAULT value, etc.)
+                  local mod_pd = 1
+                  self:advance()
+                  while self:current() and mod_pd > 0 do
+                    if self:is_type("paren_open") then mod_pd = mod_pd + 1
+                    elseif self:is_type("paren_close") then mod_pd = mod_pd - 1
+                    end
+                    self:advance()
+                  end
+                else
+                  self:advance()
+                end
+              end
+
+              -- Skip comma if present
+              if self:is_type("comma") then
+                self:advance()
+              end
+            else
+              -- Unknown token, skip it
+              self:advance()
+            end
+
+            ::continue_create_col::
+          end
+
+          -- Consume closing paren
+          if self:is_type("paren_close") then
+            self:advance()
+          end
+
+          -- Store temp table info with parsed columns
+          if #temp_columns > 0 then
+            temp_tables[qualified.name] = {
+              name = qualified.name,
+              columns = temp_columns,
+              created_in_batch = self.go_batch_index,
+              is_global = is_global_temp_table(qualified.name),
+            }
+          end
+        end
+      end
+    end
+
+    -- Consume rest of CREATE statement
+    self:consume_until_statement_end()
+  elseif self:is_keyword("DROP") then
+    -- DROP statement - track DROP TABLE for temp tables
+    chunk.statement_type = "DROP"
+    self:advance() -- consume DROP
+
+    if self:is_keyword("TABLE") then
+      self:advance() -- consume TABLE
+
+      -- Check for IF EXISTS
+      if self:is_keyword("IF") then
+        self:advance()
+        if self:is_keyword("EXISTS") then
+          self:advance()
+        end
+      end
+
+      -- Parse the table name
+      local drop_line = self:current() and self:current().line or start_token.line
+      local qualified = self:parse_qualified_identifier()
+      if qualified and is_temp_table(qualified.name) then
+        -- Mark this temp table as dropped
+        if temp_tables[qualified.name] then
+          temp_tables[qualified.name].dropped_at_line = drop_line
+        end
+      end
+    end
+
+    self:consume_until_statement_end()
+  elseif self:is_keyword("ALTER") then
+    -- ALTER statement - track ALTER TABLE ADD for temp tables
+    chunk.statement_type = "ALTER"
+    self:advance() -- consume ALTER
+
+    if self:is_keyword("TABLE") then
+      self:advance() -- consume TABLE
+
+      -- Parse the table name
+      local qualified = self:parse_qualified_identifier()
+      if qualified and is_temp_table(qualified.name) then
+        -- Check if temp table exists
+        if temp_tables[qualified.name] then
+          -- Check for ADD keyword
+          if self:is_keyword("ADD") then
+            self:advance() -- consume ADD
+
+            -- Parse new column definition(s)
+            while self:current() do
+              local token = self:current()
+
+              -- Stop at statement terminators
+              if token.type == "semicolon" or token.type == "go" or
+                 (token.type == "keyword" and
+                  (token.text:upper() == "GO" or token.text:upper() == "SELECT" or
+                   token.text:upper() == "INSERT" or token.text:upper() == "UPDATE" or
+                   token.text:upper() == "DELETE" or token.text:upper() == "CREATE" or
+                   token.text:upper() == "DROP" or token.text:upper() == "ALTER")) then
+                break
+              end
+
+              -- Skip CONSTRAINT keyword and constraint definitions
+              if token.type == "keyword" then
+                local kw = token.text:upper()
+                if kw == "CONSTRAINT" or kw == "PRIMARY" or kw == "FOREIGN" or
+                   kw == "UNIQUE" or kw == "CHECK" or kw == "DEFAULT" or kw == "INDEX" then
+                  -- Skip until next comma or end of statement
+                  while self:current() and not self:is_type("comma") do
+                    local t = self:current()
+                    if t.type == "semicolon" or t.type == "go" then break end
+                    if self:is_type("paren_open") then
+                      -- Skip parenthesized content
+                      local pd = 1
+                      self:advance()
+                      while self:current() and pd > 0 do
+                        if self:is_type("paren_open") then pd = pd + 1
+                        elseif self:is_type("paren_close") then pd = pd - 1
+                        end
+                        self:advance()
+                      end
+                    else
+                      self:advance()
+                    end
+                  end
+                  -- Skip comma if present
+                  if self:is_type("comma") then
+                    self:advance()
+                  end
+                  goto continue_alter_col
+                end
+              end
+
+              -- Parse column name
+              if token.type == "identifier" or token.type == "bracket_id" then
+                local col_name = strip_brackets(token.text)
+                self:advance()
+
+                -- Parse data type
+                local data_type = nil
+                local type_token = self:current()
+                if type_token and (type_token.type == "keyword" or type_token.type == "identifier") then
+                  data_type = type_token.text:upper()
+                  self:advance()
+
+                  -- Handle parameterized types like VARCHAR(50)
+                  if self:is_type("paren_open") then
+                    self:advance()
+                    local type_pd = 1
+                    while self:current() and type_pd > 0 do
+                      if self:is_type("paren_open") then type_pd = type_pd + 1
+                      elseif self:is_type("paren_close") then type_pd = type_pd - 1
+                      end
+                      self:advance()
+                    end
+                  end
+                end
+
+                -- Add column to temp table
+                table.insert(temp_tables[qualified.name].columns, {
+                  name = col_name,
+                  data_type = data_type,
+                  is_star = false,
+                })
+
+                -- Skip remaining column modifiers (NULL, NOT NULL, DEFAULT, etc.)
+                while self:current() and not self:is_type("comma") do
+                  local t = self:current()
+                  if t.type == "semicolon" or t.type == "go" then break end
+                  if t.type == "keyword" then
+                    local kw = t.text:upper()
+                    if kw == "SELECT" or kw == "INSERT" or kw == "UPDATE" or
+                       kw == "DELETE" or kw == "CREATE" or kw == "DROP" or kw == "ALTER" then
+                      break
+                    end
+                  end
+                  if self:is_type("paren_open") then
+                    local mod_pd = 1
+                    self:advance()
+                    while self:current() and mod_pd > 0 do
+                      if self:is_type("paren_open") then mod_pd = mod_pd + 1
+                      elseif self:is_type("paren_close") then mod_pd = mod_pd - 1
+                      end
+                      self:advance()
+                    end
+                  else
+                    self:advance()
+                  end
+                end
+
+                -- Skip comma if present (for multiple columns)
+                if self:is_type("comma") then
+                  self:advance()
+                end
+              else
+                -- Unknown token, skip it
+                self:advance()
+              end
+
+              ::continue_alter_col::
+            end
+          end
+        end
+      end
+    end
+
+    self:consume_until_statement_end()
   else
-    -- OTHER statement type (CREATE, ALTER, DROP, etc.)
+    -- OTHER statement type
     self:advance()
     self:consume_until_statement_end()
   end
@@ -1872,6 +2511,36 @@ function ParserState:parse_statement(known_ctes, temp_tables)
       end
 
       -- Mark that we found a FROM clause so we don't add update_target later
+      chunk.has_from_clause = true
+      goto continue_loop
+    end
+
+    -- Handle FROM clause in DELETE statements (extended DELETE syntax)
+    if paren_depth == 0 and upper_text == "FROM" and chunk.statement_type == "DELETE" and chunk.delete_target then
+      -- Extended DELETE syntax: DELETE alias FROM table alias WHERE ...
+      -- Parse FROM clause to get the actual tables
+      local from_token = self:current()
+      local from_clause_pos, join_positions, on_positions
+      chunk.tables, from_clause_pos, join_positions, on_positions = self:parse_from_clause(known_ctes, paren_depth, chunk.subqueries, from_token)
+      if from_clause_pos then
+        chunk.clause_positions["from"] = from_clause_pos
+      end
+
+      -- Store individual JOIN positions
+      if join_positions then
+        for i, pos in ipairs(join_positions) do
+          chunk.clause_positions["join_" .. i] = pos
+        end
+      end
+
+      -- Store individual ON positions
+      if on_positions then
+        for i, pos in ipairs(on_positions) do
+          chunk.clause_positions["on_" .. i] = pos
+        end
+      end
+
+      -- Mark that we found a FROM clause
       chunk.has_from_clause = true
       goto continue_loop
     end
@@ -1998,6 +2667,14 @@ function ParserState:parse_statement(known_ctes, temp_tables)
       end_line = set_end.line,
       end_col = (set_end == last_statement_token) and (set_end.col + #set_end.text - 1) or (set_end.col - 1),
     }
+  end
+
+  -- Rebuild alias mapping after all parsing (UPDATE/DELETE FROM may have added tables)
+  -- This ensures aliases from FROM clause in UPDATE/DELETE statements are captured
+  for _, table_ref in ipairs(chunk.tables) do
+    if table_ref.alias and not chunk.aliases[table_ref.alias:lower()] then
+      chunk.aliases[table_ref.alias:lower()] = table_ref
+    end
   end
 
   -- Post-parse parameter extraction: scan all tokens in statement for @ symbols
