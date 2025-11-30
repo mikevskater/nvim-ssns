@@ -1409,4 +1409,225 @@ function UiTree.clear_filter()
   vim.notify("SSNS: Filters cleared", vim.log.levels.INFO)
 end
 
+---Go to the first child in the current group
+---If on a group node, goes to its first child
+---If on a child within a group, goes to the first sibling
+function UiTree.goto_first_child()
+  local Buffer = require('ssns.ui.buffer')
+  local Config = require('ssns.config')
+  local smart_positioning = Config.get_ui().smart_cursor_positioning
+
+  local line_number = Buffer.get_current_line()
+  local obj = UiTree.line_map[line_number]
+
+  if not obj then
+    return
+  end
+
+  local target_obj = nil
+
+  -- Check if current object is a group (has children and is expanded)
+  if obj.ui_state and obj.ui_state.expanded and obj:has_children() then
+    -- On a group node - go to first child
+    local children = obj:get_children()
+    if #children > 0 then
+      -- Apply filters if this is a filterable group
+      local UiFilters = require('ssns.ui.filters')
+      local filters = UiFilters.get(obj)
+      local filtered_children = UiFilters.apply(children, filters)
+      if #filtered_children > 0 then
+        target_obj = filtered_children[1]
+      end
+    end
+  elseif obj.parent then
+    -- On a child within a group - go to first sibling
+    local parent = obj.parent
+    if parent:has_children() then
+      local siblings = parent:get_children()
+      -- Apply filters if parent is a filterable group
+      local UiFilters = require('ssns.ui.filters')
+      local filters = UiFilters.get(parent)
+      local filtered_siblings = UiFilters.apply(siblings, filters)
+      if #filtered_siblings > 0 then
+        target_obj = filtered_siblings[1]
+      end
+    end
+  end
+
+  if target_obj then
+    local target_line = UiTree.object_map[target_obj]
+    if target_line then
+      local col = smart_positioning and Buffer.get_name_column(target_line) or 0
+      Buffer.set_cursor(target_line, col)
+      -- Update indent tracking
+      if smart_positioning then
+        Buffer.last_indent_info = {
+          line = target_line,
+          indent_level = Buffer.get_indent_level(target_line),
+          column = col,
+        }
+      end
+    end
+  end
+end
+
+---Go to the last child in the current group
+---If on a group node, goes to its last child
+---If on a child within a group, goes to the last sibling
+function UiTree.goto_last_child()
+  local Buffer = require('ssns.ui.buffer')
+  local Config = require('ssns.config')
+  local smart_positioning = Config.get_ui().smart_cursor_positioning
+
+  local line_number = Buffer.get_current_line()
+  local obj = UiTree.line_map[line_number]
+
+  if not obj then
+    return
+  end
+
+  local target_obj = nil
+
+  -- Check if current object is a group (has children and is expanded)
+  if obj.ui_state and obj.ui_state.expanded and obj:has_children() then
+    -- On a group node - go to last child
+    local children = obj:get_children()
+    if #children > 0 then
+      -- Apply filters if this is a filterable group
+      local UiFilters = require('ssns.ui.filters')
+      local filters = UiFilters.get(obj)
+      local filtered_children = UiFilters.apply(children, filters)
+      if #filtered_children > 0 then
+        target_obj = filtered_children[#filtered_children]
+      end
+    end
+  elseif obj.parent then
+    -- On a child within a group - go to last sibling
+    local parent = obj.parent
+    if parent:has_children() then
+      local siblings = parent:get_children()
+      -- Apply filters if parent is a filterable group
+      local UiFilters = require('ssns.ui.filters')
+      local filters = UiFilters.get(parent)
+      local filtered_siblings = UiFilters.apply(siblings, filters)
+      if #filtered_siblings > 0 then
+        target_obj = filtered_siblings[#filtered_siblings]
+      end
+    end
+  end
+
+  if target_obj then
+    local target_line = UiTree.object_map[target_obj]
+    if target_line then
+      local col = smart_positioning and Buffer.get_name_column(target_line) or 0
+      Buffer.set_cursor(target_line, col)
+      -- Update indent tracking
+      if smart_positioning then
+        Buffer.last_indent_info = {
+          line = target_line,
+          indent_level = Buffer.get_indent_level(target_line),
+          column = col,
+        }
+      end
+    end
+  end
+end
+
+---Toggle expand/collapse of the parent group
+---If on a group node, toggles that group
+---If on a child within a group, toggles the parent group and moves cursor to it
+function UiTree.toggle_group()
+  local Buffer = require('ssns.ui.buffer')
+  local Config = require('ssns.config')
+  local smart_positioning = Config.get_ui().smart_cursor_positioning
+
+  local line_number = Buffer.get_current_line()
+  local obj = UiTree.line_map[line_number]
+
+  if not obj then
+    return
+  end
+
+  local target_group = nil
+
+  -- Check if current object is a group (can be expanded/collapsed)
+  if obj.ui_state and obj:has_children() then
+    -- Current object is a group - toggle it directly
+    target_group = obj
+  elseif obj.parent then
+    -- Find the nearest parent that is a group (can be expanded/collapsed)
+    local parent = obj.parent
+    while parent do
+      if parent.ui_state and parent:has_children() then
+        target_group = parent
+        break
+      end
+      parent = parent.parent
+    end
+  end
+
+  if target_group then
+    -- Toggle the group's expansion state
+    target_group:toggle_expand()
+
+    -- Re-render tree
+    UiTree.render()
+
+    -- Find the line of the target group and position cursor there
+    local target_line = UiTree.object_map[target_group]
+    if target_line then
+      local col = smart_positioning and Buffer.get_name_column(target_line) or 0
+      Buffer.set_cursor(target_line, col)
+      -- Update indent tracking
+      if smart_positioning then
+        Buffer.last_indent_info = {
+          line = target_line,
+          indent_level = Buffer.get_indent_level(target_line),
+          column = col,
+        }
+      end
+    end
+  end
+end
+
+---Create a new query buffer using the database context from the current tree node
+function UiTree.new_query_from_context()
+  local Buffer = require('ssns.ui.buffer')
+  local Query = require('ssns.ui.query')
+  local Cache = require('ssns.cache')
+
+  local line_number = Buffer.get_current_line()
+  local obj = UiTree.line_map[line_number]
+
+  local server, database
+
+  if obj then
+    -- Get database and server from the hovered object's hierarchy
+    database = obj:get_database()
+    server = obj:get_server()
+  end
+
+  -- Fallback: if hovering on server or no object, try active database
+  if not database then
+    database = Cache.get_active_database()
+    if database then
+      server = database:get_server()
+    end
+  end
+
+  -- Final fallback: just get first connected server
+  if not server then
+    local servers = Cache.get_all_servers()
+    for _, s in ipairs(servers) do
+      if s:is_connected() then
+        server = s
+        break
+      end
+    end
+  end
+
+  -- Create buffer (USE statement is handled inside create_query_buffer)
+  Query.create_query_buffer(server, database, "", "Query")
+end
+
 return UiTree

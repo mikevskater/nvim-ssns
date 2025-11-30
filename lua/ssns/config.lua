@@ -67,15 +67,27 @@
 ---@field exclude_patterns string[] Queries to exclude from history (default: {"SELECT 1", "SELECT @@"})
 
 ---@class KeymapsConfig
----@field toggle string Toggle SSNS tree window
----@field execute string Execute query in buffer
----@field execute_selection string Execute visual selection
----@field save_query string Save current query to file
----@field close string Close SSNS window
----@field refresh string Refresh current node
----@field refresh_all string Refresh all servers
----@field help string Show help
----@field toggle_connection string Toggle server connection
+---Tree buffer keymaps
+---@field toggle string Toggle expand/collapse or execute action (default: "<CR>")
+---@field toggle_alt string Alternate toggle key (default: "o")
+---@field close string Close SSNS window (default: "q")
+---@field refresh string Refresh current node (default: "r")
+---@field refresh_all string Refresh all servers (default: "R")
+---@field filter string Open filter UI for group (default: "f")
+---@field filter_clear string Clear all filters on group (default: "F")
+---@field toggle_connection string Toggle server connection (default: "d")
+---@field set_lualine_color string Set lualine color for server/database (default: "<Leader>c")
+---@field help string Show help (default: "?")
+---@field new_query string New query buffer with USE statement (default: "<C-n>")
+---@field goto_first_child string Go to first child in group (default: "<C-[>")
+---@field goto_last_child string Go to last child in group (default: "<C-]>")
+---@field toggle_group string Toggle expand/collapse of parent group (default: "g")
+---Query buffer keymaps
+---@field execute string Execute query in buffer (default: "<Leader>r")
+---@field execute_selection string Execute visual selection (default: "<Leader>r")
+---@field execute_statement string Execute statement under cursor (default: "<Leader>R")
+---@field save_query string Save current query to file (default: "<Leader>s")
+---@field expand_asterisk string Expand asterisk to column list (default: "<Leader>ce")
 
 ---@class TableHelpersConfig
 ---@field sqlserver table<string, string>? SQL Server helper templates
@@ -264,15 +276,27 @@ local default_config = {
   },
 
   keymaps = {
+    -- Tree buffer keymaps
     toggle = "<CR>",  -- Toggle expand/collapse or execute action
-    execute = "<Leader>r",  -- Execute query
-    execute_selection = "<Leader>r",  -- Execute visual selection (in visual mode)
-    save_query = "<Leader>s",  -- Save query to file
+    toggle_alt = "o",  -- Alternate toggle key
     close = "q",  -- Close SSNS window
     refresh = "r",  -- Refresh current node
     refresh_all = "R",  -- Refresh all servers
+    filter = "f",  -- Open filter UI for group
+    filter_clear = "F",  -- Clear all filters on group
+    toggle_connection = "d",  -- Toggle server connection
+    set_lualine_color = "<Leader>c",  -- Set lualine color for server/database
     help = "?",  -- Show help
-    toggle_connection = "S",  -- Toggle server connection
+    new_query = "<C-n>",  -- New query buffer with USE statement
+    goto_first_child = "<C-[>",  -- Go to first child in group
+    goto_last_child = "<C-]>",  -- Go to last child in group
+    toggle_group = "g",  -- Toggle expand/collapse of parent group
+    -- Query buffer keymaps
+    execute = "<Leader>r",  -- Execute query
+    execute_selection = "<Leader>r",  -- Execute visual selection (in visual mode)
+    execute_statement = "<Leader>R",  -- Execute statement under cursor
+    save_query = "<Leader>s",  -- Save query to file
+    expand_asterisk = "<Leader>ce",  -- Expand asterisk to column list
   },
 
   table_helpers = {

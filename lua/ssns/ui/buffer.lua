@@ -126,76 +126,105 @@ function UiBuffer.setup_keymaps()
   end
 
   local bufnr = UiBuffer.bufnr
+  local Config = require('ssns.config')
+  local keymaps = Config.get_keymaps()
 
   -- Close window
-  vim.api.nvim_buf_set_keymap(bufnr, "n", "q", "<Cmd>lua require('ssns.ui.buffer').close()<CR>", {
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.close or "q", "<Cmd>lua require('ssns.ui.buffer').close()<CR>", {
     noremap = true,
     silent = true,
     desc = "Close SSNS",
   })
 
   -- Expand/collapse node
-  vim.api.nvim_buf_set_keymap(bufnr, "n", "<CR>", "<Cmd>lua require('ssns.ui.tree').toggle_node()<CR>", {
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.toggle or "<CR>", "<Cmd>lua require('ssns.ui.tree').toggle_node()<CR>", {
     noremap = true,
     silent = true,
     desc = "Expand/collapse node",
   })
 
-  vim.api.nvim_buf_set_keymap(bufnr, "n", "o", "<Cmd>lua require('ssns.ui.tree').toggle_node()<CR>", {
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.toggle_alt or "o", "<Cmd>lua require('ssns.ui.tree').toggle_node()<CR>", {
     noremap = true,
     silent = true,
     desc = "Expand/collapse node",
   })
 
   -- Refresh
-  vim.api.nvim_buf_set_keymap(bufnr, "n", "r", "<Cmd>lua require('ssns.ui.tree').refresh_node()<CR>", {
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.refresh or "r", "<Cmd>lua require('ssns.ui.tree').refresh_node()<CR>", {
     noremap = true,
     silent = true,
     desc = "Refresh node",
   })
 
-  vim.api.nvim_buf_set_keymap(bufnr, "n", "R", "<Cmd>lua require('ssns.ui.tree').refresh_all()<CR>", {
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.refresh_all or "R", "<Cmd>lua require('ssns.ui.tree').refresh_all()<CR>", {
     noremap = true,
     silent = true,
     desc = "Refresh all",
   })
 
   -- Filter
-  vim.api.nvim_buf_set_keymap(bufnr, "n", "f", "<Cmd>lua require('ssns.ui.tree').open_filter()<CR>", {
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.filter or "f", "<Cmd>lua require('ssns.ui.tree').open_filter()<CR>", {
     noremap = true,
     silent = true,
     desc = "Filter group",
   })
 
-  vim.api.nvim_buf_set_keymap(bufnr, "n", "F", "<Cmd>lua require('ssns.ui.tree').clear_filter()<CR>", {
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.filter_clear or "F", "<Cmd>lua require('ssns.ui.tree').clear_filter()<CR>", {
     noremap = true,
     silent = true,
     desc = "Clear filter",
   })
 
   -- Connect/disconnect
-  vim.api.nvim_buf_set_keymap(bufnr, "n", "d", "<Cmd>lua require('ssns.ui.tree').toggle_connection()<CR>", {
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.toggle_connection or "d", "<Cmd>lua require('ssns.ui.tree').toggle_connection()<CR>", {
     noremap = true,
     silent = true,
     desc = "Toggle connection",
   })
 
   -- Set lualine color
-  vim.api.nvim_buf_set_keymap(bufnr, "n", "<Leader>c", "<Cmd>lua require('ssns.ui.tree').set_lualine_color()<CR>", {
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.set_lualine_color or "<Leader>c", "<Cmd>lua require('ssns.ui.tree').set_lualine_color()<CR>", {
     noremap = true,
     silent = true,
     desc = "Set lualine color",
   })
 
   -- Help
-  vim.api.nvim_buf_set_keymap(bufnr, "n", "?", "<Cmd>lua require('ssns.ui.buffer').show_help()<CR>", {
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.help or "?", "<Cmd>lua require('ssns.ui.buffer').show_help()<CR>", {
     noremap = true,
     silent = true,
     desc = "Show help",
   })
 
+  -- New query buffer with database context
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.new_query or "<C-n>", "<Cmd>lua require('ssns.ui.tree').new_query_from_context()<CR>", {
+    noremap = true,
+    silent = true,
+    desc = "New query buffer with USE statement",
+  })
+
+  -- Go to first child in group
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.goto_first_child or "<C-[>", "<Cmd>lua require('ssns.ui.tree').goto_first_child()<CR>", {
+    noremap = true,
+    silent = true,
+    desc = "Go to first child in group",
+  })
+
+  -- Go to last child in group
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.goto_last_child or "<C-]>", "<Cmd>lua require('ssns.ui.tree').goto_last_child()<CR>", {
+    noremap = true,
+    silent = true,
+    desc = "Go to last child in group",
+  })
+
+  -- Toggle parent group expand/collapse
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.toggle_group or "g", "<Cmd>lua require('ssns.ui.tree').toggle_group()<CR>", {
+    noremap = true,
+    silent = true,
+    desc = "Toggle parent group",
+  })
+
   -- Override j/k for smart cursor positioning with count support (if enabled)
-  local Config = require('ssns.config')
   if Config.get_ui().smart_cursor_positioning then
     vim.keymap.set("n", "j", function()
       local count = vim.v.count1  -- Gets count or 1 if no count given
@@ -353,13 +382,17 @@ function UiBuffer.show_help()
     "",
     "Navigation:",
     "  <CR>, o      - Expand/collapse node",
+    "  g            - Toggle parent group (collapse from child)",
     "  j, k         - Move cursor up/down",
+    "  <C-[>        - Go to first child in group",
+    "  <C-]>        - Go to last child in group",
     "  q            - Close SSNS window",
     "",
     "Actions:",
     "  r            - Refresh current node",
     "  R            - Refresh all servers",
     "  d            - Toggle connection",
+    "  <C-n>        - New query buffer with USE statement",
     "  <Leader>c    - Set lualine color (server/database)",
     "",
     "Filtering:",

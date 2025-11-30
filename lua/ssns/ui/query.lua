@@ -161,32 +161,39 @@ end
 ---Setup keymaps for query buffer
 ---@param bufnr number The buffer number
 function UiQuery.setup_query_keymaps(bufnr)
+  local Config = require('ssns.config')
+  local keymaps = Config.get_keymaps()
   local opts = { noremap = true, silent = true, buffer = bufnr }
 
   -- Execute query (visual selection or entire buffer)
-  vim.keymap.set('n', '<Leader>r', function()
+  vim.keymap.set('n', keymaps.execute or '<Leader>r', function()
     UiQuery.execute_query(bufnr, false)
   end, vim.tbl_extend('force', opts, { desc = 'Execute query' }))
 
-  vim.keymap.set('v', '<Leader>r', function()
+  vim.keymap.set('v', keymaps.execute_selection or '<Leader>r', function()
     UiQuery.execute_query(bufnr, true)
   end, vim.tbl_extend('force', opts, { desc = 'Execute selected query' }))
 
   -- Execute query under cursor
-  vim.keymap.set('n', '<Leader>R', function()
+  vim.keymap.set('n', keymaps.execute_statement or '<Leader>R', function()
     UiQuery.execute_statement_under_cursor(bufnr)
   end, vim.tbl_extend('force', opts, { desc = 'Execute statement under cursor' }))
 
   -- Save query
-  vim.keymap.set('n', '<Leader>s', function()
+  vim.keymap.set('n', keymaps.save_query or '<Leader>s', function()
     UiQuery.save_query(bufnr)
   end, vim.tbl_extend('force', opts, { desc = 'Save query' }))
 
   -- Expand asterisk
-  vim.keymap.set('n', '<Leader>ce', function()
+  vim.keymap.set('n', keymaps.expand_asterisk or '<Leader>ce', function()
     local ExpandAsterisk = require('ssns.features.expand_asterisk')
     ExpandAsterisk.expand_asterisk_at_cursor()
   end, vim.tbl_extend('force', opts, { desc = 'Expand asterisk (Columns Expand)' }))
+
+  -- New query buffer (inherits current database context)
+  vim.keymap.set('n', keymaps.new_query or '<C-n>', function()
+    UiQuery.new_query_from_buffer(bufnr)
+  end, vim.tbl_extend('force', opts, { desc = 'New query buffer' }))
 end
 
 ---Execute query in buffer
@@ -1083,6 +1090,40 @@ function UiQuery.build_exec_statement(schema_name, proc_name, parameters, values
 
   local exec_statement = string.format("EXEC %s %s;", full_name, table.concat(param_parts, ", "))
   return exec_statement
+end
+
+---Create a new query buffer using context from an existing query buffer
+---@param source_bufnr number The source buffer number
+function UiQuery.new_query_from_buffer(source_bufnr)
+  local Cache = require('ssns.cache')
+  local buffer_info = UiQuery.query_buffers[source_bufnr]
+
+  local server, database
+
+  if buffer_info then
+    server = buffer_info.server
+
+    -- Try to get database from last_database (updated after query execution)
+    if buffer_info.last_database and server and server.find_database then
+      database = server:find_database(buffer_info.last_database)
+    end
+
+    -- Fallback to initial database association
+    if not database then
+      database = buffer_info.database
+    end
+  end
+
+  -- Fallback to globally active database
+  if not database then
+    database = Cache.get_active_database()
+    if database then
+      server = database:get_server()
+    end
+  end
+
+  -- Create new query buffer
+  UiQuery.create_query_buffer(server, database, "", "Query")
 end
 
 return UiQuery
