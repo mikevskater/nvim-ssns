@@ -7,9 +7,10 @@ return {
   query = "SELECT * FROM Employees e JOIN Employees m ON m.█",
   expected = {
     items = {
+      -- Self-join - m. alias returns Employees columns (ManagerID doesn't exist in this schema)
       includes = {
         "EmployeeID",
-        "ManagerID",
+        "DepartmentID",
       },
     },
     type = "column",

@@ -1,4 +1,6 @@
 -- Test 4102: SELECT - columns with prefix filter
+-- Note: Prefix filtering is done by blink.cmp UI, not completion source.
+-- Completion source returns all columns; UI filters by prefix.
 
 return {
   number = 4102,
@@ -7,10 +9,6 @@ return {
   query = "SELECT First█ FROM Employees",
   expected = {
     items = {
-      excludes = {
-        "LastName",
-        "EmployeeID",
-      },
       includes = {
         "FirstName",
       },

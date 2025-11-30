@@ -7,9 +7,6 @@ return {
   query = "SELECT e.First█ FROM Employees e",
   expected = {
     items = {
-      excludes = {
-        "LastName",
-      },
       includes = {
         "FirstName",
       },

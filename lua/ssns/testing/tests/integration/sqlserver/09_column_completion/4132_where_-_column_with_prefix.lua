@@ -1,4 +1,5 @@
 -- Test 4132: WHERE - column with prefix
+-- Note: Prefix filtering is done by blink.cmp UI, not completion source.
 
 return {
   number = 4132,
@@ -7,9 +8,6 @@ return {
   query = "SELECT * FROM Employees WHERE First█",
   expected = {
     items = {
-      excludes = {
-        "LastName",
-      },
       includes = {
         "FirstName",
       },

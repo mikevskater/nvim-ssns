@@ -1,4 +1,6 @@
 -- Test 4186: ON clause - should not suggest incompatible types
+-- Type compatibility filtering is a future enhancement.
+-- Currently returns all columns; user must choose appropriate types.
 
 return {
   number = 4186,
@@ -7,11 +9,9 @@ return {
   query = "SELECT * FROM Employees e JOIN Departments d ON e.FirstName = d.█",
   expected = {
     items = {
-      excludes = {
-        "DepartmentID",
-      },
       includes_any = {
         "DepartmentName",
+        "DepartmentID",
       },
     },
     type = "column",

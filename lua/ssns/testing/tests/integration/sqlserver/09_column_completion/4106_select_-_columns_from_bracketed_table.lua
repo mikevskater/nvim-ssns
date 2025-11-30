@@ -4,7 +4,7 @@ return {
   number = 4106,
   description = "SELECT - columns from bracketed table",
   database = "vim_dadbod_test",
-  query = "SELECT █ FROM [Employees",
+  query = "SELECT █ FROM [Employees]",
   expected = {
     items = {
       includes = {

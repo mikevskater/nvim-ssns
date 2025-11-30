@@ -7,10 +7,11 @@ return {
   query = "SELECT * FROM Employees e JOIN Departments d ON e.DepartmentID = d.DepartmentID JOIN Projects p ON █",
   expected = {
     items = {
+      -- ON clause with multiple tables returns qualified columns
       includes_any = {
-        "EmployeeID",
-        "DepartmentID",
-        "ProjectID",
+        "e.EmployeeID",
+        "d.DepartmentID",
+        "p.ProjectID",
       },
     },
     type = "column",

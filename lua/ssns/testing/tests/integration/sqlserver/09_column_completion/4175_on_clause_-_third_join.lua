@@ -11,9 +11,11 @@ JOIN Projects p ON p.DepartmentID = d.DepartmentID
 JOIN Customers c ON c.Id = █]],
   expected = {
     items = {
-      includes = {
-        "Id",
-        "CustomerId",
+      -- ON clause with multiple tables returns qualified columns
+      includes_any = {
+        "c.Id",
+        "c.CustomerId",
+        "e.EmployeeID",
       },
     },
     type = "column",

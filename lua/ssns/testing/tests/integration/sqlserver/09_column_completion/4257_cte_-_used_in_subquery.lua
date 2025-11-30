@@ -5,7 +5,7 @@ return {
   description = "CTE - used in subquery",
   database = "vim_dadbod_test",
   query = [[WITH EmpCTE AS (SELECT EmployeeID, DepartmentID FROM Employees)
-SELECT * FROM Departments d WHERE d.DepartmentID IN (SELECT  FR█OM EmpCTE)]],
+SELECT * FROM Departments d WHERE d.DepartmentID IN (SELECT █ FROM EmpCTE)]],
   expected = {
     items = {
       includes = {
