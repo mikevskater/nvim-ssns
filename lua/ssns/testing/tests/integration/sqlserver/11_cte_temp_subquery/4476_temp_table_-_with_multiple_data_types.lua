@@ -1,9 +1,11 @@
 -- Test 4476: Temp table - with multiple data types
+-- SKIPPED: Temp table completion not yet supported
 
 return {
   number = 4476,
   description = "Temp table - with multiple data types",
   database = "vim_dadbod_test",
+  skip = false,
   query = [[CREATE TABLE #TempData (
   IntCol INT,
   BigIntCol BIGINT,

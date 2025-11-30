@@ -4,6 +4,7 @@ return {
   number = 4434,
   description = "CTE - CTE with * expansion tracking",
   database = "vim_dadbod_test",
+  skip = false,
   query = [[WITH AllEmps AS (SELECT * FROM Employees)
 SELECT * FROM AllEmps WHERE █]],
   expected = {

@@ -4,7 +4,8 @@ return {
   number = 4538,
   description = "Subquery - subquery in COALESCE",
   database = "vim_dadbod_test",
-  query = "SELECT EmployeeID, COALESCE(DepartmentID, (SELECT  FROM█ Departments WHERE DepartmentID = 1)) FROM Employees",
+  skip = false,
+  query = "SELECT EmployeeID, COALESCE(DepartmentID, (SELECT █ FROM Departments WHERE DepartmentID = 1)) FROM Employees",
   expected = {
     items = {
       includes_any = {

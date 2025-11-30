@@ -4,6 +4,7 @@ return {
   number = 4438,
   description = "CTE - CTE with TOP clause",
   database = "vim_dadbod_test",
+  skip = false,
   query = [[WITH TopEmps AS (SELECT TOP 10 * FROM Employees ORDER BY Salary DESC)
 SELECT █ FROM TopEmps]],
   expected = {
