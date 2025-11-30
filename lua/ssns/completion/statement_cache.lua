@@ -4,6 +4,7 @@
 ---@field is_global boolean Whether ## global temp
 ---@field created_in_batch number GO batch index where created
 ---@field source_tables TableReference[]? For SELECT INTO - source tables
+---@field dropped_at_line number? Line number where dropped (nil if not dropped)
 
 ---@class BufferStatementCache
 ---@field chunks StatementChunk[] All statement chunks in order
@@ -17,65 +18,238 @@ local StatementCache = {}
 -- Private cache storage: bufnr -> BufferStatementCache
 local _cache = {}
 
+-- Forward declaration for mutual recursion
+local expand_subquery_columns
+
+---Expand star columns from a subquery by looking at its tables and nested subqueries
+---@param subquery table Subquery with columns, tables, subqueries
+---@param connection table? Database connection for lookups
+---@param depth number? Current recursion depth (to prevent infinite loops)
+---@return ColumnInfo[] Expanded columns
+expand_subquery_columns = function(subquery, connection, depth)
+  depth = depth or 0
+  if depth > 10 then
+    -- Prevent infinite recursion
+    return subquery.columns or {}
+  end
+
+  local columns = subquery.columns or {}
+  if #columns == 0 then
+    return {}
+  end
+
+  -- Check if there's a star that needs expansion from nested sources
+  local has_unqualified_star = false
+  for _, col in ipairs(columns) do
+    if col.is_star and not col.source_table then
+      has_unqualified_star = true
+      break
+    end
+  end
+
+  if not has_unqualified_star then
+    -- No stars to expand from nested subqueries
+    return columns
+  end
+
+  -- Build a map of available sources (tables and nested subqueries)
+  local source_columns = {}
+
+  -- Add columns from nested subqueries (these are derived tables in FROM clause)
+  for _, nested_sq in ipairs(subquery.subqueries or {}) do
+    if nested_sq.alias then
+      -- Recursively expand the nested subquery's columns
+      local nested_cols = expand_subquery_columns(nested_sq, connection, depth + 1)
+      source_columns[nested_sq.alias:lower()] = nested_cols
+    end
+  end
+
+  -- Add columns from regular tables (will be expanded via database later)
+  for _, tbl in ipairs(subquery.tables or {}) do
+    local tbl_name = tbl.alias or tbl.name
+    if tbl_name and not source_columns[tbl_name:lower()] then
+      -- Mark as a database table source (columns will be expanded via Resolver)
+      source_columns[tbl_name:lower()] = { _is_db_table = true, _table_ref = tbl }
+    end
+  end
+
+  -- Now expand star columns
+  local expanded = {}
+  for _, col in ipairs(columns) do
+    if col.is_star then
+      if col.source_table then
+        -- Qualified star (e.g., alias.*)
+        local source_key = col.source_table:lower()
+        local source = source_columns[source_key]
+        if source then
+          if source._is_db_table then
+            -- Will be expanded from database later, keep star
+            table.insert(expanded, col)
+          else
+            -- Expand from nested subquery columns
+            for _, src_col in ipairs(source) do
+              if not src_col.is_star or src_col.name ~= "*" then
+                table.insert(expanded, {
+                  name = src_col.name,
+                  source_table = col.source_table,
+                  is_star = false,
+                })
+              end
+            end
+          end
+        else
+          table.insert(expanded, col)
+        end
+      else
+        -- Unqualified star (SELECT *) - expand from all sources
+        local added_any = false
+        for source_name, source in pairs(source_columns) do
+          if not source._is_db_table then
+            -- Expand from nested subquery columns
+            for _, src_col in ipairs(source) do
+              if not src_col.is_star or src_col.name ~= "*" then
+                table.insert(expanded, {
+                  name = src_col.name,
+                  source_table = source_name,
+                  is_star = false,
+                })
+                added_any = true
+              end
+            end
+          end
+        end
+        if not added_any then
+          -- Keep star for database table expansion later
+          table.insert(expanded, col)
+        end
+      end
+    else
+      -- Regular column, keep as-is
+      table.insert(expanded, col)
+    end
+  end
+
+  return expanded
+end
+
 ---Expand star columns in a column array to actual columns from source table
 ---@param columns ColumnInfo[] Array of column info objects
 ---@param connection table? Database connection for lookups
+---@param known_ctes table<string, table>? Previously processed CTEs for CTE-to-CTE references
+---@param cte_tables TableReference[]? Tables in the CTE's FROM clause for alias resolution
 ---@return ColumnInfo[] Expanded columns with stars replaced by actual columns
-local function expand_star_columns(columns, connection)
+local function expand_star_columns(columns, connection, known_ctes, cte_tables)
   if not columns or #columns == 0 then
     return columns or {}
-  end
-
-  -- If no connection, can't expand - return as-is
-  if not connection or not connection.database then
-    return columns
   end
 
   local expanded = {}
   local Resolver = require('ssns.completion.metadata.resolver')
 
   for _, col in ipairs(columns) do
-    if col.is_star and col.parent_table then
+    if col.is_star then
       -- This is a star column that needs expansion
-      -- Try to resolve the parent table and get its columns
-      local success, table_obj = pcall(function()
-        local ref = {
-          name = col.parent_table,
-          schema = col.parent_schema,
-        }
-        return Resolver.resolve_table(col.parent_table, connection, {})
-      end)
+      local parent = col.parent_table
+      local source = col.source_table
 
-      if success and table_obj then
-        -- Get columns from the resolved table
-        local col_success, table_cols = pcall(function()
-          return Resolver.get_columns(table_obj, connection)
+      -- For qualified stars (e.g., e.*), try to resolve the source alias
+      -- to find if it points to a CTE
+      local resolved_cte_name = nil
+      if source and cte_tables then
+        local source_lower = source:lower()
+        for _, tbl in ipairs(cte_tables) do
+          local alias = tbl.alias and tbl.alias:lower()
+          local name = tbl.name and tbl.name:lower()
+          if alias == source_lower or name == source_lower then
+            -- Check if this table is a CTE reference
+            if tbl.is_cte and tbl.name then
+              resolved_cte_name = tbl.name
+            elseif tbl.name then
+              -- Check if the table name matches a known CTE
+              local tbl_lower = tbl.name:lower()
+              if known_ctes then
+                for cte_name, _ in pairs(known_ctes) do
+                  if cte_name:lower() == tbl_lower then
+                    resolved_cte_name = cte_name
+                    break
+                  end
+                end
+              end
+            end
+            break
+          end
+        end
+      end
+
+      -- Also check if parent_table directly matches a CTE
+      if not resolved_cte_name and parent and known_ctes then
+        local parent_lower = parent:lower()
+        for cte_name, _ in pairs(known_ctes) do
+          if cte_name:lower() == parent_lower then
+            resolved_cte_name = cte_name
+            break
+          end
+        end
+      end
+
+      -- If this star refers to a CTE, expand from CTE columns
+      if resolved_cte_name and known_ctes then
+        local cte_info = known_ctes[resolved_cte_name]
+        if cte_info and cte_info.columns and #cte_info.columns > 0 then
+          -- Add each CTE column, preserving source info
+          for _, cte_col in ipairs(cte_info.columns) do
+            -- Only add non-star columns (stars should already be expanded)
+            if not cte_col.is_star then
+              table.insert(expanded, {
+                name = cte_col.name,
+                source_table = source or resolved_cte_name,
+                parent_table = resolved_cte_name,
+                parent_schema = nil, -- CTEs don't have schemas
+                data_type = cte_col.data_type,
+                is_star = false,
+              })
+            end
+          end
+          goto continue_col
+        end
+      end
+
+      -- Fall back to database table resolution
+      if parent and connection and connection.database then
+        local success, table_obj = pcall(function()
+          return Resolver.resolve_table(parent, connection, {})
         end)
 
-        if col_success and table_cols and #table_cols > 0 then
-          -- Add each actual column, preserving source info
-          for _, tc in ipairs(table_cols) do
-            table.insert(expanded, {
-              name = tc.name or tc.column_name,
-              source_table = col.source_table,
-              parent_table = col.parent_table,
-              parent_schema = col.parent_schema,
-              data_type = tc.data_type,
-              is_star = false,
-            })
+        if success and table_obj then
+          -- Get columns from the resolved table
+          local col_success, table_cols = pcall(function()
+            return Resolver.get_columns(table_obj, connection)
+          end)
+
+          if col_success and table_cols and #table_cols > 0 then
+            -- Add each actual column, preserving source info
+            for _, tc in ipairs(table_cols) do
+              table.insert(expanded, {
+                name = tc.name or tc.column_name,
+                source_table = col.source_table,
+                parent_table = col.parent_table,
+                parent_schema = col.parent_schema,
+                data_type = tc.data_type,
+                is_star = false,
+              })
+            end
+            goto continue_col
           end
-        else
-          -- Couldn't get columns, keep the star as-is
-          table.insert(expanded, col)
         end
-      else
-        -- Couldn't resolve table, keep the star as-is
-        table.insert(expanded, col)
       end
+
+      -- Couldn't expand, keep the star as-is
+      table.insert(expanded, col)
     else
       -- Regular column, keep as-is
       table.insert(expanded, col)
     end
+    ::continue_col::
   end
 
   return expanded
@@ -256,13 +430,21 @@ function StatementCache.get_visible_temp_tables(bufnr, line, col)
 
   local visible = {}
   for name, info in pairs(cache.temp_tables) do
+    -- Check if dropped before current position
+    if info.dropped_at_line and info.dropped_at_line < line then
+      -- Temp table was dropped before current line, skip it
+      goto continue
+    end
+
     if info.is_global then
-      -- Global temps (##) visible everywhere
+      -- Global temps (##) visible everywhere (unless dropped)
       visible[name] = info
     elseif info.created_in_batch == current_batch then
-      -- Local temps (#) visible only in same batch
+      -- Local temps (#) visible only in same batch (unless dropped)
       visible[name] = info
     end
+
+    ::continue::
   end
 
   return visible
@@ -304,7 +486,10 @@ function StatementCache.get_context_at_position(bufnr, line, col, connection)
     -- Also add subquery's own nested subqueries as available aliases (with star expansion)
     for _, sq in ipairs(subquery.subqueries or {}) do
       if sq.alias then
-        local expanded_sq_cols = expand_star_columns(sq.columns, connection)
+        -- Use expand_subquery_columns to handle nested subquery star expansion
+        local expanded_sq_cols = expand_subquery_columns(sq, connection)
+        -- Then expand any remaining stars from database tables
+        expanded_sq_cols = expand_star_columns(expanded_sq_cols, connection)
         aliases[sq.alias] = {
           name = sq.alias,
           alias = sq.alias,
@@ -353,7 +538,10 @@ function StatementCache.get_context_at_position(bufnr, line, col, connection)
     -- Add subqueries as available aliases (with star expansion)
     for _, sq in ipairs(chunk.subqueries or {}) do
       if sq.alias then
-        local expanded_sq_cols = expand_star_columns(sq.columns, connection)
+        -- Use expand_subquery_columns to handle nested subquery star expansion
+        local expanded_sq_cols = expand_subquery_columns(sq, connection)
+        -- Then expand any remaining stars from database tables
+        expanded_sq_cols = expand_star_columns(expanded_sq_cols, connection)
         aliases[sq.alias] = {
           name = sq.alias,
           alias = sq.alias,
@@ -372,22 +560,33 @@ function StatementCache.get_context_at_position(bufnr, line, col, connection)
   end
 
   -- Add CTEs as available references (with star column expansion)
+  -- Build set of CTE names already referenced in chunk.tables and their indices
+  local ctes_in_tables = {}
+  for i, tbl in ipairs(tables) do
+    if tbl.is_cte and tbl.name then
+      ctes_in_tables[tbl.name:lower()] = i
+    end
+  end
+
   local ctes = {}
   for _, cte in ipairs(chunk.ctes or {}) do
-    -- Expand star columns if connection is available
-    local expanded_columns = expand_star_columns(cte.columns, connection)
+    -- Expand star columns - pass previously processed CTEs for CTE-to-CTE references
+    -- and the CTE's own tables for alias resolution
+    local expanded_columns = expand_star_columns(cte.columns, connection, ctes, cte.tables)
     local cte_with_expanded = {
       name = cte.name,
       columns = expanded_columns,
       tables = cte.tables,
     }
     ctes[cte.name] = cte_with_expanded
-    -- CTEs can be referenced like tables
-    table.insert(tables, {
-      name = cte.name,
-      is_cte = true,
-      columns = expanded_columns,
-    })
+    -- Check if this CTE is already referenced in tables (from FROM clause)
+    local existing_idx = ctes_in_tables[cte.name:lower()]
+    if existing_idx then
+      -- Update the existing entry with expanded columns from CTE definition
+      tables[existing_idx].columns = expanded_columns
+    end
+    -- Don't add unreferenced CTEs to tables - they shouldn't contribute columns
+    -- to unqualified column completion
   end
 
   -- Get visible temp tables (with star expansion)
@@ -462,9 +661,11 @@ end
 ---Export expand_star_columns for use by column provider
 ---@param columns ColumnInfo[] Array of column info objects
 ---@param connection table? Database connection for lookups
+---@param known_ctes table<string, table>? Previously processed CTEs for CTE-to-CTE references
+---@param cte_tables TableReference[]? Tables in the CTE's FROM clause for alias resolution
 ---@return ColumnInfo[] Expanded columns with stars replaced by actual columns
-function StatementCache.expand_star_columns(columns, connection)
-  return expand_star_columns(columns, connection)
+function StatementCache.expand_star_columns(columns, connection, known_ctes, cte_tables)
+  return expand_star_columns(columns, connection, known_ctes, cte_tables)
 end
 
 return StatementCache
