@@ -261,6 +261,10 @@ function Resolver.resolve_all_tables_in_query(connection, context)
       -- Handle CTEs specially - use pre-stored columns instead of database lookup
       if table_info.is_cte then
         local cte_columns = table_info.columns or {}
+        -- Expand star columns (SELECT * in CTE) to actual columns from source table
+        -- Pass context.ctes for CTE-to-CTE star expansion
+        local StatementCache = require('ssns.completion.statement_cache')
+        local expanded_cte_columns = StatementCache.expand_star_columns(cte_columns, connection, context.ctes, table_info.tables)
         -- Create pseudo-table object with get_columns method for CTE
         local cte_table = {
           name = table_info.name or table_name,
@@ -268,13 +272,13 @@ function Resolver.resolve_all_tables_in_query(connection, context)
           get_columns = function()
             -- Convert CTE ColumnInfo objects to column format expected by completion
             local cols = {}
-            for _, col_info in ipairs(cte_columns) do
+            for _, col_info in ipairs(expanded_cte_columns) do
               local col_name = type(col_info) == "table" and col_info.name or col_info
-              if col_name then
+              if col_name and col_name ~= "*" then  -- Skip unexpanded stars
                 table.insert(cols, {
                   name = col_name,
                   column_name = col_name,
-                  data_type = "unknown",
+                  data_type = type(col_info) == "table" and col_info.data_type or "unknown",
                 })
               end
             end
@@ -283,7 +287,7 @@ function Resolver.resolve_all_tables_in_query(connection, context)
         }
         table.insert(resolved_tables, cte_table)
         seen_tables[table_name_lower] = true
-        debug_log(string.format("[RESOLVER] Added CTE '%s' with %d columns", table_name, #cte_columns))
+        debug_log(string.format("[RESOLVER] Added CTE '%s' with %d columns (expanded from %d)", table_name, #expanded_cte_columns, #cte_columns))
       elseif table_info.is_subquery then
         -- Handle subqueries/derived tables - use pre-stored columns instead of database lookup
         local sq_columns = table_info.columns or {}
@@ -313,6 +317,36 @@ function Resolver.resolve_all_tables_in_query(connection, context)
         table.insert(resolved_tables, sq_table)
         seen_tables[table_name_lower] = true
         debug_log(string.format("[RESOLVER] Added subquery '%s' with %d columns (expanded from %d)", table_name, #expanded_sq_columns, #sq_columns))
+      elseif table_info.is_temp_table then
+        -- Handle temp tables (#TempName, ##GlobalTemp) - use pre-stored columns instead of database lookup
+        local temp_columns = table_info.columns or {}
+        -- Expand star columns if present
+        local StatementCache = require('ssns.completion.statement_cache')
+        local expanded_temp_columns = StatementCache.expand_star_columns(temp_columns, connection)
+        -- Create pseudo-table object with get_columns method for temp table
+        local temp_table = {
+          name = table_info.name or table_name,
+          is_temp_table = true,
+          is_global = table_info.is_global,
+          get_columns = function()
+            -- Convert temp table ColumnInfo objects to column format expected by completion
+            local cols = {}
+            for _, col_info in ipairs(expanded_temp_columns) do
+              local col_name = type(col_info) == "table" and col_info.name or col_info
+              if col_name and col_name ~= "*" then  -- Skip unexpanded stars
+                table.insert(cols, {
+                  name = col_name,
+                  column_name = col_name,
+                  data_type = type(col_info) == "table" and col_info.data_type or "unknown",
+                })
+              end
+            end
+            return cols
+          end
+        }
+        table.insert(resolved_tables, temp_table)
+        seen_tables[table_name_lower] = true
+        debug_log(string.format("[RESOLVER] Added temp table '%s' with %d columns (expanded from %d)", table_name, #expanded_temp_columns, #temp_columns))
       else
         -- Try pre-resolved scope first, then on-demand resolution
         local resolved_table = nil
@@ -621,6 +655,107 @@ function Resolver.get_resolved(resolved_scope, name)
 
   debug_log(string.format("[RESOLVER] get_resolved: '%s' not found in pre-resolved scope", name))
   return nil
+end
+
+---Resolve table-valued function (TVF) columns from database metadata
+---Looks up the function in the cached UI tree and returns its result columns
+---@param function_name string The function name
+---@param schema_name string? The schema name (defaults to "dbo")
+---@param connection table Connection context
+---@return table[] columns Array of column info objects
+function Resolver.resolve_tvf_columns(function_name, schema_name, connection)
+  if not function_name or not connection or not connection.database then
+    return {}
+  end
+
+  schema_name = schema_name or "dbo"
+  local database = connection.database
+
+  -- Ensure database is loaded
+  if not database.is_loaded then
+    local success = pcall(function()
+      database:load()
+    end)
+    if not success then
+      return {}
+    end
+  end
+
+  -- Find the functions group in database children
+  local functions_group = nil
+  for _, child in ipairs(database.children) do
+    if child.object_type == "functions_group" then
+      functions_group = child
+      break
+    end
+  end
+
+  if not functions_group then
+    debug_log(string.format("[RESOLVER] resolve_tvf_columns: No functions_group found for '%s'", function_name))
+    return {}
+  end
+
+  -- Ensure functions group is loaded
+  if not functions_group.is_loaded then
+    local success = pcall(function()
+      functions_group:load()
+    end)
+    if not success then
+      return {}
+    end
+  end
+
+  -- Search for the function (case-insensitive)
+  local function_name_lower = function_name:lower()
+  local schema_name_lower = schema_name:lower()
+
+  for _, func in ipairs(functions_group.children or {}) do
+    if func.object_type == "function" then
+      local func_name = func.function_name or func.name
+      local func_schema = func.schema_name or "dbo"
+
+      if func_name and func_name:lower() == function_name_lower and
+         func_schema:lower() == schema_name_lower then
+        -- Found the function - check if it's table-valued
+        if func.is_table_valued and func:is_table_valued() then
+          -- Get TVF columns - these are stored in the function's metadata
+          -- For TVFs, we need to query the database for result columns
+          -- The adapter has a method to get TVF columns
+          local adapter = connection.server and connection.server:get_adapter()
+          if adapter and adapter.get_tvf_columns_query then
+            local query = adapter:get_tvf_columns_query(
+              database.db_name,
+              schema_name,
+              function_name
+            )
+            if query then
+              local results = adapter:execute(connection.server.connection, query)
+              if results and results.success and results.resultSets and #results.resultSets > 0 then
+                local columns = {}
+                local rows = results.resultSets[1].rows or {}
+                for _, row in ipairs(rows) do
+                  table.insert(columns, {
+                    name = row.column_name or row.name,
+                    data_type = row.data_type or row.type,
+                    ordinal_position = row.ordinal_position or row.column_id,
+                  })
+                end
+                debug_log(string.format("[RESOLVER] resolve_tvf_columns: Found %d columns for '%s.%s'",
+                  #columns, schema_name, function_name))
+                return columns
+              end
+            end
+          end
+          debug_log(string.format("[RESOLVER] resolve_tvf_columns: No columns found for TVF '%s.%s'",
+            schema_name, function_name))
+          return {}
+        end
+      end
+    end
+  end
+
+  debug_log(string.format("[RESOLVER] resolve_tvf_columns: Function '%s.%s' not found", schema_name, function_name))
+  return {}
 end
 
 return Resolver
