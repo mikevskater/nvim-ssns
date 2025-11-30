@@ -58,50 +58,31 @@ function ParametersProvider._find_procedure_or_function(name, connection)
     return nil
   end
 
-  -- Ensure database is loaded
-  if not database.is_loaded then
-    database:load()
-  end
-
   local name_lower = name:lower()
 
-  -- Search through all schemas
-  for _, schema in ipairs(database.children) do
-    if schema.object_type == "schema" then
-      -- Ensure schema is loaded
-      if not schema.is_loaded then
-        schema:load()
-      end
+  -- Search procedures using database accessor (handles schema-based vs non-schema servers)
+  local procedures = database:get_procedures()
+  for _, proc in ipairs(procedures) do
+    local proc_name_lower = (proc.name or proc.procedure_name or ""):lower()
+    local schema_name = proc.schema or proc.schema_name or ""
+    -- Also try schema-qualified name
+    local qualified_name_lower = (schema_name .. "." .. proc_name_lower):lower()
 
-      -- Search in procedure_group
-      for _, child in ipairs(schema.children) do
-        if child.object_type == "procedure_group" then
-          for _, proc in ipairs(child.children) do
-            local proc_name_lower = (proc.name or proc.procedure_name or ""):lower()
-            -- Also try schema-qualified name
-            local qualified_name_lower = (proc.schema_name .. "." .. proc_name_lower):lower()
+    if proc_name_lower == name_lower or qualified_name_lower == name_lower then
+      return proc
+    end
+  end
 
-            if proc_name_lower == name_lower or qualified_name_lower == name_lower then
-              return proc
-            end
-          end
-        end
-      end
+  -- Search functions using database accessor
+  local functions = database:get_functions()
+  for _, func in ipairs(functions) do
+    local func_name_lower = (func.name or func.function_name or ""):lower()
+    local schema_name = func.schema or func.schema_name or ""
+    -- Also try schema-qualified name
+    local qualified_name_lower = (schema_name .. "." .. func_name_lower):lower()
 
-      -- Search in function_group
-      for _, child in ipairs(schema.children) do
-        if child.object_type == "function_group" then
-          for _, func in ipairs(child.children) do
-            local func_name_lower = (func.name or func.function_name or ""):lower()
-            -- Also try schema-qualified name
-            local qualified_name_lower = (func.schema_name .. "." .. func_name_lower):lower()
-
-            if func_name_lower == name_lower or qualified_name_lower == name_lower then
-              return func
-            end
-          end
-        end
-      end
+    if func_name_lower == name_lower or qualified_name_lower == name_lower then
+      return func
     end
   end
 

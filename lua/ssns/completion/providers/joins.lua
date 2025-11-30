@@ -382,16 +382,6 @@ function JoinsProvider._get_fallback_tables(connection, existing_aliases)
 
   local database = connection.database
 
-  -- Ensure database is loaded
-  if not database.is_loaded then
-    local success = pcall(function()
-      database:load()
-    end)
-    if not success then
-      return {}
-    end
-  end
-
   -- Get show_schema_prefix option from config
   local show_schema_prefix = Config.ui and Config.ui.show_schema_prefix
   if show_schema_prefix == nil then
@@ -400,106 +390,90 @@ function JoinsProvider._get_fallback_tables(connection, existing_aliases)
 
   local items = {}
 
-  -- Find TABLES group
-  local tables_group = nil
-  for _, child in ipairs(database.children) do
-    if child.object_type == "tables_group" then
-      tables_group = child
-      break
+  -- Use database accessor method (handles schema-based vs non-schema servers)
+  local tables = database:get_tables()
+
+  for _, table_obj in ipairs(tables) do
+    local table_name = table_obj.name or table_obj.table_name
+
+    -- Generate alias for this table
+    local alias = JoinsProvider._generate_alias(table_name, existing_aliases)
+
+    -- Build insert text: "TableName alias"
+    local table_reference = table_name
+    if show_schema_prefix and table_obj.schema then
+      table_reference = table_obj.schema .. "." .. table_name
     end
-  end
 
-  if tables_group then
-    for _, table_obj in ipairs(tables_group.children) do
-      local table_name = table_obj.name or table_obj.table_name
+    local insertText = string.format("%s %s", table_reference, alias)
 
-      -- Generate alias for this table
-      local alias = JoinsProvider._generate_alias(table_name, existing_aliases)
-
-      -- Build insert text: "TableName alias"
-      local table_reference = table_name
-      if show_schema_prefix and table_obj.schema then
-        table_reference = table_obj.schema .. "." .. table_name
-      end
-
-      local insertText = string.format("%s %s", table_reference, alias)
-
-      -- Format as completion item
-      local detail
-      if show_schema_prefix and table_obj.schema then
-        detail = string.format("%s.%s (TABLE)", table_obj.schema, table_name)
-      else
-        detail = string.format("%s (TABLE)", table_name)
-      end
-
-      table.insert(items, {
-        label = table_name,
-        kind = Utils.CompletionItemKind.Class,
-        detail = detail,
-        documentation = nil,
-        insertText = insertText,
-        filterText = table_name,
-        sortText = Utils.generate_sort_text(9, table_name), -- Low priority
-        data = {
-          type = "join_fallback",
-          name = table_name,
-          schema = table_obj.schema,
-          has_fk = false,
-        }
-      })
+    -- Format as completion item
+    local detail
+    if show_schema_prefix and table_obj.schema then
+      detail = string.format("%s.%s (TABLE)", table_obj.schema, table_name)
+    else
+      detail = string.format("%s (TABLE)", table_name)
     end
+
+    table.insert(items, {
+      label = table_name,
+      kind = Utils.CompletionItemKind.Class,
+      detail = detail,
+      documentation = nil,
+      insertText = insertText,
+      filterText = table_name,
+      sortText = Utils.generate_sort_text(9, table_name), -- Low priority
+      data = {
+        type = "join_fallback",
+        name = table_name,
+        schema = table_obj.schema,
+        has_fk = false,
+      }
+    })
   end
 
   -- Also include views if supported
   local adapter = database:get_adapter()
   if adapter.features and adapter.features.views then
-    local views_group = nil
-    for _, child in ipairs(database.children) do
-      if child.object_type == "views_group" then
-        views_group = child
-        break
+    local views = database:get_views()
+
+    for _, view_obj in ipairs(views) do
+      local view_name = view_obj.name or view_obj.view_name
+
+      -- Generate alias for this view
+      local alias = JoinsProvider._generate_alias(view_name, existing_aliases)
+
+      -- Build insert text: "ViewName alias"
+      local view_reference = view_name
+      if show_schema_prefix and view_obj.schema then
+        view_reference = view_obj.schema .. "." .. view_name
       end
-    end
 
-    if views_group then
-      for _, view_obj in ipairs(views_group.children) do
-        local view_name = view_obj.name or view_obj.view_name
+      local insertText = string.format("%s %s", view_reference, alias)
 
-        -- Generate alias for this view
-        local alias = JoinsProvider._generate_alias(view_name, existing_aliases)
-
-        -- Build insert text: "ViewName alias"
-        local view_reference = view_name
-        if show_schema_prefix and view_obj.schema then
-          view_reference = view_obj.schema .. "." .. view_name
-        end
-
-        local insertText = string.format("%s %s", view_reference, alias)
-
-        -- Format as completion item
-        local detail
-        if show_schema_prefix and view_obj.schema then
-          detail = string.format("%s.%s (VIEW)", view_obj.schema, view_name)
-        else
-          detail = string.format("%s (VIEW)", view_name)
-        end
-
-        table.insert(items, {
-          label = view_name,
-          kind = Utils.CompletionItemKind.Class,
-          detail = detail,
-          documentation = nil,
-          insertText = insertText,
-          filterText = view_name,
-          sortText = Utils.generate_sort_text(9, view_name), -- Low priority
-          data = {
-            type = "join_fallback",
-            name = view_name,
-            schema = view_obj.schema,
-            has_fk = false,
-          }
-        })
+      -- Format as completion item
+      local detail
+      if show_schema_prefix and view_obj.schema then
+        detail = string.format("%s.%s (VIEW)", view_obj.schema, view_name)
+      else
+        detail = string.format("%s (VIEW)", view_name)
       end
+
+      table.insert(items, {
+        label = view_name,
+        kind = Utils.CompletionItemKind.Class,
+        detail = detail,
+        documentation = nil,
+        insertText = insertText,
+        filterText = view_name,
+        sortText = Utils.generate_sort_text(9, view_name), -- Low priority
+        data = {
+          type = "join_fallback",
+          name = view_name,
+          schema = view_obj.schema,
+          has_fk = false,
+        }
+      })
     end
   end
 

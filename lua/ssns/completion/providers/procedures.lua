@@ -101,70 +101,43 @@ function ProceduresProvider._get_procedures(connection)
     return items
   end
 
-  -- Ensure database is loaded
-  if not database.is_loaded then
-    database:load()
-  end
+  -- Use database accessor method (handles schema-based vs non-schema servers)
+  local procedures = database:get_procedures()
 
-  -- Find the PROCEDURES group in database children
-  local procedures_group = nil
-  for _, child in ipairs(database.children) do
-    if child.object_type == "procedures_group" then
-      procedures_group = child
-      break
-    end
-  end
+  for idx, proc_obj in ipairs(procedures) do
+    local item = Utils.format_procedure(proc_obj, {
+      show_schema = Config.ui and Config.ui.show_schema_prefix,
+      priority = 1,
+      with_params = true,
+    })
 
-  if not procedures_group then
-    return items
-  end
+    -- Get procedure name and schema for weight lookup
+    local proc_name = proc_obj.name or proc_obj.procedure_name
+    local schema = proc_obj.schema or proc_obj.schema_name
 
-  -- Lazy-load if needed
-  if not procedures_group.is_loaded then
-    procedures_group:load()
-  end
+    if proc_name and schema then
+      -- Build procedure path: schema.procedure
+      local proc_path = string.format("%s.%s", schema, proc_name)
 
-  if not procedures_group.children then
-    return items
-  end
+      -- Get weight
+      local weight = get_usage_weight(connection, "procedure", proc_path)
 
-  -- Iterate through procedures in the group
-  for idx, proc_obj in ipairs(procedures_group.children) do
-    if proc_obj.object_type == "procedure" then
-      local item = Utils.format_procedure(proc_obj, {
-        show_schema = Config.ui and Config.ui.show_schema_prefix,
-        priority = 1,
-        with_params = true,
-      })
-
-      -- Get procedure name and schema for weight lookup
-      local proc_name = proc_obj.name or proc_obj.procedure_name
-      local schema = proc_obj.schema or proc_obj.schema_name
-
-      if proc_name and schema then
-        -- Build procedure path: schema.procedure
-        local proc_path = string.format("%s.%s", schema, proc_name)
-
-        -- Get weight
-        local weight = get_usage_weight(connection, "procedure", proc_path)
-
-        -- Priority calculation
-        local priority
-        if weight > 0 then
-          priority = math.max(0, 4999 - weight)
-        else
-          priority = 5000 + idx
-        end
-
-        -- Update sortText with new priority
-        item.sortText = string.format("%05d_%s", priority, proc_name)
-
-        -- Store weight in data for debugging
-        item.data.weight = weight
+      -- Priority calculation
+      local priority
+      if weight > 0 then
+        priority = math.max(0, 4999 - weight)
+      else
+        priority = 5000 + idx
       end
 
-      table.insert(items, item)
+      -- Update sortText with new priority
+      item.sortText = string.format("%05d_%s", priority, proc_name)
+
+      -- Store weight in data for debugging
+      item.data.weight = weight
     end
+
+    table.insert(items, item)
   end
 
   return items
@@ -183,36 +156,12 @@ function ProceduresProvider._get_scalar_functions(connection)
     return items
   end
 
-  -- Ensure database is loaded
-  if not database.is_loaded then
-    database:load()
-  end
+  -- Use database accessor method (handles schema-based vs non-schema servers)
+  local functions = database:get_functions()
 
-  -- Find the FUNCTIONS group in database children
-  local functions_group = nil
-  for _, child in ipairs(database.children) do
-    if child.object_type == "functions_group" then
-      functions_group = child
-      break
-    end
-  end
-
-  if not functions_group then
-    return items
-  end
-
-  -- Lazy-load if needed
-  if not functions_group.is_loaded then
-    functions_group:load()
-  end
-
-  if not functions_group.children then
-    return items
-  end
-
-  -- Iterate through scalar functions in the group
-  for idx, func_obj in ipairs(functions_group.children) do
-    if func_obj.object_type == "function" and func_obj.function_type == "SCALAR" then
+  for idx, func_obj in ipairs(functions) do
+    -- Only include scalar functions
+    if func_obj.function_type == "SCALAR" then
       local item = Utils.format_procedure(func_obj, {
         show_schema = Config.ui and Config.ui.show_schema_prefix,
         priority = 2,
@@ -265,37 +214,12 @@ function ProceduresProvider._get_table_functions(connection)
     return items
   end
 
-  -- Ensure database is loaded
-  if not database.is_loaded then
-    database:load()
-  end
+  -- Use database accessor method (handles schema-based vs non-schema servers)
+  local functions = database:get_functions()
 
-  -- Find the FUNCTIONS group in database children
-  local functions_group = nil
-  for _, child in ipairs(database.children) do
-    if child.object_type == "functions_group" then
-      functions_group = child
-      break
-    end
-  end
-
-  if not functions_group then
-    return items
-  end
-
-  -- Lazy-load if needed
-  if not functions_group.is_loaded then
-    functions_group:load()
-  end
-
-  if not functions_group.children then
-    return items
-  end
-
-  -- Iterate through table-valued functions in the group
-  for idx, func_obj in ipairs(functions_group.children) do
-    if func_obj.object_type == "function" and
-       (func_obj.function_type == "TABLE" or func_obj.function_type == "INLINE_TABLE") then
+  for idx, func_obj in ipairs(functions) do
+    -- Only include table-valued functions
+    if func_obj.function_type == "TABLE" or func_obj.function_type == "INLINE_TABLE" then
       local item = Utils.format_procedure(func_obj, {
         show_schema = Config.ui and Config.ui.show_schema_prefix,
         priority = 2,

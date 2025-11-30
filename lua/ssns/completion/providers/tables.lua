@@ -291,37 +291,16 @@ function TablesProvider._collect_tables(database, show_schema_prefix, omit_schem
   local Utils = require('ssns.completion.utils')
   local items = {}
 
-  -- Find the TABLES group in database children
-  local tables_group = nil
-  for _, child in ipairs(database.children) do
-    if child.object_type == "tables_group" then
-      tables_group = child
-      break
-    end
-  end
+  -- Use database accessor method (handles schema-based vs non-schema servers)
+  local tables = database:get_tables(filter_schema)
 
-  if not tables_group then
-    return items
-  end
-
-  -- Iterate through tables in the group
-  for _, table_obj in ipairs(tables_group.children) do
-    -- Filter by schema if specified
-    if filter_schema then
-      local obj_schema = (table_obj.schema or table_obj.schema_name or ""):lower()
-      if obj_schema ~= filter_schema:lower() then
-        goto continue
-      end
-    end
-
+  for _, table_obj in ipairs(tables) do
     -- Create completion item using Utils.format_table
     local item = Utils.format_table(table_obj, {
       show_schema = show_schema_prefix,
       omit_schema = omit_schema,
     })
     table.insert(items, item)
-
-    ::continue::
   end
 
   return items
@@ -337,37 +316,16 @@ function TablesProvider._collect_views(database, show_schema_prefix, omit_schema
   local Utils = require('ssns.completion.utils')
   local items = {}
 
-  -- Find the VIEWS group in database children
-  local views_group = nil
-  for _, child in ipairs(database.children) do
-    if child.object_type == "views_group" then
-      views_group = child
-      break
-    end
-  end
+  -- Use database accessor method (handles schema-based vs non-schema servers)
+  local views = database:get_views(filter_schema)
 
-  if not views_group then
-    return items
-  end
-
-  -- Iterate through views in the group
-  for _, view_obj in ipairs(views_group.children) do
-    -- Filter by schema if specified
-    if filter_schema then
-      local obj_schema = (view_obj.schema or view_obj.schema_name or ""):lower()
-      if obj_schema ~= filter_schema:lower() then
-        goto continue
-      end
-    end
-
+  for _, view_obj in ipairs(views) do
     -- Create completion item using Utils.format_view
     local item = Utils.format_view(view_obj, {
       show_schema = show_schema_prefix,
       omit_schema = omit_schema,
     })
     table.insert(items, item)
-
-    ::continue::
   end
 
   return items
@@ -383,37 +341,16 @@ function TablesProvider._collect_synonyms(database, show_schema_prefix, omit_sch
   local Utils = require('ssns.completion.utils')
   local items = {}
 
-  -- Find the SYNONYMS group in database children
-  local synonyms_group = nil
-  for _, child in ipairs(database.children) do
-    if child.object_type == "synonyms_group" then
-      synonyms_group = child
-      break
-    end
-  end
+  -- Use database accessor method (handles schema-based vs non-schema servers)
+  local synonyms = database:get_synonyms(filter_schema)
 
-  if not synonyms_group then
-    return items
-  end
-
-  -- Iterate through synonyms in the group
-  for _, synonym_obj in ipairs(synonyms_group.children) do
-    -- Filter by schema if specified
-    if filter_schema then
-      local obj_schema = (synonym_obj.schema or synonym_obj.schema_name or ""):lower()
-      if obj_schema ~= filter_schema:lower() then
-        goto continue
-      end
-    end
-
+  for _, synonym_obj in ipairs(synonyms) do
     -- Create completion item using Utils.format_synonym
     local item = Utils.format_synonym(synonym_obj, {
       show_schema = show_schema_prefix,
       omit_schema = omit_schema,
     })
     table.insert(items, item)
-
-    ::continue::
   end
 
   return items
@@ -429,33 +366,14 @@ function TablesProvider._collect_functions(database, show_schema_prefix, omit_sc
   local Utils = require('ssns.completion.utils')
   local items = {}
 
-  if not database or not database.children then
+  if not database then
     return items
   end
 
-  -- Find the Functions group in database children
-  local functions_group = nil
-  for _, child in ipairs(database.children) do
-    if child.object_type == "functions_group" then
-      functions_group = child
-      break
-    end
-  end
+  -- Use database accessor method (handles schema-based vs non-schema servers)
+  local functions = database:get_functions(filter_schema)
 
-  if not functions_group or not functions_group.children then
-    return items
-  end
-
-  -- Collect all function objects
-  for _, func_obj in ipairs(functions_group.children) do
-    -- Filter by schema if specified
-    if filter_schema then
-      local obj_schema = (func_obj.schema or func_obj.schema_name or ""):lower()
-      if obj_schema ~= filter_schema:lower() then
-        goto continue
-      end
-    end
-
+  for _, func_obj in ipairs(functions) do
     -- Only include table-valued functions (skip scalar functions)
     if func_obj.is_table_valued and not func_obj:is_table_valued() then
       goto continue
@@ -486,23 +404,12 @@ function TablesProvider._collect_databases(server)
     return items
   end
 
-  -- Ensure server is loaded (loads all databases from server)
-  if not server.is_loaded then
-    server:load()
-  end
+  -- Use server accessor method
+  local databases = server:get_databases()
 
-  -- Server structure: server.children contains groups like "databases_group"
-  -- The actual databases are in databases_group.children
-  for _, child in ipairs(server.children or {}) do
-    if child.object_type == "databases_group" and child.children then
-      -- Found the databases group - iterate through actual databases
-      for _, db in ipairs(child.children) do
-        if db.object_type == "database" then
-          local item = Utils.format_database(db, {})
-          table.insert(items, item)
-        end
-      end
-    end
+  for _, db in ipairs(databases) do
+    local item = Utils.format_database(db, {})
+    table.insert(items, item)
   end
 
   return items
