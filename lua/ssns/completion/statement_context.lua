@@ -89,9 +89,24 @@ function Context._extract_prefix_and_trigger(line, col)
 end
 
 ---Get reference before a dot (e.g., "e." -> "e", "dbo.Employees." -> "dbo.Employees")
+---Also handles partial column names: "e.First" -> "e"
+---Also handles bracketed identifiers: "[e]." -> "e"
 ---@param before_cursor string Text before cursor
 ---@return string? reference The table/alias reference, or nil
 function Context._get_reference_before_dot(before_cursor)
+  -- First, strip any partial column name after the last dot
+  -- For "e.First" we want to get "e." then strip the dot to get "e"
+  -- For "e." we just strip the dot to get "e"
+  -- For "dbo.Employees.First" we want "dbo.Employees"
+
+  -- Check if there's text after a dot (partial column name)
+  -- Handle both regular identifiers and bracketed ones: .First or .[First]
+  local text_after_dot = before_cursor:match("%.(%[?[%w_]+%]?)$")
+  if text_after_dot then
+    -- Strip the partial column name to get "SELECT e."
+    before_cursor = before_cursor:sub(1, -(#text_after_dot + 1))
+  end
+
   -- Remove the trailing dot
   if before_cursor:sub(-1) == "." then
     before_cursor = before_cursor:sub(1, -2)
@@ -104,6 +119,9 @@ function Context._get_reference_before_dot(before_cursor)
   if ref then
     -- Clean up any whitespace
     ref = ref:gsub("%s+", "")
+    -- Strip surrounding brackets from each part for alias matching
+    -- [e] -> e, [dbo].[Employees] -> dbo.Employees
+    ref = ref:gsub("%[([^%]]+)%]", "%1")
     return ref
   end
 
@@ -334,6 +352,16 @@ function Context._detect_type_from_line(before_cursor, chunk)
     return Context.Type.TABLE, "delete", extra
   end
 
+  -- TRUNCATE TABLE: TRUNCATE TABLE table_name
+  if upper_trimmed:match("TRUNCATE%s+TABLE%s+$") or upper:match("TRUNCATE%s+TABLE%s+[%w_#@%.%[%]]*$") then
+    return Context.Type.TABLE, "truncate", extra
+  end
+
+  -- ALTER TABLE: ALTER TABLE table_name
+  if upper_trimmed:match("ALTER%s+TABLE%s+$") or upper:match("ALTER%s+TABLE%s+[%w_#@%.%[%]]*$") then
+    return Context.Type.TABLE, "alter", extra
+  end
+
   -- MERGE INTO target_table: MERGE INTO table AS target
   if upper_trimmed:match("MERGE%s+INTO%s+$") or upper:match("MERGE%s+INTO%s+[%w_#@%.%[%]]*$") then
     return Context.Type.TABLE, "merge", extra
@@ -341,7 +369,54 @@ function Context._detect_type_from_line(before_cursor, chunk)
 
   -- MERGE USING source_table: MERGE ... USING table AS source
   if upper_trimmed:match("USING%s+$") or upper:match("USING%s+[%w_#@%.%[%]]*$") then
+    -- Parse qualified name for cross-database support: USING TEST.dbo.█
+    local after_using = trimmed:match("USING%s+(.*)$")
+    if after_using then
+      local qualified = Context._parse_qualified_name(after_using)
+      if qualified.database then
+        extra.database = qualified.database
+        extra.schema = qualified.schema
+        extra.filter_database = qualified.database
+        extra.filter_schema = qualified.schema
+        extra.omit_schema = true
+        return Context.Type.TABLE, "merge_cross_db_qualified", extra
+      elseif qualified.schema then
+        -- Could be "schema." or "database." - set potential_database for provider to check
+        extra.potential_database = qualified.schema
+        extra.schema = qualified.schema
+        extra.filter_schema = qualified.schema
+        extra.omit_schema = true
+        return Context.Type.TABLE, "merge_qualified", extra
+      end
+    end
     return Context.Type.TABLE, "merge", extra
+  end
+
+  -- MERGE INSERT column list: WHEN NOT MATCHED THEN INSERT (█) or INSERT (col1, █)
+  -- This must come BEFORE regular INSERT INTO check to detect MERGE context
+  local merge_insert_match = before_cursor:upper():match("WHEN%s+NOT%s+MATCHED[^;]*THEN%s+INSERT%s*%(")
+  if merge_insert_match then
+    -- For MERGE INSERT, the target table is from MERGE INTO earlier
+    -- We need to get it from the parsed chunk
+    extra.is_merge_insert = true
+    return Context.Type.COLUMN, "merge_insert_columns", extra
+  end
+
+  -- OUTPUT clause with inserted/deleted pseudo-tables (MUST check BEFORE qualified column)
+  -- Patterns: "OUTPUT inserted.█" or "OUTPUT deleted.█"
+  local upper_before_out = before_cursor:upper()
+  local output_inserted_early = upper_before_out:match("OUTPUT[^;]*INSERTED%.$")
+  local output_deleted_early = upper_before_out:match("OUTPUT[^;]*DELETED%.$")
+  if output_inserted_early then
+    extra.is_output_clause = true
+    extra.output_pseudo_table = "inserted"
+    extra.table_ref = "inserted"
+    return Context.Type.COLUMN, "output", extra
+  elseif output_deleted_early then
+    extra.is_output_clause = true
+    extra.output_pseudo_table = "deleted"
+    extra.table_ref = "deleted"
+    return Context.Type.COLUMN, "output", extra
   end
 
   -- Check for qualified column reference (alias.column, table.column)
@@ -474,6 +549,16 @@ function Context._detect_type_from_line(before_cursor, chunk)
   -- COLUMN contexts
   -- Check before_cursor for SELECT context (not full line - handles nested SELECT ... FROM)
   local before_upper = before_cursor:upper()
+  -- Check for subquery SELECT context: (SELECT ... with no FROM after it
+  -- This handles: WHERE col IN (SELECT █FROM table)
+  -- The outer query has FROM but the subquery's SELECT should get column completion
+  if before_upper:match("%(%s*SELECT%s+$") or before_upper:match("%(%s*SELECT%s+[^%)]*$") then
+    -- We're inside a subquery SELECT - check if there's a FROM after the subquery's SELECT
+    local subquery_start = before_upper:match(".*%(%s*(SELECT.*)$")
+    if subquery_start and not subquery_start:match("FROM") then
+      return Context.Type.COLUMN, "select", extra
+    end
+  end
   if upper_trimmed:match("SELECT%s+$") or (before_upper:match("SELECT%s+") and not before_upper:match("FROM")) then
     return Context.Type.COLUMN, "select", extra
   end
@@ -505,6 +590,16 @@ function Context._detect_type_from_line(before_cursor, chunk)
     -- UPDATE SET clause
     if chunk and chunk.statement_type == "UPDATE" then
       return Context.Type.COLUMN, "set", extra
+    end
+  end
+
+  -- OUTPUT clause without qualification - suggest both inserted and deleted
+  -- (OUTPUT inserted./deleted. patterns are handled earlier, before the qualified column check)
+  if upper_trimmed:match("OUTPUT%s+$") or upper:match("OUTPUT%s+[%w_%.]*$") then
+    if chunk and (chunk.statement_type == "INSERT" or chunk.statement_type == "UPDATE" or
+                  chunk.statement_type == "DELETE" or chunk.statement_type == "MERGE") then
+      extra.is_output_clause = true
+      return Context.Type.COLUMN, "output", extra
     end
   end
 
@@ -667,6 +762,50 @@ function Context.detect(bufnr, line_num, col)
     goto build_context
   end
 
+  -- OUTPUT INTO table detection (MUST be BEFORE OUTPUT column detection)
+  -- Pattern: "OUTPUT ... INTO █" - needs TABLE completion
+  do
+    local upper_for_output = before_cursor:upper()
+    if upper_for_output:match("OUTPUT[^;]*INTO%s+$") or upper_for_output:match("OUTPUT[^;]*INTO%s+[%w_#@]*$") then
+      extra = {}
+      extra.is_output_into = true
+      ctx_type = Context.Type.TABLE
+      mode = "from"
+      goto build_context
+    end
+  end
+
+  -- EXEC/EXECUTE detection (MUST be BEFORE clause-based routing)
+  -- Patterns: "EXEC █" or "INSERT INTO table EXEC █" - needs PROCEDURE completion
+  do
+    local upper_for_exec = before_cursor:upper()
+    if upper_for_exec:match("EXEC%s+$") or upper_for_exec:match("EXECUTE%s+$") or
+       upper_for_exec:match("EXEC%s+[%w_%.]*$") or upper_for_exec:match("EXECUTE%s+[%w_%.]*$") then
+      extra = {}
+      ctx_type = Context.Type.PROCEDURE
+      mode = "exec"
+      goto build_context
+    end
+  end
+
+  -- OUTPUT clause detection (MUST be BEFORE clause-based routing since OUTPUT isn't tracked in clause_positions)
+  -- Pattern: "OUTPUT inserted.█" or "OUTPUT deleted.█"
+  -- Use do...end block to avoid goto scope issues with local variables
+  do
+    local upper_for_output = before_cursor:upper()
+    local output_inserted_ctx = upper_for_output:match("OUTPUT[^;]*INSERTED%.$")
+    local output_deleted_ctx = upper_for_output:match("OUTPUT[^;]*DELETED%.$")
+    if output_inserted_ctx or output_deleted_ctx then
+      extra = {}
+      extra.is_output_clause = true
+      extra.output_pseudo_table = output_inserted_ctx and "inserted" or "deleted"
+      extra.table_ref = extra.output_pseudo_table
+      ctx_type = Context.Type.COLUMN
+      mode = "output"
+      goto build_context
+    end
+  end
+
   if chunk then
     local StatementParser = require('ssns.completion.statement_parser')
 
@@ -680,6 +819,7 @@ function Context.detect(bufnr, line_num, col)
     end
 
     local clause = StatementParser.get_clause_at_position(clause_source, line_num, col)
+    Debug.log(string.format("[statement_context] get_clause_at_position returned: %s", tostring(clause)))
 
     if clause then
       -- Use clause position to determine context
@@ -766,6 +906,10 @@ function Context.detect(bufnr, line_num, col)
             extra.omit_schema = true
             mode = "join_cross_db_qualified"
           elseif qualified.schema then
+            -- Check if this single identifier is a database name (cross-db schema completion)
+            -- For "JOIN TEST.█", qualified.schema would be "TEST"
+            -- Pass potential_database so providers can validate it
+            extra.potential_database = qualified.schema
             extra.schema = qualified.schema
             extra.filter_schema = qualified.schema
             extra.omit_schema = true
@@ -968,6 +1112,7 @@ function Context.detect(bufnr, line_num, col)
   local tables_in_scope = {}
   local seen_ctes = {} -- Track which CTEs have been added to avoid duplicates
   local seen_subqueries = {} -- Track which subqueries have been added to avoid duplicates
+  local seen_temp_tables = {} -- Track which temp tables have been added to avoid duplicates
   if cache_ctx and cache_ctx.tables then
     for _, table_ref in ipairs(cache_ctx.tables) do
       -- Preserve CTE entries with their columns
@@ -989,6 +1134,27 @@ function Context.detect(bufnr, line_num, col)
             columns = cte_columns,
           })
         end
+      elseif table_ref.is_temp_table then
+        -- Preserve temp table entries with their columns
+        local temp_name = table_ref.name
+        if temp_name and not seen_temp_tables[temp_name:lower()] then
+          seen_temp_tables[temp_name:lower()] = true
+          -- Look up columns from temp_tables dict if not present on table_ref
+          local temp_columns = table_ref.columns
+          if (not temp_columns or #temp_columns == 0) and cache_ctx.temp_tables then
+            local temp_def = cache_ctx.temp_tables[temp_name] or cache_ctx.temp_tables[temp_name:lower()]
+            if temp_def then
+              temp_columns = temp_def.columns
+            end
+          end
+          table.insert(tables_in_scope, {
+            name = temp_name,
+            alias = table_ref.alias,
+            is_temp_table = true,
+            is_global = table_ref.is_global,
+            columns = temp_columns,
+          })
+        end
       elseif table_ref.is_subquery then
         -- Preserve subquery/derived table entries with their columns
         local sq_name = table_ref.name or table_ref.alias
@@ -999,6 +1165,19 @@ function Context.detect(bufnr, line_num, col)
             alias = table_ref.alias,
             is_subquery = true,
             columns = table_ref.columns,
+          })
+        end
+      elseif table_ref.is_tvf then
+        -- Preserve table-valued function (TVF) entries
+        -- Columns will be looked up from database metadata when needed
+        local tvf_name = table_ref.alias or table_ref.name
+        if tvf_name then
+          table.insert(tables_in_scope, {
+            name = table_ref.name,
+            alias = table_ref.alias,
+            schema = table_ref.schema,
+            is_tvf = true,
+            function_name = table_ref.function_name or table_ref.name,
           })
         end
       else
