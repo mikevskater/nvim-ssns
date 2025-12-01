@@ -188,6 +188,32 @@ WHERE type = 'table'
 ]], table_name)
 end
 
+---Parse table definition result and return normalized format
+---@param result table Node.js result object
+---@return string? definition The CREATE TABLE statement
+function SQLiteAdapter:parse_table_definition(result)
+  if result and result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    if #rows > 0 then
+      return rows[1].definition
+    end
+  end
+  return nil
+end
+
+---Parse object definition result (for views)
+---@param result table Node.js result object
+---@return string? definition The object definition
+function SQLiteAdapter:parse_definition(result)
+  if result and result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    if #rows > 0 then
+      return rows[1].definition
+    end
+  end
+  return nil
+end
+
 -- ============================================================================
 -- Result Parsing Methods
 -- ============================================================================

@@ -622,20 +622,18 @@ function TableClass:get_definition()
   -- Use adapter to get the definition query
   local query = adapter:get_table_definition_query(db.db_name, self.schema_name, self.table_name)
 
-  -- Execute query to get the definition (no delimiter for multi-line text)
+  -- Execute query to get the definition
   local server = self:get_server()
-  local success, results = pcall(adapter.execute, adapter, server.connection, query, { use_delimiter = false })
+  local success, results = pcall(adapter.execute, adapter, server.connection_string, query, { use_delimiter = false })
 
   if not success then
     return string.format("-- Error getting definition: %s", tostring(results))
   end
 
-  -- For SQL Server, the result should contain the CREATE TABLE script
-  if adapter.db_type == "sqlserver" then
-    -- The query should return a single row with the CREATE TABLE script
-    if results and #results > 0 and results[1].definition then
-      return results[1].definition
-    end
+  -- Use adapter's parse method for consistent result handling
+  local definition = adapter:parse_table_definition(results)
+  if definition then
+    return definition
   end
 
   -- Fallback: construct CREATE TABLE from columns metadata

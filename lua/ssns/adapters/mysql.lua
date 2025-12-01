@@ -312,9 +312,36 @@ end
 ---@param table_name string
 ---@return string query
 function MySQLAdapter:get_table_definition_query(database_name, schema_name, table_name)
-  return string.format([[
-SHOW CREATE TABLE `%s`.`%s`;
-]], database_name, table_name)
+  -- SHOW CREATE TABLE returns columns: 'Table' and 'Create Table'
+  -- The 'Create Table' column contains the CREATE TABLE statement
+  return string.format([[SHOW CREATE TABLE `%s`.`%s`;]], database_name, table_name)
+end
+
+---Parse table definition result and return normalized format
+---@param result table Node.js result object
+---@return string? definition The CREATE TABLE statement
+function MySQLAdapter:parse_table_definition(result)
+  if result and result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    if #rows > 0 then
+      -- SHOW CREATE TABLE returns 'Create Table' column
+      return rows[1]["Create Table"]
+    end
+  end
+  return nil
+end
+
+---Parse object definition result (for views, procedures, functions)
+---@param result table Node.js result object
+---@return string? definition The object definition
+function MySQLAdapter:parse_definition(result)
+  if result and result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    if #rows > 0 then
+      return rows[1].definition
+    end
+  end
+  return nil
 end
 
 -- ============================================================================
