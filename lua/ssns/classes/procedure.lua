@@ -189,8 +189,15 @@ function ProcedureClass:load_definition()
 
   local adapter = self:get_adapter()
 
-  -- Navigate up: Procedure -> Database (no schemas in new structure)
-  local db = self.parent
+  -- Navigate to database based on server type:
+  -- Schema-based (SQL Server, PostgreSQL): Procedure -> Schema -> Database
+  -- Non-schema (MySQL, SQLite): Procedure -> Database
+  local db
+  if adapter.features.schemas then
+    db = self.parent.parent  -- Procedure -> Schema -> Database
+  else
+    db = self.parent  -- Procedure -> Database
+  end
 
   -- Get definition query from adapter
   local query = adapter:get_definition_query(db.db_name, self.schema_name, self.procedure_name, "PROCEDURE")
