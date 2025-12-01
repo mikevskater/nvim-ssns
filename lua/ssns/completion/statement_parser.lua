@@ -705,7 +705,8 @@ function ParserState:parse_select_columns(paren_depth, known_ctes, subqueries, s
       if self:is_keyword("AS") then
         self:advance()
         local alias_token = self:current()
-        if alias_token and (alias_token.type == "identifier" or alias_token.type == "bracket_id") then
+        -- Accept identifiers, bracket_ids, and keywords as aliases (SQL keywords can be valid aliases)
+        if alias_token and (alias_token.type == "identifier" or alias_token.type == "bracket_id" or alias_token.type == "keyword") then
           current_col = strip_brackets(alias_token.text)
           -- Don't clear current_source_table - preserve the table reference for the alias
           self:advance()
@@ -723,8 +724,18 @@ function ParserState:parse_select_columns(paren_depth, known_ctes, subqueries, s
         current_source_table = nil
       end
       self:advance()
+    elseif self:is_keyword("AS") then
+      -- Handle AS keyword for expressions (e.g., "1 AS Level", "GETDATE() AS Today")
+      -- This captures aliased expressions where the expression itself isn't tracked
+      self:advance()
+      local alias_token = self:current()
+      -- Accept identifiers, bracket_ids, and keywords as aliases
+      if alias_token and (alias_token.type == "identifier" or alias_token.type == "bracket_id" or alias_token.type == "keyword") then
+        current_col = strip_brackets(alias_token.text)
+        self:advance()
+      end
     else
-      -- Other tokens (keywords, operators, etc.) - keep parsing
+      -- Other tokens (numbers, operators, etc.) - keep parsing
       self:advance()
     end
   end

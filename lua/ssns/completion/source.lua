@@ -338,9 +338,27 @@ function Source:get_completions(ctx, callback)
       connection_ctx.database and connection_ctx.database.db_name or "nil"))
   end
 
+  -- Check for cross-db schema completion early (TEST.█ pattern)
+  -- Skip expensive pre_resolve_scope for this case
+  local is_cross_db_schema = false
+  local cross_db_target = nil  -- Store the target database for later use
+  if context_result and context_result.potential_database and connection_ctx then
+    local server = connection_ctx.server
+    if server then
+      local check_db = server:get_database(context_result.potential_database)
+      if check_db then
+        is_cross_db_schema = true
+        cross_db_target = check_db
+        Debug.log(string.format("[COMPLETION] Cross-db schema detected: %s - skipping pre_resolve_scope",
+          context_result.potential_database))
+      end
+    end
+  end
+
   -- Pre-resolve all aliases and tables in scope to avoid repeated tree walks in providers
+  -- Skip for cross-db schema completion (doesn't need resolved tables)
   local resolved_scope = nil
-  if context_result and connection_ctx then
+  if context_result and connection_ctx and not is_cross_db_schema then
     local Resolver = require('ssns.completion.metadata.resolver')
     resolved_scope = Resolver.pre_resolve_scope(context_result, connection_ctx)
     Debug.log(string.format("[COMPLETION] Pre-resolved scope: %d aliases, %d tables",
@@ -391,15 +409,14 @@ function Source:get_completions(ctx, callback)
     }
     setup_selection_tracker(tracking_ctx, items)
 
-    -- Return results via callback (async pattern)
-    vim.schedule(function()
-      Debug.log(string.format("[COMPLETION] Calling blink callback with %d items", #items))
-      callback({
-        items = items,
-        is_incomplete_backward = false,
-        is_incomplete_forward = false,
-      })
-    end)
+    -- Return results via callback directly
+    -- Avoid vim.schedule() here as it can delay completion in headless/test mode
+    Debug.log(string.format("[COMPLETION] Calling blink callback with %d items", #items))
+    callback({
+      items = items,
+      is_incomplete_backward = false,
+      is_incomplete_forward = false,
+    })
   end
 
   -- Route to appropriate provider based on context type
@@ -414,20 +431,14 @@ function Source:get_completions(ctx, callback)
     -- All TABLE contexts (including "join" mode) use TablesProvider for consistent behavior
     -- FK suggestions can be added as an enhancement layer on top of TablesProvider results
 
-    -- Check if this is a cross-database schema completion ("TEST.█" pattern)
-    -- potential_database is set when we have a single identifier + dot that could be a database name
-    if context_result.potential_database then
-      local server = connection_ctx and connection_ctx.server
-      if server then
-        local check_db = server:get_database(context_result.potential_database)
-        if check_db then
-          -- This is a database name - return schemas from that database instead of tables
-          Debug.log(string.format("[COMPLETION] Calling SchemasProvider for cross-db: %s", context_result.potential_database))
-          local SchemasProvider = require('ssns.completion.providers.schemas')
-          SchemasProvider.get_completions(provider_ctx, wrapped_callback)
-          return
-        end
-      end
+    -- Cross-database schema completion ("TEST.█" pattern)
+    -- Already detected early and stored in is_cross_db_schema/cross_db_target
+    if is_cross_db_schema and cross_db_target then
+      Debug.log(string.format("[COMPLETION] Routing to SchemasProvider for cross-db: %s",
+        context_result.potential_database))
+      local SchemasProvider = require('ssns.completion.providers.schemas')
+      SchemasProvider.get_completions(provider_ctx, wrapped_callback)
+      return
     end
 
     -- Table/view/synonym completion (Phase 10.2)
