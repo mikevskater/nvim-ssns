@@ -67,6 +67,23 @@ function DbClass:load()
   return true
 end
 
+---Create a database-scoped connection string
+---@return string connection_string
+function DbClass:_get_db_connection_string()
+  local server = self:get_server()
+  local adapter = self:get_adapter()
+
+  -- SQLite: The file path IS the database, no modification needed
+  -- The "main" database name is just SQLite's internal reference
+  if adapter.db_type == "sqlite" then
+    return server.connection_string
+  end
+
+  -- For other databases, modify the connection string to target this database
+  local ConnectionString = require('ssns.connection_string')
+  return ConnectionString.with_database(server.connection_string, self.db_name)
+end
+
 ---Load schemas for this database
 ---@return SchemaClass[]
 function DbClass:_load_schemas()
@@ -75,7 +92,7 @@ function DbClass:_load_schemas()
 
   -- Get schemas query
   local query = adapter:get_schemas_query(self.db_name)
-  local results = adapter:execute(self:get_server().connection, query)
+  local results = adapter:execute(self:_get_db_connection_string(), query)
   local schema_data_list = adapter:parse_schemas(results)
 
   local schemas = {}
@@ -96,7 +113,7 @@ function DbClass:_load_tables()
   local adapter = self:get_adapter()
 
   local query = adapter:get_tables_query(self.db_name, nil)
-  local results = adapter:execute(self:get_server().connection, query)
+  local results = adapter:execute(self:_get_db_connection_string(), query)
   local table_data_list = adapter:parse_tables(results)
 
   local tables = {}
@@ -119,7 +136,7 @@ function DbClass:_load_views()
   end
 
   local query = adapter:get_views_query(self.db_name, nil)
-  local results = adapter:execute(self:get_server().connection, query)
+  local results = adapter:execute(self:_get_db_connection_string(), query)
   local view_data_list = adapter:parse_views(results)
 
   local views = {}
@@ -142,7 +159,7 @@ function DbClass:_load_procedures()
   end
 
   local query = adapter:get_procedures_query(self.db_name, nil)
-  local results = adapter:execute(self:get_server().connection, query)
+  local results = adapter:execute(self:_get_db_connection_string(), query)
   local proc_data_list = adapter:parse_procedures(results)
 
   local procedures = {}
@@ -165,7 +182,7 @@ function DbClass:_load_functions()
   end
 
   local query = adapter:get_functions_query(self.db_name, nil)
-  local results = adapter:execute(self:get_server().connection, query)
+  local results = adapter:execute(self:_get_db_connection_string(), query)
   local func_data_list = adapter:parse_functions(results)
 
   local functions = {}

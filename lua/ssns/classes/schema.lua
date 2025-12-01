@@ -60,8 +60,7 @@ function SchemaClass:load_tables()
   local query = adapter:get_tables_query(db.db_name, self.schema_name)
 
   -- Execute query
-  -- TODO: Implement actual execution via vim-dadbod
-  local results = adapter:execute(self:get_server().connection, query)
+  local results = adapter:execute(db:_get_db_connection_string(), query)
 
   -- Parse results
   local tables = adapter:parse_tables(results)
@@ -91,8 +90,7 @@ function SchemaClass:load_views()
   local query = adapter:get_views_query(db.db_name, self.schema_name)
 
   -- Execute query
-  -- TODO: Implement actual execution via vim-dadbod
-  local results = adapter:execute(self:get_server().connection, query)
+  local results = adapter:execute(db:_get_db_connection_string(), query)
 
   -- Parse results
   local views = adapter:parse_views(results)
@@ -123,7 +121,7 @@ function SchemaClass:load_procedures()
 
   -- Execute query
   -- TODO: Implement actual execution via vim-dadbod
-  local results = adapter:execute(self:get_server().connection, query)
+  local results = adapter:execute(db:_get_db_connection_string(), query)
 
   -- Parse results
   local procedures = adapter:parse_procedures(results)
@@ -159,7 +157,7 @@ function SchemaClass:load_functions()
 
   -- Execute query
   -- TODO: Implement actual execution via vim-dadbod
-  local results = adapter:execute(self:get_server().connection, query)
+  local results = adapter:execute(db:_get_db_connection_string(), query)
 
   -- Parse results
   local functions = adapter:parse_functions(results)
@@ -195,7 +193,7 @@ function SchemaClass:load_synonyms()
   local query = adapter:get_synonyms_query(db.db_name, self.schema_name)
 
   -- Execute query
-  local results = adapter:execute(self:get_server().connection, query)
+  local results = adapter:execute(db:_get_db_connection_string(), query)
 
   -- Parse results
   local synonyms = adapter:parse_synonyms(results)
