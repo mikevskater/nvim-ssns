@@ -240,50 +240,49 @@ function UiTree.render_database(db, lines, indent_level)
       local loading_icon = icons.connecting or "⋯"
       table.insert(lines, indent .. "    " .. loading_icon .. " Loading...")
     elseif db.is_loaded then
-      -- Check if this is a schema-based server (SQL Server, PostgreSQL)
-      local schemas = db:get_schemas()
-      if #schemas > 0 then
-        -- Schema-based server: render schemas, each schema has object groups
-        for _, schema in ipairs(schemas) do
-          UiTree.render_schema(schema, lines, indent_level + 1)
-        end
-      else
-        -- Non-schema server (MySQL): render object groups directly under database
-        local adapter = db:get_adapter()
+      -- Render object groups at database level (aggregating from schemas if needed)
+      -- This works for both schema-based (SQL Server, PostgreSQL) and non-schema (MySQL) servers
+      local adapter = db:get_adapter()
 
-        -- TABLES group
-        local tables = db:get_tables()
-        if #tables > 0 then
-          local tables_group = create_ui_group(db, "TABLES", "tables_group", tables)
-          UiTree.render_object(tables_group, lines, indent_level + 1)
-        end
+      -- SCHEMAS group (for schema-based servers like SQL Server, PostgreSQL)
+      if adapter.features and adapter.features.schemas then
+        local schemas = db:get_schemas()
+        local schemas_group = create_ui_group(db, "SCHEMAS", "schemas_group", schemas)
+        UiTree.render_object(schemas_group, lines, indent_level + 1)
+      end
 
-        -- VIEWS group
-        if adapter.features and adapter.features.views then
-          local views = db:get_views()
-          if #views > 0 then
-            local views_group = create_ui_group(db, "VIEWS", "views_group", views)
-            UiTree.render_object(views_group, lines, indent_level + 1)
-          end
-        end
+      -- TABLES group - uses db:get_tables() which aggregates from schemas
+      -- Always show even if empty (with count of 0)
+      local tables = db:get_tables()
+      local tables_group = create_ui_group(db, "TABLES", "tables_group", tables)
+      UiTree.render_object(tables_group, lines, indent_level + 1)
 
-        -- PROCEDURES group
-        if adapter.features and adapter.features.procedures then
-          local procedures = db:get_procedures()
-          if #procedures > 0 then
-            local procedures_group = create_ui_group(db, "PROCEDURES", "procedures_group", procedures)
-            UiTree.render_object(procedures_group, lines, indent_level + 1)
-          end
-        end
+      -- VIEWS group - always show if feature supported
+      if adapter.features and adapter.features.views then
+        local views = db:get_views()
+        local views_group = create_ui_group(db, "VIEWS", "views_group", views)
+        UiTree.render_object(views_group, lines, indent_level + 1)
+      end
 
-        -- FUNCTIONS group
-        if adapter.features and adapter.features.functions then
-          local functions = db:get_functions()
-          if #functions > 0 then
-            local functions_group = create_ui_group(db, "FUNCTIONS", "functions_group", functions)
-            UiTree.render_object(functions_group, lines, indent_level + 1)
-          end
-        end
+      -- PROCEDURES group - always show if feature supported
+      if adapter.features and adapter.features.procedures then
+        local procedures = db:get_procedures()
+        local procedures_group = create_ui_group(db, "PROCEDURES", "procedures_group", procedures)
+        UiTree.render_object(procedures_group, lines, indent_level + 1)
+      end
+
+      -- FUNCTIONS group - always show if feature supported
+      if adapter.features and adapter.features.functions then
+        local functions = db:get_functions()
+        local functions_group = create_ui_group(db, "FUNCTIONS", "functions_group", functions)
+        UiTree.render_object(functions_group, lines, indent_level + 1)
+      end
+
+      -- SYNONYMS group (typically SQL Server only) - always show if feature supported
+      if adapter.features and adapter.features.synonyms then
+        local synonyms = db:get_synonyms()
+        local synonyms_group = create_ui_group(db, "SYNONYMS", "synonyms_group", synonyms)
+        UiTree.render_object(synonyms_group, lines, indent_level + 1)
       end
     else
       local loading_icon = icons.connecting or "⋯"
@@ -317,47 +316,37 @@ function UiTree.render_schema(schema, lines, indent_level)
     if schema.is_loaded then
       local adapter = schema:get_adapter()
 
-      -- TABLES group
+      -- TABLES group - always show even if empty
       local tables = schema:get_tables()
-      if #tables > 0 then
-        local tables_group = create_ui_group(schema, "TABLES", "tables_group", tables)
-        UiTree.render_object_group(tables_group, lines, indent_level + 1)
-      end
+      local tables_group = create_ui_group(schema, "TABLES", "tables_group", tables)
+      UiTree.render_object_group(tables_group, lines, indent_level + 1)
 
-      -- VIEWS group
+      -- VIEWS group - always show if feature supported
       if adapter.features and adapter.features.views then
         local views = schema:get_views()
-        if #views > 0 then
-          local views_group = create_ui_group(schema, "VIEWS", "views_group", views)
-          UiTree.render_object_group(views_group, lines, indent_level + 1)
-        end
+        local views_group = create_ui_group(schema, "VIEWS", "views_group", views)
+        UiTree.render_object_group(views_group, lines, indent_level + 1)
       end
 
-      -- PROCEDURES group
+      -- PROCEDURES group - always show if feature supported
       if adapter.features and adapter.features.procedures then
         local procedures = schema:get_procedures()
-        if #procedures > 0 then
-          local procedures_group = create_ui_group(schema, "PROCEDURES", "procedures_group", procedures)
-          UiTree.render_object_group(procedures_group, lines, indent_level + 1)
-        end
+        local procedures_group = create_ui_group(schema, "PROCEDURES", "procedures_group", procedures)
+        UiTree.render_object_group(procedures_group, lines, indent_level + 1)
       end
 
-      -- FUNCTIONS group
+      -- FUNCTIONS group - always show if feature supported
       if adapter.features and adapter.features.functions then
         local functions = schema:get_functions()
-        if #functions > 0 then
-          local functions_group = create_ui_group(schema, "FUNCTIONS", "functions_group", functions)
-          UiTree.render_object_group(functions_group, lines, indent_level + 1)
-        end
+        local functions_group = create_ui_group(schema, "FUNCTIONS", "functions_group", functions)
+        UiTree.render_object_group(functions_group, lines, indent_level + 1)
       end
 
-      -- SYNONYMS group
+      -- SYNONYMS group - always show if feature supported
       if adapter.features and adapter.features.synonyms then
         local synonyms = schema:get_synonyms()
-        if #synonyms > 0 then
-          local synonyms_group = create_ui_group(schema, "SYNONYMS", "synonyms_group", synonyms)
-          UiTree.render_object_group(synonyms_group, lines, indent_level + 1)
-        end
+        local synonyms_group = create_ui_group(schema, "SYNONYMS", "synonyms_group", synonyms)
+        UiTree.render_object_group(synonyms_group, lines, indent_level + 1)
       end
     else
       local loading_icon = icons.connecting or "⋯"
@@ -548,12 +537,26 @@ function UiTree.render_object(obj, lines, indent_level)
 
           -- Render filtered children
           for _, child in ipairs(filtered_children) do
-            UiTree.render_object(child, lines, indent_level + 1)
+            -- Delegate to specialized renderers for complex objects
+            if child.object_type == "database" then
+              UiTree.render_database(child, lines, indent_level + 1)
+            elseif child.object_type == "schema" then
+              UiTree.render_schema(child, lines, indent_level + 1)
+            else
+              UiTree.render_object(child, lines, indent_level + 1)
+            end
           end
         else
           -- Regular rendering without filters
           for _, child in ipairs(all_children) do
-            UiTree.render_object(child, lines, indent_level + 1)
+            -- Delegate to specialized renderers for complex objects
+            if child.object_type == "database" then
+              UiTree.render_database(child, lines, indent_level + 1)
+            elseif child.object_type == "schema" then
+              UiTree.render_schema(child, lines, indent_level + 1)
+            else
+              UiTree.render_object(child, lines, indent_level + 1)
+            end
           end
         end
       end
@@ -1117,6 +1120,7 @@ function UiTree.show_dependencies(obj)
 end
 
 ---Navigate to an object in the tree (expand parents and position cursor)
+---Auto-loads unloaded objects in the path and expands them
 ---@param target_object BaseDbObject The object to navigate to
 function UiTree.navigate_to_object(target_object)
   if not target_object then
@@ -1132,22 +1136,46 @@ function UiTree.navigate_to_object(target_object)
     current = current.parent
   end
 
-  -- Expand all parent nodes
+  -- Load and expand all parent nodes in order (root to target)
   for _, parent in ipairs(parents) do
-    if not parent.ui_state.expanded and parent:has_children() then
+    -- First, load the object if it has a load method and isn't loaded
+    if not parent.is_loaded and parent.load then
+      parent:load()
+    end
+
+    -- Then expand if it can have children (by type or by actual children)
+    local can_have_children = parent:has_children()
+      or parent.object_type == "server"
+      or parent.object_type == "database"
+      or parent.object_type == "schema"
+      or parent.object_type == "table"
+      or parent.object_type == "view"
+      or parent.object_type == "procedure"
+      or parent.object_type == "function"
+      or parent.object_type == "synonym"
+      or parent.object_type == "databases_group"
+      or parent.object_type == "tables_group"
+      or parent.object_type == "views_group"
+      or parent.object_type == "procedures_group"
+      or parent.object_type == "functions_group"
+      or parent.object_type == "synonyms_group"
+      or parent.object_type == "schemas_group"
+
+    if not parent.ui_state.expanded and can_have_children then
       parent.ui_state.expanded = true
-      -- Load if needed
-      if not parent.is_loaded and parent.load then
-        parent:load()
-      end
     end
   end
 
   -- Find the database that contains the target object
   local database = target_object:get_database()
-  if not database or not database.is_loaded then
-    vim.notify("Target database not loaded", vim.log.levels.WARN)
+  if not database then
+    vim.notify("Target database not found", vim.log.levels.WARN)
     return
+  end
+
+  -- Load the database if not loaded
+  if not database.is_loaded and database.load then
+    database:load()
   end
 
   -- Verify object exists in cached data using typed arrays

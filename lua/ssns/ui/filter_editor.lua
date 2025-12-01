@@ -46,7 +46,8 @@ local function parse_buffer_state(bufnr, extmarks)
     schema_include = "",
     schema_exclude = "",
     object_types = {},
-    case_sensitive = false
+    case_sensitive = false,
+    hide_system_schemas = false
   }
 
   -- Parse each field by getting text between extmarks
@@ -82,6 +83,11 @@ local function parse_buffer_state(bufnr, extmarks)
     -- Case sensitive checkbox
     if line:match("^Case Sensitive:") then
       state.case_sensitive = line:match("%[x%]") ~= nil
+    end
+
+    -- Hide system schemas checkbox
+    if line:match("^Hide System Schemas:") then
+      state.hide_system_schemas = line:match("%[x%]") ~= nil
     end
 
     -- Object types
@@ -124,7 +130,8 @@ local function apply_filters(group, bufnr, extmarks, live)
     schema_include = state.schema_include ~= "" and state.schema_include or nil,
     schema_exclude = state.schema_exclude ~= "" and state.schema_exclude or nil,
     object_types = next(state.object_types) and state.object_types or nil,
-    case_sensitive = state.case_sensitive
+    case_sensitive = state.case_sensitive,
+    hide_system_schemas = state.hide_system_schemas
   }
 
   -- Save filters
@@ -296,6 +303,23 @@ local function render_editor(bufnr, group, state)
   table.insert(lines, "")
   current_line = current_line + 1
 
+  -- Hide system schemas checkbox (only for object groups that support it)
+  local supports_system_filter = is_object_group or group.object_type == "schemas_group"
+  if supports_system_filter then
+    local sys_check = state.hide_system_schemas and "x" or " "
+    table.insert(lines, string.format("Hide System Schemas: [%s] (Enter to toggle)", sys_check))
+    current_line = current_line + 1
+    option_num = option_num + 1
+    extmarks["option_" .. option_num] = {
+      line = current_line,
+      type = "checkbox",
+      field = "hide_system_schemas"
+    }
+
+    table.insert(lines, "")
+    current_line = current_line + 1
+  end
+
   -- Help text
   table.insert(lines, "Edit text between quotes with 'i' or 'a'")
   current_line = current_line + 1
@@ -454,6 +478,14 @@ local function toggle_checkbox(bufnr, group, extmarks)
     return
   end
 
+  -- Toggle hide system schemas
+  if line:match("^Hide System Schemas:") then
+    local new_line = line:match("%[x%]") and line:gsub("%[x%]", "[ ]") or line:gsub("%[ %]", "[x]")
+    vim.api.nvim_buf_set_lines(bufnr, line_num - 1, line_num, false, {new_line})
+    trigger_live_filter(group, bufnr, extmarks)
+    return
+  end
+
   -- Toggle object types
   if line:match("^%s*%[.%]%s+") then
     local new_line = line:match("%[x%]") and line:gsub("%[x%]", "[ ]") or line:gsub("%[ %]", "[x]")
@@ -490,7 +522,8 @@ function UiFilterEditor.open(group)
       ["function"] = true,
       synonym = true
     } or {}),
-    case_sensitive = current_filters.case_sensitive or false
+    case_sensitive = current_filters.case_sensitive or false,
+    hide_system_schemas = current_filters.hide_system_schemas or false
   }
 
   -- Create buffer

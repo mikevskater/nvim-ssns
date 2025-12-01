@@ -15,6 +15,33 @@ local filter_store = {}
 ---@field case_sensitive boolean Whether patterns are case-sensitive
 ---@field hide_system_schemas boolean Whether to hide system schemas (sys, INFORMATION_SCHEMA, etc.)
 
+---List of SQL Server system database names (case-insensitive)
+local system_database_names = {
+  "master",
+  "msdb",
+  "tempdb",
+  "model",
+  "resource",  -- SQL Server internal
+}
+
+---Check if a database is a system database
+---@param db_name string The database name
+---@return boolean is_system True if it's a system database
+local function is_system_database(db_name)
+  if not db_name then
+    return false
+  end
+
+  local lower_name = db_name:lower()
+  for _, sys_db in ipairs(system_database_names) do
+    if lower_name == sys_db then
+      return true
+    end
+  end
+
+  return false
+end
+
 ---Check if a group supports system schema filtering
 ---@param group BaseDbObject The group object
 ---@return boolean
@@ -30,6 +57,96 @@ local function supports_system_schema_filter(group)
     or obj_type == "schema_view"
 end
 
+---Check if a schema name is a system schema
+---@param schema_name string The schema name
+---@param system_schemas string[] List of system schema names from config
+---@return boolean is_system True if it's a system schema
+local function is_system_schema(schema_name, system_schemas)
+  if not schema_name then
+    return false
+  end
+
+  local lower_name = schema_name:lower()
+  for _, sys_schema in ipairs(system_schemas) do
+    if lower_name == sys_schema:lower() then
+      return true
+    end
+  end
+
+  return false
+end
+
+---Check if a group belongs to a system database (where system filtering should be disabled)
+---@param group BaseDbObject The group object
+---@return boolean is_in_system_db True if the group is inside a system database
+local function is_group_in_system_database(group)
+  -- Try to get the database this group belongs to
+  if group.get_database then
+    local db = group:get_database()
+    if db and db.db_name then
+      return is_system_database(db.db_name)
+    end
+  end
+
+  -- For ephemeral groups, check parent chain
+  local current = group.parent
+  while current do
+    if current.object_type == "database" and current.db_name then
+      return is_system_database(current.db_name)
+    end
+    current = current.parent
+  end
+
+  return false
+end
+
+---Check if a group is inside a system schema (where system filtering should be disabled)
+---@param group BaseDbObject The group object
+---@return boolean is_in_system_schema True if the group is inside a system schema
+local function is_group_in_system_schema(group)
+  local Config = require('ssns.config')
+  local filter_config = Config.get_filters()
+  local system_schemas = filter_config and filter_config.system_schemas or {}
+
+  -- Check if this group is directly a system schema
+  if (group.object_type == "schema" or group.object_type == "schema_view") and group.name then
+    if is_system_schema(group.name, system_schemas) then
+      return true
+    end
+  end
+
+  -- For ephemeral groups (like TABLES under sys), check parent chain
+  local current = group.parent
+  while current do
+    -- Check if parent is a system schema node
+    if (current.object_type == "schema" or current.object_type == "schema_view") and current.name then
+      if is_system_schema(current.name, system_schemas) then
+        return true
+      end
+    end
+    current = current.parent
+  end
+
+  return false
+end
+
+---Check if system schema filtering should be disabled for this group
+---@param group BaseDbObject The group object
+---@return boolean should_disable True if system filtering should be disabled
+local function should_disable_system_filter(group)
+  -- Disable system filtering in system databases (master, msdb, tempdb)
+  if is_group_in_system_database(group) then
+    return true
+  end
+
+  -- Disable system filtering inside system schemas (sys, INFORMATION_SCHEMA)
+  if is_group_in_system_schema(group) then
+    return true
+  end
+
+  return false
+end
+
 ---Get filter state for a group
 ---@param group BaseDbObject The group object
 ---@return FilterState
@@ -43,7 +160,14 @@ function UiFilters.get(group)
     local default_hide = filter_config and filter_config.hide_system_schemas or false
 
     -- Only apply system schema filter to groups that support it
-    local hide_system = supports_system_schema_filter(group) and default_hide or false
+    -- AND are NOT in a system database (master, msdb, tempdb, etc.)
+    local hide_system = false
+    if supports_system_schema_filter(group) and default_hide then
+      -- Don't hide system schemas in system databases
+      if not is_group_in_system_database(group) then
+        hide_system = true
+      end
+    end
 
     -- Initialize with defaults from config
     filter_store[path] = {
@@ -77,7 +201,16 @@ function UiFilters.clear(group)
   local Config = require('ssns.config')
   local filter_config = Config.get_filters()
   local default_hide = filter_config and filter_config.hide_system_schemas or false
-  local hide_system = supports_system_schema_filter(group) and default_hide or false
+
+  -- Only apply system schema filter to groups that support it
+  -- AND are NOT in a system database (master, msdb, tempdb, etc.)
+  local hide_system = false
+  if supports_system_schema_filter(group) and default_hide then
+    -- Don't hide system schemas in system databases
+    if not is_group_in_system_database(group) then
+      hide_system = true
+    end
+  end
 
   filter_store[path] = {
     name_include = nil,
