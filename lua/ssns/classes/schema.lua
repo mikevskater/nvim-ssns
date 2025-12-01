@@ -287,45 +287,55 @@ function SchemaClass:find_synonym(synonym_name)
 end
 
 ---Get all synonyms in this schema
+---@param opts table? Options { skip_load: boolean? }
 ---@return SynonymClass[]
-function SchemaClass:get_synonyms()
-  if not self.synonyms then
+function SchemaClass:get_synonyms(opts)
+  opts = opts or {}
+  if not self.synonyms and not opts.skip_load then
     self:load_synonyms()
   end
   return self.synonyms or {}
 end
 
 ---Get all tables in this schema
+---@param opts table? Options { skip_load: boolean? }
 ---@return TableClass[]
-function SchemaClass:get_tables()
-  if not self.tables then
+function SchemaClass:get_tables(opts)
+  opts = opts or {}
+  if not self.tables and not opts.skip_load then
     self:load_tables()
   end
   return self.tables or {}
 end
 
 ---Get all views in this schema
+---@param opts table? Options { skip_load: boolean? }
 ---@return ViewClass[]
-function SchemaClass:get_views()
-  if not self.views then
+function SchemaClass:get_views(opts)
+  opts = opts or {}
+  if not self.views and not opts.skip_load then
     self:load_views()
   end
   return self.views or {}
 end
 
 ---Get all procedures in this schema
+---@param opts table? Options { skip_load: boolean? }
 ---@return ProcedureClass[]
-function SchemaClass:get_procedures()
-  if not self.procedures then
+function SchemaClass:get_procedures(opts)
+  opts = opts or {}
+  if not self.procedures and not opts.skip_load then
     self:load_procedures()
   end
   return self.procedures or {}
 end
 
 ---Get all functions in this schema
+---@param opts table? Options { skip_load: boolean? }
 ---@return FunctionClass[]
-function SchemaClass:get_functions()
-  if not self.functions then
+function SchemaClass:get_functions(opts)
+  opts = opts or {}
+  if not self.functions and not opts.skip_load then
     self:load_functions()
   end
   return self.functions or {}

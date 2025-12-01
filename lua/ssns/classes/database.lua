@@ -264,9 +264,13 @@ end
 
 ---Get all tables (server-type aware - aggregates from schemas if needed)
 ---@param schema_filter string? Optional schema name to filter by
+---@param opts table? Options { skip_load: boolean? } - skip_load prevents triggering load
 ---@return TableClass[]
-function DbClass:get_tables(schema_filter)
-  if not self.is_loaded then
+function DbClass:get_tables(schema_filter, opts)
+  opts = opts or {}
+  
+  -- Only load if not already loaded and skip_load is not set
+  if not self.is_loaded and not opts.skip_load then
     self:load()
   end
 
@@ -275,7 +279,7 @@ function DbClass:get_tables(schema_filter)
     local all_tables = {}
     for _, schema in ipairs(self.schemas) do
       if not schema_filter or schema.name:lower() == schema_filter:lower() then
-        for _, t in ipairs(schema:get_tables()) do
+        for _, t in ipairs(schema:get_tables(opts)) do
           table.insert(all_tables, t)
         end
       end
@@ -289,9 +293,13 @@ end
 
 ---Get all views (server-type aware - aggregates from schemas if needed)
 ---@param schema_filter string? Optional schema name to filter by
+---@param opts table? Options { skip_load: boolean? } - skip_load prevents triggering load
 ---@return ViewClass[]
-function DbClass:get_views(schema_filter)
-  if not self.is_loaded then
+function DbClass:get_views(schema_filter, opts)
+  opts = opts or {}
+  
+  -- Only load if not already loaded and skip_load is not set
+  if not self.is_loaded and not opts.skip_load then
     self:load()
   end
 
@@ -300,7 +308,7 @@ function DbClass:get_views(schema_filter)
     local all_views = {}
     for _, schema in ipairs(self.schemas) do
       if not schema_filter or schema.name:lower() == schema_filter:lower() then
-        for _, v in ipairs(schema:get_views()) do
+        for _, v in ipairs(schema:get_views(opts)) do
           table.insert(all_views, v)
         end
       end
@@ -314,9 +322,13 @@ end
 
 ---Get all procedures (server-type aware - aggregates from schemas if needed)
 ---@param schema_filter string? Optional schema name to filter by
+---@param opts table? Options { skip_load: boolean? } - skip_load prevents triggering load
 ---@return ProcedureClass[]
-function DbClass:get_procedures(schema_filter)
-  if not self.is_loaded then
+function DbClass:get_procedures(schema_filter, opts)
+  opts = opts or {}
+  
+  -- Only load if not already loaded and skip_load is not set
+  if not self.is_loaded and not opts.skip_load then
     self:load()
   end
 
@@ -325,7 +337,7 @@ function DbClass:get_procedures(schema_filter)
     local all_procedures = {}
     for _, schema in ipairs(self.schemas) do
       if not schema_filter or schema.name:lower() == schema_filter:lower() then
-        for _, p in ipairs(schema:get_procedures()) do
+        for _, p in ipairs(schema:get_procedures(opts)) do
           table.insert(all_procedures, p)
         end
       end
@@ -339,9 +351,13 @@ end
 
 ---Get all functions (server-type aware - aggregates from schemas if needed)
 ---@param schema_filter string? Optional schema name to filter by
+---@param opts table? Options { skip_load: boolean? } - skip_load prevents triggering load
 ---@return FunctionClass[]
-function DbClass:get_functions(schema_filter)
-  if not self.is_loaded then
+function DbClass:get_functions(schema_filter, opts)
+  opts = opts or {}
+  
+  -- Only load if not already loaded and skip_load is not set
+  if not self.is_loaded and not opts.skip_load then
     self:load()
   end
 
@@ -350,7 +366,7 @@ function DbClass:get_functions(schema_filter)
     local all_functions = {}
     for _, schema in ipairs(self.schemas) do
       if not schema_filter or schema.name:lower() == schema_filter:lower() then
-        for _, f in ipairs(schema:get_functions()) do
+        for _, f in ipairs(schema:get_functions(opts)) do
           table.insert(all_functions, f)
         end
       end
@@ -364,9 +380,13 @@ end
 
 ---Get all synonyms (server-type aware - aggregates from schemas if needed)
 ---@param schema_filter string? Optional schema name to filter by
+---@param opts table? Options { skip_load: boolean? } - skip_load prevents triggering load
 ---@return SynonymClass[]
-function DbClass:get_synonyms(schema_filter)
-  if not self.is_loaded then
+function DbClass:get_synonyms(schema_filter, opts)
+  opts = opts or {}
+  
+  -- Only load if not already loaded and skip_load is not set
+  if not self.is_loaded and not opts.skip_load then
     self:load()
   end
 
@@ -375,7 +395,7 @@ function DbClass:get_synonyms(schema_filter)
     local all_synonyms = {}
     for _, schema in ipairs(self.schemas) do
       if not schema_filter or schema.name:lower() == schema_filter:lower() then
-        for _, s in ipairs(schema:get_synonyms()) do
+        for _, s in ipairs(schema:get_synonyms(opts)) do
           table.insert(all_synonyms, s)
         end
       end
