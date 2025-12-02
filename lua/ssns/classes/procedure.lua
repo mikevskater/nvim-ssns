@@ -133,8 +133,8 @@ function ProcedureClass:load_parameters()
 
   local adapter = self:get_adapter()
 
-  -- Navigate up: Procedure -> Database (no schemas in new structure)
-  local db = self.parent
+  -- Get database using get_database() method (handles both schema and non-schema databases)
+  local db = self:get_database()
 
   -- Get parameters query from adapter
   local query = adapter:get_parameters_query(db.db_name, self.schema_name, self.procedure_name, "PROCEDURE")
