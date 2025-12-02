@@ -335,7 +335,7 @@ local default_config = {
     execute_statement = "<Leader>R",  -- Execute statement under cursor
     save_query = "<Leader>s",  -- Save query to file
     expand_asterisk = "<Leader>ce",  -- Expand asterisk to column list
-    show_history = "<C-H>",  -- Show query history panel
+    show_history = "<Leader>@",  -- Show query history panel
   },
 
   table_helpers = {

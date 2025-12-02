@@ -276,7 +276,7 @@ function UiBuffer.setup_keymaps()
   })
 
   -- Show query history for current server
-  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.show_history or "<C-H>", "<Cmd>lua require('ssns.ui.tree').show_history_from_context()<CR>", {
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.show_history or "<Leader>@", "<Cmd>lua require('ssns.ui.tree').show_history_from_context()<CR>", {
     noremap = true,
     silent = true,
     desc = "Show query history for server",
