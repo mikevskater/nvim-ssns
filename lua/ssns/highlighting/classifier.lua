@@ -946,6 +946,143 @@ function Classifier._find_column_in_object(obj, column_name)
   return false
 end
 
+---Find a column in tables referenced by the current statement
+---This is more efficient than searching the entire database - it only checks
+---tables that appear in the FROM/JOIN clauses of the current statement
+---@param sql_context table Context with tables from StatementChunk
+---@param column_name string Column name to find
+---@param connection table? Connection context with server/database
+---@return boolean found True if column exists in any context table
+function Classifier._find_column_in_context_tables(sql_context, column_name, connection)
+  if not sql_context.tables or #sql_context.tables == 0 then
+    return false
+  end
+
+  local connected_db = connection and connection.database
+  if not connected_db then
+    return false
+  end
+
+  local uses_schemas = Classifier._db_uses_schemas(connected_db)
+
+  for _, table_ref in ipairs(sql_context.tables) do
+    -- Skip CTEs, temp tables, and table variables - they don't have loaded columns
+    if table_ref.is_cte or table_ref.is_temp or table_ref.is_table_variable then
+      goto continue
+    end
+
+    local obj = nil
+    local table_name = table_ref.name
+    local schema_name = table_ref.schema
+
+    if not table_name then
+      goto continue
+    end
+
+    -- Find the actual table/view object
+    if uses_schemas then
+      -- If schema specified in reference, search that schema
+      if schema_name then
+        local schema = Classifier._find_schema(connected_db, schema_name)
+        if schema then
+          local obj_type
+          obj_type, obj = Classifier._find_object_in_schema(schema, table_name)
+        end
+      else
+        -- No schema specified - search default schema first, then all loaded schemas
+        local default_schema_name = connected_db:get_default_schema()
+        local default_schema = Classifier._find_schema(connected_db, default_schema_name)
+        if default_schema then
+          local obj_type
+          obj_type, obj = Classifier._find_object_in_schema(default_schema, table_name)
+        end
+
+        -- If not found in default schema, search all loaded schemas
+        if not obj then
+          for _, schema in ipairs(connected_db.schemas or {}) do
+            if schema.is_loaded then
+              local obj_type
+              obj_type, obj = Classifier._find_object_in_schema(schema, table_name)
+              if obj then break end
+            end
+          end
+        end
+      end
+    else
+      -- Non-schema database (MySQL, SQLite)
+      local obj_type
+      obj_type, obj = Classifier._find_object_in_db(connected_db, table_name)
+    end
+
+    -- Check if column exists in this table/view
+    if obj then
+      Classifier._ensure_object_details_loaded(obj)
+      if Classifier._find_column_in_object(obj, column_name) then
+        return true
+      end
+    end
+
+    ::continue::
+  end
+
+  return false
+end
+
+---Find a table object from the statement context
+---Returns the actual table/view object for a TableReference
+---@param table_ref table TableReference from sql_context.tables
+---@param connection table? Connection context
+---@return table? obj The table/view object if found
+---@return string? obj_type The object type ("table" or "view")
+function Classifier._resolve_table_ref_to_object(table_ref, connection)
+  if not table_ref or not table_ref.name then
+    return nil, nil
+  end
+
+  -- Skip CTEs, temp tables, table variables
+  if table_ref.is_cte or table_ref.is_temp or table_ref.is_table_variable then
+    return nil, nil
+  end
+
+  local connected_db = connection and connection.database
+  if not connected_db then
+    return nil, nil
+  end
+
+  local uses_schemas = Classifier._db_uses_schemas(connected_db)
+  local table_name = table_ref.name
+  local schema_name = table_ref.schema
+
+  if uses_schemas then
+    if schema_name then
+      local schema = Classifier._find_schema(connected_db, schema_name)
+      if schema then
+        return Classifier._find_object_in_schema(schema, table_name)
+      end
+    else
+      -- Search default schema first
+      local default_schema_name = connected_db:get_default_schema()
+      local default_schema = Classifier._find_schema(connected_db, default_schema_name)
+      if default_schema then
+        local obj_type, obj = Classifier._find_object_in_schema(default_schema, table_name)
+        if obj then return obj_type, obj end
+      end
+
+      -- Search all loaded schemas
+      for _, schema in ipairs(connected_db.schemas or {}) do
+        if schema.is_loaded then
+          local obj_type, obj = Classifier._find_object_in_schema(schema, table_name)
+          if obj then return obj_type, obj end
+        end
+      end
+    end
+  else
+    return Classifier._find_object_in_db(connected_db, table_name)
+  end
+
+  return nil, nil
+end
+
 ---Find all columns across all loaded tables/views in the cache
 ---@param column_name string Column name to search for
 ---@return boolean found True if column exists anywhere
@@ -1204,7 +1341,8 @@ function Classifier._resolve_multipart_from_cache(names, sql_context, connection
   end
 
   -- ============================================================================
-  -- Step 8: Tables from SQL chunk's tables list
+  -- Step 8: Tables from SQL chunk's tables list (with column verification)
+  -- Check if first part matches a table referenced in this statement
   -- ============================================================================
   for _, tbl in ipairs(sql_context.tables or {}) do
     local tbl_name = tbl.name or tbl.table
@@ -1212,8 +1350,23 @@ function Classifier._resolve_multipart_from_cache(names, sql_context, connection
       local simple_name = tbl_name:match("%.([^%.]+)$") or tbl_name
       if simple_name:lower() == name1_lower then
         types[1] = "table"
-        for i = 2, #names do
-          types[i] = "column"
+
+        -- Try to resolve the table and verify columns
+        local obj_type, obj = Classifier._resolve_table_ref_to_object(tbl, connection)
+        if obj then
+          Classifier._ensure_object_details_loaded(obj)
+          for i = 2, #names do
+            if Classifier._find_column_in_object(obj, names[i]) then
+              types[i] = "column"
+            else
+              types[i] = "unresolved"
+            end
+          end
+        else
+          -- Table not loaded yet - assume remaining parts are columns
+          for i = 2, #names do
+            types[i] = "column"
+          end
         end
         return types
       end
@@ -1221,12 +1374,25 @@ function Classifier._resolve_multipart_from_cache(names, sql_context, connection
   end
 
   -- ============================================================================
-  -- Step 9: Single-part column lookup
+  -- Step 9: Single-part column lookup (context-aware)
+  -- First check columns in tables referenced by this statement (fast path),
+  -- then fall back to searching all loaded tables in the database (slow path)
   -- ============================================================================
-  if #names == 1 and connected_db then
-    if Classifier._find_column_in_loaded_objects(connected_db, name1) then
+  if #names == 1 then
+    -- Fast path: Check columns in tables from this statement's FROM/JOIN clauses
+    -- This is more accurate and efficient than searching the entire database
+    if Classifier._find_column_in_context_tables(sql_context, name1, connection) then
       types[1] = "column"
       return types
+    end
+
+    -- Slow path: Fall back to searching all loaded tables in the database
+    -- This handles cases like subqueries or when tables aren't parsed yet
+    if connected_db then
+      if Classifier._find_column_in_loaded_objects(connected_db, name1) then
+        types[1] = "column"
+        return types
+      end
     end
   end
 
@@ -1470,8 +1636,9 @@ function Classifier._build_context(chunk)
 end
 
 ---Build index for quick chunk lookup by line
+---Provides O(1) lookup by line number instead of linear scan
 ---@param chunks StatementChunk[] Statement chunks
----@return table index Lookup table
+---@return table index Lookup table mapping line -> chunk
 function Classifier._build_chunk_index(chunks)
   local index = {}
   for _, chunk in ipairs(chunks or {}) do
@@ -1485,13 +1652,33 @@ function Classifier._build_chunk_index(chunks)
   return index
 end
 
----Find chunk at position
+---Find chunk at position with boundary line column validation
+---Column checks only matter on boundary lines (first/last line of chunk)
+---Middle lines are always valid since the statement spans the entire line
 ---@param index table Chunk index
 ---@param line number 1-indexed line
 ---@param col number 1-indexed column
 ---@return StatementChunk? chunk
 function Classifier._find_chunk_at_position(index, line, col)
-  return index[line]
+  local chunk = index[line]
+  if not chunk then
+    return nil
+  end
+
+  -- Column validation only on boundary lines:
+  -- - First line: cursor must be at or after start_col
+  -- - Last line: allow tolerance for typing continuation
+  -- - Middle lines: any column is valid
+
+  if line == chunk.start_line and col < chunk.start_col then
+    return nil
+  end
+
+  if line == chunk.end_line and col > chunk.end_col + 50 then
+    return nil
+  end
+
+  return chunk
 end
 
 ---Strip brackets from identifier

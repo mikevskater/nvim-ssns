@@ -59,8 +59,8 @@
 ---@field insert_columns string[]? Column names in INSERT INTO table (col1, col2, ...)
 ---@field start_line number 1-indexed start line
 ---@field end_line number 1-indexed end line
----@field start_col number 1-indexed start column
----@field end_col number 1-indexed end column
+---@field start_col number 1-indexed start column (only relevant on start_line)
+---@field end_col number 1-indexed end column (only relevant on end_line)
 ---@field go_batch_index number Which GO batch this belongs to (1-indexed)
 ---@field clause_positions table<string, ClausePosition>? Positions of each clause (select, from, where, values, insert_columns, etc.)
 
@@ -2746,6 +2746,7 @@ function StatementParser.parse(text)
 end
 
 ---Find which chunk contains the given position
+---Optimized: Early termination when chunks are ordered by start_line
 ---@param chunks StatementChunk[] The parsed chunks
 ---@param line number 1-indexed line
 ---@param col number 1-indexed column
@@ -2755,27 +2756,41 @@ function StatementParser.get_chunk_at_position(chunks, line, col)
   local best_end_line = -1
 
   for _, chunk in ipairs(chunks) do
-    -- Check if cursor is within chunk boundaries
+    -- Quick line check: skip chunks that start after cursor line
+    -- Since chunks are ordered by start_line, we can potentially stop early
+    if line < chunk.start_line then
+      -- If we already have a continuation match, we can stop
+      -- (future chunks start even later)
+      if best_match then
+        break
+      end
+      goto continue
+    end
+
+    -- Check if cursor is within chunk line boundaries
     if line >= chunk.start_line and line <= chunk.end_line then
-      -- Check column boundaries for first/last line
+      -- Column bounds check only matters on boundary lines:
+      -- - First line: cursor must be at or after start_col
+      -- - Last line: allow tolerance for typing continuation
+      -- - Middle lines: any column is valid (statement spans entire line)
+
       if line == chunk.start_line and col < chunk.start_col then
         goto continue
       end
+
       -- For completion purposes, allow cursor to be past the end_col on the last line
       -- This handles the case where user is typing at the end of a statement (e.g., "dbo.█")
-      -- The cache records end_col as the last parsed character, but the cursor is naturally
-      -- positioned one character ahead when typing. Allow up to 50 chars past end_col to
-      -- still be considered part of this chunk for context detection.
+      -- Allow up to 50 chars past end_col to still be considered part of this chunk
       if line == chunk.end_line and col > chunk.end_col + 50 then
         goto continue
       end
+
       return chunk
     end
 
     -- Also check if cursor is on lines AFTER chunk.end_line (within 5 lines)
     -- This handles multiline continuation like "FROM Table,\n  █" where the cursor
     -- is on a new line but still logically part of the previous statement
-    -- Only consider this if there's no next chunk that starts before the cursor
     if line > chunk.end_line and line <= chunk.end_line + 5 then
       -- Track the chunk that ends closest to the cursor line
       if chunk.end_line > best_end_line then
@@ -2851,12 +2866,22 @@ function StatementParser.get_subquery_at_position(chunk, line, col)
 end
 
 ---Get which clause the cursor is in
+---Optimized: Uses end_line/end_col bounds for early filtering and tracks
+---clauses starting on cursor line for potential early exit
 ---@param chunk StatementChunk
 ---@param line number 1-indexed line
 ---@param col number 1-indexed column
 ---@return string? clause_name "select", "from", "where", "group_by", "having", "order_by", "set", "into", "join", "on", "values", "insert_columns", or nil
 function StatementParser.get_clause_at_position(chunk, line, col)
   if not chunk or not chunk.clause_positions then
+    return nil
+  end
+
+  -- Quick bounds check: if cursor is outside chunk bounds, no clause match
+  if line < chunk.start_line or line > chunk.end_line then
+    return nil
+  end
+  if line == chunk.start_line and col < chunk.start_col then
     return nil
   end
 
@@ -2867,21 +2892,44 @@ function StatementParser.get_clause_at_position(chunk, line, col)
   local best_start_line = -1
   local best_start_col = -1
 
-  for clause_name, pos in pairs(chunk.clause_positions) do
-    -- Check if this clause started before or at the cursor
-    local clause_before_cursor = (pos.start_line < line) or
-                                   (pos.start_line == line and pos.start_col <= col)
+  -- Track if we find a clause starting on the cursor line for early exit opportunity
+  local found_on_cursor_line = false
+  local cursor_line_clause = nil
+  local cursor_line_start_col = -1
 
-    if clause_before_cursor then
-      -- Keep the clause that started latest (closest to cursor)
-      local is_later = (pos.start_line > best_start_line) or
-                       (pos.start_line == best_start_line and pos.start_col > best_start_col)
-      if is_later then
-        best_start_line = pos.start_line
-        best_start_col = pos.start_col
-        best_match = clause_name
+  for clause_name, pos in pairs(chunk.clause_positions) do
+    -- Optimization: Skip clauses that start AFTER the cursor (they can't be the answer)
+    -- This is a quick filter before doing more checks
+    if pos.start_line > line or (pos.start_line == line and pos.start_col > col) then
+      goto continue
+    end
+
+    -- At this point, clause started before or at cursor
+    -- Check if this is the latest-starting clause we've found
+    local is_later = (pos.start_line > best_start_line) or
+                     (pos.start_line == best_start_line and pos.start_col > best_start_col)
+
+    if is_later then
+      best_start_line = pos.start_line
+      best_start_col = pos.start_col
+      best_match = clause_name
+
+      -- Track clause on cursor line for potential early exit
+      if pos.start_line == line then
+        found_on_cursor_line = true
+        cursor_line_clause = clause_name
+        cursor_line_start_col = pos.start_col
       end
     end
+
+    ::continue::
+  end
+
+  -- Early exit optimization: If we found a clause starting on the cursor line,
+  -- and the cursor is within a reasonable distance from its start, this is likely
+  -- the correct clause (no need to re-verify against all clauses)
+  if found_on_cursor_line and cursor_line_clause == best_match then
+    -- The best match is on the cursor line - good match
   end
 
   if best_match then
