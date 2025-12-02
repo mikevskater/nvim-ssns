@@ -3,6 +3,7 @@
 ---@field text string The token text
 ---@field line number 1-indexed line number
 ---@field col number 1-indexed column number
+---@field keyword_category string? Keyword category: "statement", "clause", "function", "datatype", "operator", "constraint", "modifier", "misc"
 
 local TOKEN_TYPE = {
   KEYWORD = "keyword",         -- SELECT, FROM, WHERE, JOIN, etc.
@@ -30,180 +31,247 @@ local STATE = {
   IN_LINE_COMMENT = 5,     -- -- comment
 }
 
--- SQL Keywords (case-insensitive)
--- Comprehensive list from Microsoft SQL Server documentation
--- Source: https://learn.microsoft.com/en-us/sql/t-sql/language-elements/reserved-keywords-transact-sql
-local SQL_KEYWORDS = {
-  -- ==========================================================================
-  -- SQL Server and Azure Synapse Analytics Reserved Keywords
-  -- ==========================================================================
-  ADD = true, ALL = true, ALTER = true, AND = true, ANY = true, AS = true, ASC = true, AUTHORIZATION = true,
-  BACKUP = true, BEGIN = true, BETWEEN = true, BREAK = true, BROWSE = true, BULK = true, BY = true,
-  CASCADE = true, CASE = true, CHECK = true, CHECKPOINT = true, CLOSE = true, CLUSTERED = true,
-  COALESCE = true, COLLATE = true, COLUMN = true, COMMIT = true, COMPUTE = true, CONSTRAINT = true,
-  CONTAINS = true, CONTAINSTABLE = true, CONTINUE = true, CONVERT = true, CREATE = true, CROSS = true,
-  CURRENT = true, CURRENT_DATE = true, CURRENT_TIME = true, CURRENT_TIMESTAMP = true, CURRENT_USER = true, CURSOR = true,
-  DATABASE = true, DBCC = true, DEALLOCATE = true, DECLARE = true, DEFAULT = true, DELETE = true,
-  DENY = true, DESC = true, DISK = true, DISTINCT = true, DISTRIBUTED = true, DOUBLE = true, DROP = true, DUMP = true,
-  ELSE = true, END = true, ERRLVL = true, ESCAPE = true, EXCEPT = true, EXEC = true, EXECUTE = true,
-  EXISTS = true, EXIT = true, EXTERNAL = true,
-  FETCH = true, FILE = true, FILLFACTOR = true, FOR = true, FOREIGN = true, FREETEXT = true,
-  FREETEXTTABLE = true, FROM = true, FULL = true, FUNCTION = true,
-  GOTO = true, GRANT = true, GROUP = true,
-  HAVING = true, HOLDLOCK = true,
-  IDENTITY = true, IDENTITY_INSERT = true, IDENTITYCOL = true, IF = true, IN = true, INDEX = true,
-  INNER = true, INSERT = true, INTERSECT = true, INTO = true, IS = true,
-  JOIN = true,
-  KEY = true, KILL = true,
-  LEFT = true, LIKE = true, LINENO = true, LOAD = true,
-  MERGE = true,
-  NATIONAL = true, NOCHECK = true, NONCLUSTERED = true, NOT = true, NULL = true, NULLIF = true,
-  OF = true, OFF = true, OFFSETS = true, ON = true, OPEN = true, OPENDATASOURCE = true,
-  OPENQUERY = true, OPENROWSET = true, OPENXML = true, OPTION = true, OR = true, ORDER = true, OUTER = true, OVER = true,
-  PERCENT = true, PIVOT = true, PLAN = true, PRECISION = true, PRIMARY = true, PRINT = true,
-  PROC = true, PROCEDURE = true, PUBLIC = true,
-  RAISERROR = true, READ = true, READTEXT = true, RECONFIGURE = true, REFERENCES = true,
-  REPLICATION = true, RESTORE = true, RESTRICT = true, RETURN = true, REVERT = true, REVOKE = true,
-  RIGHT = true, ROLLBACK = true, ROWCOUNT = true, ROWGUIDCOL = true, RULE = true,
-  SAVE = true, SCHEMA = true, SECURITYAUDIT = true, SELECT = true,
-  SEMANTICKEYPHRASETABLE = true, SEMANTICSIMILARITYDETAILSTABLE = true, SEMANTICSIMILARITYTABLE = true,
-  SESSION_USER = true, SET = true, SETUSER = true, SHUTDOWN = true, SOME = true, STATISTICS = true, SYSTEM_USER = true,
-  TABLE = true, TABLESAMPLE = true, TEXTSIZE = true, THEN = true, TO = true, TOP = true,
-  TRAN = true, TRANSACTION = true, TRIGGER = true, TRUNCATE = true, TRY_CONVERT = true, TSEQUAL = true,
-  UNION = true, UNIQUE = true, UNPIVOT = true, UPDATE = true, UPDATETEXT = true, USE = true, USER = true,
-  VALUES = true, VARYING = true, VIEW = true,
-  WAITFOR = true, WHEN = true, WHERE = true, WHILE = true, WITH = true, WITHIN = true, WRITETEXT = true,
+-- ==========================================================================
+-- SQL Keyword Categories for Granular Highlighting
+-- Each category gets its own highlight group for user customization
+-- ==========================================================================
 
-  -- Azure Synapse Analytics specific
-  LABEL = true,
+-- Category 1: Statements (DML/DDL/Control Flow/Transaction)
+local STATEMENT_KEYWORDS = {
+  -- DML
+  SELECT = true, INSERT = true, UPDATE = true, DELETE = true, MERGE = true,
+  -- DDL
+  CREATE = true, ALTER = true, DROP = true, TRUNCATE = true,
+  -- Control flow
+  IF = true, ELSE = true, WHILE = true, BEGIN = true, END = true,
+  RETURN = true, BREAK = true, CONTINUE = true, GOTO = true,
+  TRY = true, CATCH = true, THROW = true, LOOP = true,
+  -- Transaction
+  COMMIT = true, ROLLBACK = true, TRANSACTION = true, TRAN = true, SAVEPOINT = true,
+  -- Execution
+  EXEC = true, EXECUTE = true, DECLARE = true, SET = true, CALL = true,
+  -- Other statements
+  USE = true, PRINT = true, RAISERROR = true, WAITFOR = true,
+  WITH = true, GO = true,
+  -- Database management
+  BACKUP = true, RESTORE = true, CHECKPOINT = true, DBCC = true,
+  GRANT = true, REVOKE = true, DENY = true,
+  -- Cursor operations
+  OPEN = true, CLOSE = true, FETCH = true, DEALLOCATE = true,
+  -- SQLite/PostgreSQL/MySQL specific
+  PRAGMA = true, VACUUM = true, ATTACH = true, DETACH = true, EXPLAIN = true, SHOW = true, ANALYZE = true,
+}
 
-  -- ==========================================================================
-  -- ODBC Reserved Keywords (common subset)
-  -- ==========================================================================
-  ABSOLUTE = true, ACTION = true, ALLOCATE = true, ARE = true, ASSERTION = true, AT = true,
-  BIT = true, BIT_LENGTH = true, BOTH = true,
-  CASCADED = true, CAST = true, CATALOG = true, CHAR = true, CHAR_LENGTH = true, CHARACTER = true,
-  CHARACTER_LENGTH = true, COLLATION = true, CONNECT = true, CONNECTION = true, CONSTRAINTS = true, CORRESPONDING = true,
-  DATE = true, DAY = true, DEC = true, DECIMAL = true, DEFERRABLE = true, DEFERRED = true,
-  DESCRIBE = true, DESCRIPTOR = true, DIAGNOSTICS = true, DISCONNECT = true, DOMAIN = true,
-  EXCEPTION = true, EXTRACT = true,
-  FALSE = true, FLOAT = true, FOUND = true,
-  GET = true, GLOBAL = true, GO = true,
-  HOUR = true,
-  IMMEDIATE = true, INCLUDE = true, INDICATOR = true, INITIALLY = true, INPUT = true, INSENSITIVE = true,
-  INT = true, INTEGER = true, INTERVAL = true, ISOLATION = true,
-  LANGUAGE = true, LAST = true, LEADING = true, LEVEL = true, LOCAL = true, LOCALTIME = true, LOCALTIMESTAMP = true, LOWER = true,
-  MATCH = true, MAX = true, MIN = true, MINUTE = true, MODULE = true, MONTH = true,
-  NAMES = true, NATURAL = true, NCHAR = true, NEXT = true, NO = true, NONE = true, NUMERIC = true,
-  OCTET_LENGTH = true, ONLY = true, OUTPUT = true, OVERLAPS = true,
-  PAD = true, PARTIAL = true, POSITION = true, PREPARE = true, PRESERVE = true, PRIOR = true, PRIVILEGES = true,
-  REAL = true, RELATIVE = true,
-  ROWS = true, SCROLL = true, SECOND = true, SECTION = true, SESSION = true, SIZE = true, SMALLINT = true,
-  SPACE = true, SQL = true, SQLCA = true, SQLCODE = true, SQLERROR = true, SQLSTATE = true, SQLWARNING = true,
-  SUBSTRING = true, SUM = true,
-  TEMPORARY = true, TIME = true, TIMESTAMP = true, TIMEZONE_HOUR = true, TIMEZONE_MINUTE = true,
-  TRAILING = true, TRANSLATE = true, TRANSLATION = true, TRIM = true, TRUE = true,
-  UNKNOWN = true, UPPER = true, USAGE = true, USING = true,
-  VALUE = true, VARCHAR = true, WHENEVER = true, WORK = true, WRITE = true,
-  YEAR = true, ZONE = true,
+-- Category 2: Clauses
+local CLAUSE_KEYWORDS = {
+  FROM = true, WHERE = true, JOIN = true, ON = true,
+  INNER = true, LEFT = true, RIGHT = true, OUTER = true, CROSS = true, FULL = true, NATURAL = true,
+  GROUP = true, BY = true, HAVING = true, ORDER = true,
+  INTO = true, VALUES = true, OUTPUT = true,
+  UNION = true, INTERSECT = true, EXCEPT = true,
+  TOP = true, DISTINCT = true, ALL = true,
+  AS = true, OVER = true, PARTITION = true,
+  CASE = true, WHEN = true, THEN = true,
+  PIVOT = true, UNPIVOT = true, APPLY = true,
+  OFFSET = true, NEXT = true, ROWS = true, ONLY = true,
+  LIMIT = true, RETURNING = true,
+  FOR = true, USING = true,
+}
 
-  -- ==========================================================================
-  -- Future Reserved Keywords (commonly used)
-  -- ==========================================================================
-  ADMIN = true, AFTER = true, AGGREGATE = true, ALIAS = true, ARRAY = true, ASENSITIVE = true, ASYMMETRIC = true, ATOMIC = true,
-  BEFORE = true, BINARY = true, BLOB = true, BOOLEAN = true, BREADTH = true,
-  CALL = true, CALLED = true, CARDINALITY = true, CLASS = true, CLOB = true, COLLECT = true, COMPLETION = true,
-  CONDITION = true, CONSTRUCTOR = true, CORR = true, COVAR_POP = true, COVAR_SAMP = true,
-  CUBE = true, CUME_DIST = true, CURRENT_CATALOG = true, CURRENT_PATH = true, CURRENT_ROLE = true, CURRENT_SCHEMA = true, CYCLE = true,
-  DATA = true, DEPTH = true, DEREF = true, DESTROY = true, DESTRUCTOR = true, DETERMINISTIC = true, DICTIONARY = true, DYNAMIC = true,
-  EACH = true, ELEMENT = true, EQUALS = true, EVERY = true,
-  FILTER = true, FREE = true, FULLTEXTTABLE = true, FUSION = true,
-  GENERAL = true, GROUPING = true,
-  HOLD = true, HOST = true,
-  IGNORE = true, INITIALIZE = true, INOUT = true, INTERSECTION = true, ITERATE = true,
-  LARGE = true, LATERAL = true, LESS = true, LIMIT = true, LN = true, LOCATOR = true,
-  MAP = true, MEMBER = true, METHOD = true, MOD = true, MODIFIES = true, MODIFY = true, MULTISET = true,
-  NCLOB = true, NEW = true, NORMALIZE = true,
-  OBJECT = true, OLD = true, OPERATION = true, ORDINALITY = true, OVERLAY = true,
-  PARAMETER = true, PARAMETERS = true, PARTITION = true, PATH = true, PERCENT_RANK = true,
-  PERCENTILE_CONT = true, PERCENTILE_DISC = true,
-  POSTFIX = true, PREFIX = true, PREORDER = true,
-  RANGE = true, READS = true, RECURSIVE = true, REF = true, REFERENCING = true,
+-- Category 3: Functions (Aggregate/Scalar/System)
+local FUNCTION_KEYWORDS = {
+  -- Aggregate
+  COUNT = true, SUM = true, AVG = true, MIN = true, MAX = true,
+  STRING_AGG = true, GROUPING = true, GROUPING_ID = true,
+  STDEV = true, STDEVP = true, VAR = true, VARP = true,
+  STDDEV_POP = true, STDDEV_SAMP = true, VAR_POP = true, VAR_SAMP = true,
+  CORR = true, COVAR_POP = true, COVAR_SAMP = true,
   REGR_AVGX = true, REGR_AVGY = true, REGR_COUNT = true, REGR_INTERCEPT = true, REGR_R2 = true,
   REGR_SLOPE = true, REGR_SXX = true, REGR_SXY = true, REGR_SYY = true,
-  RELEASE = true, RESULT = true, RETURNS = true, ROLE = true, ROLLUP = true, ROUTINE = true, ROW = true,
-  SAVEPOINT = true, SCOPE = true, SEARCH = true, SENSITIVE = true, SEQUENCE = true, SETS = true, SIMILAR = true,
-  SPECIFIC = true, SPECIFICTYPE = true, SQLEXCEPTION = true, START = true, STATE = true, STATEMENT = true, STATIC = true,
-  STDDEV_POP = true, STDDEV_SAMP = true, STRUCTURE = true, SUBMULTISET = true, SYMMETRIC = true, SYSTEM = true,
-  TERMINATE = true, THAN = true, TREAT = true,
-  UESCAPE = true, UNDER = true, UNNEST = true,
-  VAR_POP = true, VAR_SAMP = true, VARIABLE = true,
-  WIDTH_BUCKET = true, WINDOW = true, WITHOUT = true,
+  PERCENTILE_CONT = true, PERCENTILE_DISC = true, PERCENT_RANK = true, CUME_DIST = true,
+  -- String functions
+  LEN = true, SUBSTRING = true, LTRIM = true, RTRIM = true, TRIM = true,
+  UPPER = true, LOWER = true, REPLACE = true, STUFF = true,
+  CHARINDEX = true, PATINDEX = true, CONCAT = true, CONCAT_WS = true,
+  STRING_SPLIT = true, REVERSE = true, REPLICATE = true, SPACE = true, FORMAT = true,
+  CHAR_LENGTH = true, CHARACTER_LENGTH = true, OCTET_LENGTH = true, BIT_LENGTH = true,
+  TRANSLATE = true, POSITION = true, OVERLAY = true,
+  -- Date/Time functions
+  GETDATE = true, GETUTCDATE = true, SYSDATETIME = true,
+  DATEADD = true, DATEDIFF = true, DATENAME = true, DATEPART = true,
+  YEAR = true, MONTH = true, DAY = true, HOUR = true, MINUTE = true, SECOND = true,
+  EOMONTH = true, DATEFROMPARTS = true, ISDATE = true, EXTRACT = true,
+  LOCALTIME = true, LOCALTIMESTAMP = true,
+  -- Conversion functions
+  CAST = true, CONVERT = true, TRY_CAST = true, TRY_CONVERT = true, PARSE = true,
+  -- NULL handling
+  ISNULL = true, NULLIF = true, COALESCE = true, IIF = true, CHOOSE = true,
+  GREATEST = true, LEAST = true,
+  -- Math functions
+  ABS = true, CEILING = true, FLOOR = true, ROUND = true,
+  POWER = true, SQRT = true, SIGN = true, RAND = true, LN = true, MOD = true,
+  WIDTH_BUCKET = true,
+  -- System functions
+  NEWID = true, NEWSEQUENTIALID = true,
+  SCOPE_IDENTITY = true, IDENT_CURRENT = true,
+  ROW_NUMBER = true, RANK = true, DENSE_RANK = true, NTILE = true,
+  LAG = true, LEAD = true, FIRST_VALUE = true, LAST_VALUE = true,
+  -- Type checking
+  ISNUMERIC = true,
+  -- Table functions
+  OPENDATASOURCE = true, OPENQUERY = true, OPENROWSET = true, OPENXML = true, OPENJSON = true,
+  CONTAINSTABLE = true, FREETEXTTABLE = true, SEMANTICKEYPHRASETABLE = true,
+  SEMANTICSIMILARITYDETAILSTABLE = true, SEMANTICSIMILARITYTABLE = true, FULLTEXTTABLE = true,
+  -- XML functions
   XMLAGG = true, XMLATTRIBUTES = true, XMLBINARY = true, XMLCAST = true, XMLCOMMENT = true, XMLCONCAT = true,
   XMLDOCUMENT = true, XMLELEMENT = true, XMLEXISTS = true, XMLFOREST = true, XMLITERATE = true, XMLNAMESPACES = true,
   XMLPARSE = true, XMLPI = true, XMLQUERY = true, XMLSERIALIZE = true, XMLTABLE = true, XMLTEXT = true, XMLVALIDATE = true,
-
-  -- ==========================================================================
-  -- T-SQL Specific Keywords
-  -- ==========================================================================
-  APPLY = true, OPENJSON = true,
-  TRY = true, CATCH = true, THROW = true,
-  IIF = true, CHOOSE = true, GREATEST = true, LEAST = true,
-  OFFSET = true, FIRST = true,
-  UNBOUNDED = true, PRECEDING = true, FOLLOWING = true,
-
-  -- ==========================================================================
-  -- Control Flow
-  -- ==========================================================================
-  LOOP = true,
-
-  -- ==========================================================================
-  -- Cursor Keywords
-  -- ==========================================================================
-  KEYSET = true, FAST_FORWARD = true, READ_ONLY = true, SCROLL_LOCKS = true, OPTIMISTIC = true,
-
-  -- ==========================================================================
-  -- Table Hints
-  -- ==========================================================================
-  NOLOCK = true, READUNCOMMITTED = true, UPDLOCK = true, ROWLOCK = true, PAGLOCK = true, TABLOCK = true, TABLOCKX = true,
-  READPAST = true, SERIALIZABLE = true, SNAPSHOT = true, READCOMMITTEDLOCK = true,
-  FORCESEEK = true, FORCESCAN = true, NOEXPAND = true,
-  XLOCK = true, NOWAIT = true,
-
-  -- ==========================================================================
-  -- Query Hints
-  -- ==========================================================================
-  RECOMPILE = true, MAXDOP = true, FAST = true, MAXRECURSION = true,
-  EXPAND = true, VIEWS = true,
-
-  -- ==========================================================================
-  -- Data Types (used in CAST, CONVERT, variable declarations)
-  -- ==========================================================================
-  BIGINT = true, TINYINT = true, MONEY = true, SMALLMONEY = true,
-  DATETIME = true, DATETIME2 = true, SMALLDATETIME = true, DATETIMEOFFSET = true,
-  TEXT = true, NTEXT = true, IMAGE = true,
-  NVARCHAR = true, VARBINARY = true,
-  UNIQUEIDENTIFIER = true, XML = true, JSON = true,
-  SQL_VARIANT = true, ROWVERSION = true,
-  HIERARCHYID = true, GEOGRAPHY = true, GEOMETRY = true,
-
-  -- ==========================================================================
-  -- PostgreSQL Specific (for multi-database support)
-  -- ==========================================================================
-  RETURNING = true, ILIKE = true,
-
-  -- ==========================================================================
-  -- SQLite Specific (for multi-database support)
-  -- ==========================================================================
-  PRAGMA = true, VACUUM = true, ATTACH = true, DETACH = true, GLOB = true,
-  TEMP = true,
-
-  -- ==========================================================================
-  -- MySQL Specific (for multi-database support)
-  -- ==========================================================================
-  UNSIGNED = true, ZEROFILL = true, AUTO_INCREMENT = true,
-  EXPLAIN = true, SHOW = true, ANALYZE = true,
+  -- Cardinality/element
+  CARDINALITY = true, ELEMENT = true, FUSION = true, COLLECT = true, MULTISET = true,
+  SUBMULTISET = true, UNNEST = true, NORMALIZE = true,
 }
+
+-- Category 4: Data Types
+local DATATYPE_KEYWORDS = {
+  -- Numeric
+  INT = true, INTEGER = true, BIGINT = true, SMALLINT = true, TINYINT = true,
+  DECIMAL = true, NUMERIC = true, FLOAT = true, REAL = true, DOUBLE = true,
+  MONEY = true, SMALLMONEY = true, BIT = true,
+  -- String
+  CHAR = true, VARCHAR = true, NCHAR = true, NVARCHAR = true,
+  TEXT = true, NTEXT = true, CHARACTER = true,
+  -- Binary
+  BINARY = true, VARBINARY = true, IMAGE = true, BLOB = true, CLOB = true, NCLOB = true,
+  -- Date/Time
+  DATE = true, TIME = true, DATETIME = true, DATETIME2 = true,
+  SMALLDATETIME = true, DATETIMEOFFSET = true, TIMESTAMP = true, INTERVAL = true,
+  TIMEZONE_HOUR = true, TIMEZONE_MINUTE = true,
+  -- Other types
+  UNIQUEIDENTIFIER = true, XML = true, JSON = true, SQL_VARIANT = true, ROWVERSION = true,
+  GEOGRAPHY = true, GEOMETRY = true, HIERARCHYID = true,
+  TABLE = true, CURSOR = true, BOOLEAN = true, ARRAY = true,
+  -- Precision
+  PRECISION = true, DEC = true,
+  -- MySQL specific
+  UNSIGNED = true, ZEROFILL = true, AUTO_INCREMENT = true,
+}
+
+-- Category 5: Operators/Logical
+local OPERATOR_KEYWORDS = {
+  AND = true, OR = true, NOT = true,
+  IN = true, EXISTS = true, BETWEEN = true, LIKE = true, ILIKE = true, GLOB = true,
+  IS = true, NULL = true, TRUE = true, FALSE = true,
+  ANY = true, SOME = true,
+  CONTAINS = true, FREETEXT = true, MATCH = true, SIMILAR = true,
+  ESCAPE = true, OVERLAPS = true,
+}
+
+-- Category 6: Constraints/Index/Schema Definition
+local CONSTRAINT_KEYWORDS = {
+  PRIMARY = true, KEY = true, FOREIGN = true, REFERENCES = true,
+  UNIQUE = true, CHECK = true, DEFAULT = true,
+  CONSTRAINT = true, INDEX = true, CLUSTERED = true, NONCLUSTERED = true,
+  IDENTITY = true, IDENTITY_INSERT = true, IDENTITYCOL = true, ROWGUIDCOL = true,
+  CASCADE = true, RESTRICT = true, NOCHECK = true,
+  ADD = true, COLUMN = true, MODIFY = true,
+  -- Schema objects
+  SCHEMA = true, DATABASE = true, VIEW = true, PROCEDURE = true, PROC = true,
+  FUNCTION = true, TRIGGER = true, SEQUENCE = true, RULE = true,
+  -- Storage
+  FILLFACTOR = true, INCLUDE = true,
+  -- Collation
+  COLLATE = true, COLLATION = true,
+}
+
+-- Category 7: Modifiers/Hints
+local MODIFIER_KEYWORDS = {
+  ASC = true, DESC = true,
+  -- Table hints
+  NOLOCK = true, HOLDLOCK = true, UPDLOCK = true, READPAST = true,
+  ROWLOCK = true, PAGLOCK = true, TABLOCK = true, TABLOCKX = true, XLOCK = true,
+  READUNCOMMITTED = true, READCOMMITTEDLOCK = true, SERIALIZABLE = true, SNAPSHOT = true,
+  FORCESEEK = true, FORCESCAN = true, NOEXPAND = true, NOWAIT = true,
+  -- Query hints
+  OPTION = true, MAXDOP = true, RECOMPILE = true, FAST = true, MAXRECURSION = true,
+  EXPAND = true, OPTIMIZE = true, UNKNOWN = true,
+  -- Window frame
+  UNBOUNDED = true, PRECEDING = true, FOLLOWING = true, CURRENT = true, RANGE = true, WINDOW = true,
+  -- Cursor options
+  SCROLL = true, INSENSITIVE = true, KEYSET = true, FAST_FORWARD = true, READ_ONLY = true,
+  SCROLL_LOCKS = true, OPTIMISTIC = true, DYNAMIC = true, STATIC = true, FORWARD_ONLY = true,
+  -- Other modifiers
+  PERCENT = true, TABLESAMPLE = true, RECURSIVE = true,
+  LATERAL = true, VARYING = true, EXTERNAL = true, TEMP = true, TEMPORARY = true, LOCAL = true, GLOBAL = true,
+}
+
+-- Category 8: Miscellaneous (reserved words that don't fit other categories)
+local MISC_KEYWORDS = {
+  -- Session/user context
+  CURRENT_DATE = true, CURRENT_TIME = true, CURRENT_TIMESTAMP = true, CURRENT_USER = true,
+  SESSION_USER = true, SYSTEM_USER = true, USER = true,
+  CURRENT_CATALOG = true, CURRENT_PATH = true, CURRENT_ROLE = true, CURRENT_SCHEMA = true,
+  -- Reserved identifiers and special keywords
+  AUTHORIZATION = true, PUBLIC = true, ROLE = true, ADMIN = true, PRIVILEGES = true, USAGE = true,
+  -- Other reserved
+  BROWSE = true, BULK = true, COMPUTE = true, DISK = true, DISTRIBUTED = true, DUMP = true,
+  ERRLVL = true, EXIT = true, FILE = true, KILL = true, LABEL = true, LINENO = true, LOAD = true,
+  NATIONAL = true, OF = true, OFF = true, OFFSETS = true, PLAN = true, READ = true, READTEXT = true,
+  RECONFIGURE = true, REPLICATION = true, REVERT = true, ROWCOUNT = true, SAVE = true,
+  SECURITYAUDIT = true, SETUSER = true, SHUTDOWN = true, STATISTICS = true, TEXTSIZE = true, TO = true,
+  TSEQUAL = true, UPDATETEXT = true, WITHIN = true, WRITETEXT = true,
+  -- Transaction isolation
+  ISOLATION = true, LEVEL = true, WORK = true, SESSION = true, CONNECTION = true,
+  -- Future reserved
+  ABSOLUTE = true, ACTION = true, AFTER = true, AGGREGATE = true, ALIAS = true, ALLOCATE = true,
+  ARE = true, ASENSITIVE = true, ASSERTION = true, ASYMMETRIC = true, AT = true, ATOMIC = true, BEFORE = true,
+  BOTH = true, BREADTH = true, CALLED = true, CASCADED = true, CATALOG = true, CLASS = true, COMPLETION = true,
+  CONDITION = true, CONSTRUCTOR = true, CORRESPONDING = true, CUBE = true, CYCLE = true, DATA = true,
+  DEFERRABLE = true, DEFERRED = true, DEPTH = true, DEREF = true, DESCRIBE = true, DESCRIPTOR = true,
+  DESTROY = true, DESTRUCTOR = true, DETERMINISTIC = true, DIAGNOSTICS = true, DICTIONARY = true, DISCONNECT = true,
+  DOMAIN = true, EACH = true, EQUALS = true, EVERY = true, EXCEPTION = true, FILTER = true, FIRST = true,
+  FOUND = true, FREE = true, GENERAL = true, GET = true, HOLD = true, HOST = true, IGNORE = true,
+  IMMEDIATE = true, INDICATOR = true, INITIALIZE = true, INITIALLY = true, INOUT = true, INPUT = true,
+  INTERSECTION = true, ITERATE = true, LANGUAGE = true, LARGE = true, LAST = true, LEADING = true, LESS = true,
+  LOCATOR = true, MAP = true, MEMBER = true, METHOD = true, MODIFIES = true, MODULE = true, NAMES = true,
+  NEW = true, NEXT = true, NO = true, NONE = true, OBJECT = true, OLD = true, OPERATION = true,
+  ORDINALITY = true, PAD = true, PARAMETER = true, PARAMETERS = true, PARTIAL = true, PATH = true, POSTFIX = true,
+  PREFIX = true, PREORDER = true, PREPARE = true, PRESERVE = true, PRIOR = true, READS = true, REF = true,
+  REFERENCING = true, RELATIVE = true, RELEASE = true, RESULT = true, RETURNS = true, ROLLUP = true, ROUTINE = true,
+  ROW = true, SCOPE = true, SEARCH = true, SECTION = true, SENSITIVE = true, SETS = true, SIZE = true,
+  SPECIFIC = true, SPECIFICTYPE = true, SQLCA = true, SQLCODE = true, SQLERROR = true, SQLEXCEPTION = true,
+  SQLSTATE = true, SQLWARNING = true, SQL = true, START = true, STATE = true, STATEMENT = true,
+  STRUCTURE = true, SYMMETRIC = true, SYSTEM = true, TERMINATE = true, THAN = true, TRAILING = true,
+  TRANSLATE_REGEX = true, TREAT = true, UNDER = true, UESCAPE = true, VALUE = true, VARIABLE = true,
+  VIEWS = true, WHENEVER = true, WITHOUT = true, WRITE = true, ZONE = true, CONNECT = true, CONSTRAINTS = true,
+}
+
+-- Build lookup: keyword -> category
+local KEYWORD_TO_CATEGORY = {}
+local category_tables = {
+  { tbl = STATEMENT_KEYWORDS, category = "statement" },
+  { tbl = CLAUSE_KEYWORDS, category = "clause" },
+  { tbl = FUNCTION_KEYWORDS, category = "function" },
+  { tbl = DATATYPE_KEYWORDS, category = "datatype" },
+  { tbl = OPERATOR_KEYWORDS, category = "operator" },
+  { tbl = CONSTRAINT_KEYWORDS, category = "constraint" },
+  { tbl = MODIFIER_KEYWORDS, category = "modifier" },
+  { tbl = MISC_KEYWORDS, category = "misc" },
+}
+
+for _, cat in ipairs(category_tables) do
+  for keyword, _ in pairs(cat.tbl) do
+    -- First category wins for duplicates (priority: statement > clause > function > datatype > operator > constraint > modifier > misc)
+    if not KEYWORD_TO_CATEGORY[keyword] then
+      KEYWORD_TO_CATEGORY[keyword] = cat.category
+    end
+  end
+end
+
+-- Build flat lookup table for backwards compatibility
+local SQL_KEYWORDS = {}
+for keyword, _ in pairs(KEYWORD_TO_CATEGORY) do
+  SQL_KEYWORDS[keyword] = true
+end
 
 -- Single-character operators (parser combines if needed)
 local SINGLE_CHAR_OPERATORS = {
@@ -294,15 +362,19 @@ function Tokenizer.tokenize(text)
     end
 
     local token_type = force_type
+    local keyword_category = nil
 
     if not token_type then
       -- Determine token type based on content
       if is_keyword(current_token) then
+        local upper = current_token:upper()
         -- Check for GO keyword (must be alone on line conceptually)
-        if current_token:upper() == "GO" then
+        if upper == "GO" then
           token_type = TOKEN_TYPE.GO
+          keyword_category = "statement"  -- GO is a batch separator/statement
         else
           token_type = TOKEN_TYPE.KEYWORD
+          keyword_category = KEYWORD_TO_CATEGORY[upper]
         end
       elseif current_token:match("^%d+%.?%d*$") or current_token:match("^%d*%.%d+$") then
         -- Simple number detection (integer or decimal)
@@ -317,6 +389,7 @@ function Tokenizer.tokenize(text)
       text = current_token,
       line = token_start_line,
       col = token_start_col,
+      keyword_category = keyword_category,
     })
 
     current_token = ""

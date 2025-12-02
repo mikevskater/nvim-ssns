@@ -58,7 +58,20 @@ function UiHighlights.setup()
   vim.api.nvim_set_hl(0, "SsnsCollapsed", vim.tbl_extend("force", hl.collapsed, { default = true }))
 
   -- Semantic highlighting for query buffers
+  -- Legacy keyword (fallback)
   vim.api.nvim_set_hl(0, "SsnsKeyword", hl.keyword or { fg = "#569CD6", bold = true })
+
+  -- Categorized keyword highlight groups
+  vim.api.nvim_set_hl(0, "SsnsKeywordStatement", hl.keyword_statement or { fg = "#C586C0", bold = true })  -- Purple: SELECT, INSERT, CREATE, etc.
+  vim.api.nvim_set_hl(0, "SsnsKeywordClause", hl.keyword_clause or { fg = "#569CD6", bold = true })       -- Blue: FROM, WHERE, JOIN, etc.
+  vim.api.nvim_set_hl(0, "SsnsKeywordFunction", hl.keyword_function or { fg = "#DCDCAA" })                -- Yellow: COUNT, SUM, GETDATE, etc.
+  vim.api.nvim_set_hl(0, "SsnsKeywordDatatype", hl.keyword_datatype or { fg = "#4EC9B0" })                -- Cyan: INT, VARCHAR, DATETIME, etc.
+  vim.api.nvim_set_hl(0, "SsnsKeywordOperator", hl.keyword_operator or { fg = "#569CD6" })                -- Blue: AND, OR, NOT, IN, etc.
+  vim.api.nvim_set_hl(0, "SsnsKeywordConstraint", hl.keyword_constraint or { fg = "#CE9178" })            -- Orange: PRIMARY, KEY, FOREIGN, etc.
+  vim.api.nvim_set_hl(0, "SsnsKeywordModifier", hl.keyword_modifier or { fg = "#9CDCFE" })                -- Light Blue: ASC, DESC, NOLOCK, etc.
+  vim.api.nvim_set_hl(0, "SsnsKeywordMisc", hl.keyword_misc or { fg = "#808080" })                        -- Gray: reserved/misc keywords
+
+  -- Other semantic highlights
   vim.api.nvim_set_hl(0, "SsnsOperator", hl.operator or { fg = "#D4D4D4" })
   vim.api.nvim_set_hl(0, "SsnsString", hl.string or { fg = "#CE9178" })
   vim.api.nvim_set_hl(0, "SsnsNumber", hl.number or { fg = "#B5CEA8" })

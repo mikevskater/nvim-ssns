@@ -29,7 +29,18 @@ local TOKEN_TYPES = {
 
 -- Map semantic types to highlight groups
 local HIGHLIGHT_MAP = {
+  -- Legacy keyword (fallback for uncategorized)
   keyword = "SsnsKeyword",
+  -- Keyword categories
+  keyword_statement = "SsnsKeywordStatement",
+  keyword_clause = "SsnsKeywordClause",
+  keyword_function = "SsnsKeywordFunction",
+  keyword_datatype = "SsnsKeywordDatatype",
+  keyword_operator = "SsnsKeywordOperator",
+  keyword_constraint = "SsnsKeywordConstraint",
+  keyword_modifier = "SsnsKeywordModifier",
+  keyword_misc = "SsnsKeywordMisc",
+  -- Database objects
   database = "SsnsDatabase",
   schema = "SsnsSchema",
   table = "SsnsTable",
@@ -51,6 +62,22 @@ local HIGHLIGHT_MAP = {
 -- Keywords that indicate the next identifier is a database name
 local DATABASE_CONTEXT_KEYWORDS = {
   USE = true,
+}
+
+-- Keywords that start a CREATE/ALTER context
+local CREATE_ALTER_KEYWORDS = {
+  CREATE = true,
+  ALTER = true,
+}
+
+-- Keywords that indicate object type being created/altered
+-- Maps keyword to semantic type for the object name
+local CREATE_OBJECT_TYPE_KEYWORDS = {
+  PROCEDURE = "procedure",
+  PROC = "procedure",
+  FUNCTION = "function",
+  VIEW = "view",
+  TRIGGER = "procedure",  -- Treat triggers like procedures
 }
 
 -- ============================================================================
@@ -401,6 +428,11 @@ function Classifier.classify(tokens, chunks, connection, config)
   -- Track the last keyword for context (only for USE database detection)
   local last_keyword = nil
 
+  -- Track CREATE/ALTER context: when we see CREATE/ALTER followed by PROCEDURE/FUNCTION,
+  -- the next identifier should be highlighted as that object type even if not in cache
+  local in_create_alter = false  -- True after seeing CREATE or ALTER
+  local create_object_type = nil  -- "procedure", "function", etc. after seeing the object type keyword
+
   -- Track previous token for parameter detection (identifier following @)
   local prev_token = nil
 
@@ -415,11 +447,33 @@ function Classifier.classify(tokens, chunks, connection, config)
       local keyword_upper = token.text:upper()
       last_keyword = keyword_upper
 
+      -- Track CREATE/ALTER context
+      if CREATE_ALTER_KEYWORDS[keyword_upper] then
+        in_create_alter = true
+        create_object_type = nil  -- Reset until we see PROCEDURE/FUNCTION
+      elseif in_create_alter and CREATE_OBJECT_TYPE_KEYWORDS[keyword_upper] then
+        -- We're in CREATE/ALTER and just saw PROCEDURE, FUNCTION, etc.
+        create_object_type = CREATE_OBJECT_TYPE_KEYWORDS[keyword_upper]
+      elseif keyword_upper == "OR" then
+        -- Keep in_create_alter for "CREATE OR ALTER"
+      else
+        -- Any other keyword resets the CREATE context (unless it's OR)
+        if not (keyword_upper == "OR") then
+          in_create_alter = false
+          create_object_type = nil
+        end
+      end
+
       if config.highlight_keywords then
+        -- Determine specific semantic type based on keyword category
+        local category = token.keyword_category or "misc"
+        local semantic_type = "keyword_" .. category
+        local highlight_group = HIGHLIGHT_MAP[semantic_type] or HIGHLIGHT_MAP.keyword
+
         result = {
           token = token,
-          semantic_type = "keyword",
-          highlight_group = HIGHLIGHT_MAP.keyword,
+          semantic_type = semantic_type,
+          highlight_group = highlight_group,
         }
       end
       prev_token = token
@@ -473,9 +527,10 @@ function Classifier.classify(tokens, chunks, connection, config)
         local parts, consumed = Classifier._gather_multipart(tokens, i)
         local chunk = Classifier._find_chunk_at_position(chunk_index, token.line, token.col)
 
-        -- Build keyword context (only for USE database detection)
+        -- Build keyword context for special handling
         local keyword_context = {
           is_database_context = last_keyword and DATABASE_CONTEXT_KEYWORDS[last_keyword],
+          create_object_type = create_object_type,  -- "procedure", "function", etc. when in CREATE context
         }
 
         -- Classify each part by resolving against cache
@@ -484,8 +539,13 @@ function Classifier.classify(tokens, chunks, connection, config)
           table.insert(classified, part_result)
         end
 
-        -- Reset last_keyword after consuming identifier
+        -- Reset context after consuming identifier
         last_keyword = nil
+        -- Reset CREATE context after consuming the object name
+        if create_object_type then
+          in_create_alter = false
+          create_object_type = nil
+        end
 
         prev_token = token
         i = i + consumed
@@ -617,10 +677,11 @@ function Classifier._classify_multipart(parts, chunk, connection, config, keywor
     clause = StatementParser.get_clause_at_position(chunk, parts[1].line, parts[1].col)
   end
 
-  -- Build resolution context with clause info
+  -- Build resolution context with clause info and CREATE context
   local resolution_context = {
     is_database_context = keyword_context.is_database_context,
     clause = clause,  -- "from", "select", "where", "join", "on", "group_by", "having", "order_by", etc.
+    create_object_type = keyword_context.create_object_type,  -- "procedure", "function", etc. in CREATE statements
   }
 
   -- Resolve each part against the cache, building context as we go
@@ -1173,6 +1234,43 @@ function Classifier._resolve_multipart_from_cache(names, sql_context, connection
       Classifier._ensure_schemas_loaded(db)
     end
     return { "database" }
+  end
+
+  -- ============================================================================
+  -- Step 2.5: CREATE/ALTER context - highlight object being created/altered
+  -- When we're in a CREATE PROCEDURE/FUNCTION statement, highlight the object name
+  -- as that type even if it doesn't exist in the cache yet
+  -- ============================================================================
+  if resolution_context.create_object_type then
+    local obj_type = resolution_context.create_object_type  -- "procedure", "function", "view"
+
+    if #names == 1 then
+      -- Single identifier: sp_SearchEmployees
+      types[1] = obj_type
+      return types
+    elseif #names == 2 then
+      -- Two-part: dbo.sp_SearchEmployees → schema.procedure
+      -- First check if first part is a schema
+      local connected_db = connection and connection.database
+      if connected_db and Classifier._db_uses_schemas(connected_db) then
+        local schema = Classifier._find_schema(connected_db, name1)
+        if schema then
+          types[1] = "schema"
+          types[2] = obj_type
+          return types
+        end
+      end
+      -- Not a schema - might be database.object or just assume schema.object
+      types[1] = "schema"
+      types[2] = obj_type
+      return types
+    elseif #names == 3 then
+      -- Three-part: mydb.dbo.sp_SearchEmployees → database.schema.procedure
+      types[1] = "database"
+      types[2] = "schema"
+      types[3] = obj_type
+      return types
+    end
   end
 
   -- ============================================================================

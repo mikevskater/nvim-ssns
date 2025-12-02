@@ -268,10 +268,22 @@ local default_config = {
       collapsed = { fg = "#808080" },                      -- Gray
 
       -- Semantic highlighting (query buffers)
-      keyword = { fg = "#56cdd6", bold = true },           -- Blue (SQL keywords)
+      keyword = { fg = "#56cdd6", bold = true },           -- Blue (SQL keywords - legacy fallback)
+
+      -- Categorized keyword highlighting
+      keyword_statement = { fg = "#C586C0", bold = true }, -- Purple (SELECT, INSERT, CREATE, IF, BEGIN, etc.)
+      keyword_clause = { fg = "#569CD6", bold = true },    -- Blue (FROM, WHERE, JOIN, GROUP BY, etc.)
+      keyword_function = { fg = "#DCDCAA" },               -- Yellow (COUNT, SUM, GETDATE, CAST, etc.)
+      keyword_datatype = { fg = "#4EC9B0" },               -- Cyan (INT, VARCHAR, DATETIME, etc.)
+      keyword_operator = { fg = "#569CD6" },               -- Blue (AND, OR, NOT, IN, BETWEEN, etc.)
+      keyword_constraint = { fg = "#CE9178" },             -- Orange (PRIMARY, KEY, FOREIGN, INDEX, etc.)
+      keyword_modifier = { fg = "#9CDCFE" },               -- Light Blue (ASC, DESC, NOLOCK, etc.)
+      keyword_misc = { fg = "#808080" },                   -- Gray (reserved/misc keywords)
+
+      -- Other semantic highlights
       operator = { fg = "#D4D4D4" },                       -- Light gray (operators)
       string = { fg = "#CE9178" },                         -- Orange (string literals)
-      number = { fg = "#B5CEA8" },                         -- Green (numeric literals)
+      number = { fg = "#81ca59" },                         -- Green (numeric literals)
       alias = { fg = "#0affce", italic = true },           -- Cyan italic (table aliases)
       unresolved = { fg = "#808080" },                     -- Gray (unresolved identifiers)
       comment = { fg = "#6A9955", italic = true },         -- Green italic (comments)
