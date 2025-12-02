@@ -198,6 +198,12 @@ function UiQuery.setup_query_keymaps(bufnr)
   vim.keymap.set('n', keymaps.new_query or '<C-n>', function()
     UiQuery.new_query_from_buffer(bufnr)
   end, vim.tbl_extend('force', opts, { desc = 'New query buffer' }))
+
+  -- Show query history
+  vim.keymap.set('n', keymaps.show_history or '<C-H>', function()
+    local UiHistory = require('ssns.ui.history')
+    UiHistory.show_history()
+  end, vim.tbl_extend('force', opts, { desc = 'Show query history' }))
 end
 
 ---Execute query in buffer

@@ -1910,4 +1910,30 @@ function UiTree.new_query_from_context()
   Query.create_query_buffer(server, database, "", "Query")
 end
 
+---Show history for the server of the current node
+function UiTree.show_history_from_context()
+  local Buffer = require('ssns.ui.buffer')
+  local UiHistory = require('ssns.ui.history')
+
+  local line_number = Buffer.get_current_line()
+  local obj = UiTree.line_map[line_number]
+
+  if not obj then
+    -- No object under cursor, show all history
+    UiHistory.show_history()
+    return
+  end
+
+  -- Get server from the hovered object's hierarchy
+  local server = obj:get_server()
+
+  if server then
+    -- Show history filtered by server name
+    UiHistory.show_history({ server = server.name })
+  else
+    -- Fallback: show all history
+    UiHistory.show_history()
+  end
+end
+
 return UiTree

@@ -224,6 +224,13 @@ function UiBuffer.setup_keymaps()
     desc = "Toggle parent group",
   })
 
+  -- Show query history for current server
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.show_history or "<C-H>", "<Cmd>lua require('ssns.ui.tree').show_history_from_context()<CR>", {
+    noremap = true,
+    silent = true,
+    desc = "Show query history for server",
+  })
+
   -- Override j/k for smart cursor positioning with count support (if enabled)
   if Config.get_ui().smart_cursor_positioning then
     vim.keymap.set("n", "j", function()
