@@ -609,8 +609,22 @@ function Classifier._classify_multipart(parts, chunk, connection, config, keywor
   -- Build context for resolution (aliases, CTEs, temp tables from chunk)
   local sql_context = Classifier._build_context(chunk)
 
+  -- Get clause position for context-aware disambiguation
+  -- This helps when objects aren't loaded yet (FROM → schema.table, SELECT → alias.column)
+  local clause = nil
+  if chunk and parts[1] then
+    local StatementParser = require('ssns.completion.statement_parser')
+    clause = StatementParser.get_clause_at_position(chunk, parts[1].line, parts[1].col)
+  end
+
+  -- Build resolution context with clause info
+  local resolution_context = {
+    is_database_context = keyword_context.is_database_context,
+    clause = clause,  -- "from", "select", "where", "join", "on", "group_by", "having", "order_by", etc.
+  }
+
   -- Resolve each part against the cache, building context as we go
-  local resolved_types = Classifier._resolve_multipart_from_cache(names, sql_context, connection, keyword_context)
+  local resolved_types = Classifier._resolve_multipart_from_cache(names, sql_context, connection, resolution_context)
 
   -- Build results from resolved types
   for i, part in ipairs(parts) do
@@ -964,19 +978,28 @@ function Classifier._find_column_in_cache(column_name)
   return false
 end
 
----Resolve multi-part identifier using smart loading
----Loads data on-demand based on what's referenced in the SQL:
---- - Database name found → load that database's schemas
---- - Schema name found → load that schema's objects  
---- - Object name found → load that object's details (columns, params)
+---Resolve multi-part identifier using smart loading with proper disambiguation
+---
+---Resolution priority (designed to match SQL Server interpretation):
+---1. 4-part identifiers (linked servers) → mark as unresolved (not tracked)
+---2. USE keyword context → always database
+---3. Local SQL context (aliases, CTEs, temp tables) → highest priority
+---4. Schema in current database (with valid object) → before cross-DB lookup
+---5. Cross-database reference (database.schema.object)
+---6. Object in current database's default schema
+---7. Tables from SQL chunk
+---8. Single-part column lookup
+---9. Clause-based heuristics when objects aren't loaded
+---10. Unresolved fallback
+---
 ---@param names string[] Array of identifier names (without brackets)
 ---@param sql_context table Context with aliases, CTEs, temp tables
 ---@param connection table? Connection context with server/database
----@param keyword_context table? Keyword context
+---@param resolution_context table? Resolution context with is_database_context and clause
 ---@return string[] types Array of semantic types for each part
-function Classifier._resolve_multipart_from_cache(names, sql_context, connection, keyword_context)
+function Classifier._resolve_multipart_from_cache(names, sql_context, connection, resolution_context)
   local types = {}
-  keyword_context = keyword_context or {}
+  resolution_context = resolution_context or {}
 
   if #names == 0 then
     return types
@@ -985,9 +1008,29 @@ function Classifier._resolve_multipart_from_cache(names, sql_context, connection
   local name1 = names[1]
   local name1_lower = name1:lower()
 
-  -- Special case: after USE keyword, first part is always database
-  if keyword_context.is_database_context and #names == 1 then
-    -- Smart load: ensure database's schemas are loaded when referenced
+  -- ============================================================================
+  -- Step 1: 4-part identifiers (linked servers) - mark as unresolved
+  -- server.database.schema.table format - we don't track linked servers
+  -- ============================================================================
+  if #names >= 4 then
+    -- Could be database.schema.table.column or server.database.schema.table
+    -- Try to disambiguate: if first part is a known database, it's db.schema.table.column
+    local db = Classifier._find_database(name1)
+    if db then
+      -- It's database.schema.table.column
+      return Classifier._resolve_as_database_qualified(names, db)
+    end
+    -- First part is not a database → likely linked server → unresolved
+    for i = 1, #names do
+      types[i] = "unresolved"
+    end
+    return types
+  end
+
+  -- ============================================================================
+  -- Step 2: USE keyword context - first part is always database
+  -- ============================================================================
+  if resolution_context.is_database_context and #names == 1 then
     local db = Classifier._find_database(name1)
     if db then
       Classifier._ensure_schemas_loaded(db)
@@ -995,8 +1038,10 @@ function Classifier._resolve_multipart_from_cache(names, sql_context, connection
     return { "database" }
   end
 
-  -- Check local SQL context first (aliases, CTEs, temp tables)
+  -- ============================================================================
+  -- Step 3: Local SQL context (aliases, CTEs, temp tables)
   -- These take precedence over database objects
+  -- ============================================================================
 
   -- Check if first part is an alias
   if sql_context.aliases[name1_lower] then
@@ -1029,130 +1074,109 @@ function Classifier._resolve_multipart_from_cache(names, sql_context, connection
   local connected_db = connection and connection.database
   local uses_schemas = connected_db and Classifier._db_uses_schemas(connected_db)
 
-  -- Try to resolve based on number of parts and database type
-  -- Pattern matching for: Database.Schema.Object.Column, Schema.Object.Column, Object.Column, etc.
-
-  -- First, check if name1 is a database
-  local db, server = Classifier._find_database(name1)
-  if db then
-    types[1] = "database"
-    -- Smart load: ensure this database's schemas are loaded
-    Classifier._ensure_schemas_loaded(db)
-
-    if #names >= 2 then
-      -- Look for schema in this database
-      local schema = Classifier._find_schema(db, names[2])
-      if schema then
-        types[2] = "schema"
-        -- Smart load: ensure this schema's objects are loaded
-        Classifier._ensure_schema_objects_loaded(schema)
-
-        if #names >= 3 then
-          -- Look for object in this schema
-          local obj_type, obj = Classifier._find_object_in_schema(schema, names[3])
-          if obj_type then
-            types[3] = obj_type
-            -- Smart load: ensure object details are loaded for column verification
-            Classifier._ensure_object_details_loaded(obj)
-
-            -- Verify columns
-            for i = 4, #names do
-              if Classifier._find_column_in_object(obj, names[i]) then
-                types[i] = "column"
-              else
-                types[i] = "unresolved"
-              end
-            end
-          else
-            types[3] = "unresolved"
-            for i = 4, #names do
-              types[i] = "unresolved"
-            end
-          end
-        end
-      else
-        -- For non-schema databases, second part might be an object directly
-        if not Classifier._db_uses_schemas(db) then
-          local obj_type, obj = Classifier._find_object_in_db(db, names[2])
-          if obj_type then
-            types[2] = obj_type
-            Classifier._ensure_object_details_loaded(obj)
-            for i = 3, #names do
-              if Classifier._find_column_in_object(obj, names[i]) then
-                types[i] = "column"
-              else
-                types[i] = "unresolved"
-              end
-            end
-          else
-            types[2] = "unresolved"
-            for i = 3, #names do
-              types[i] = "unresolved"
-            end
-          end
-        else
-          types[2] = "unresolved"
-          for i = 3, #names do
-            types[i] = "unresolved"
-          end
-        end
-      end
-    end
-    return types
-  end
-
-  -- Not a database - check if it's a schema in the connected database
-  if connected_db and uses_schemas then
+  -- ============================================================================
+  -- Step 4: Schema in current database (BEFORE cross-database lookup)
+  -- This is the key disambiguation: current DB context takes priority
+  -- e.g., if connected to "otherdb" and "mydb" is both a database AND a schema
+  -- in otherdb, then mydb.users should be schema.table, not database.table
+  -- ============================================================================
+  if connected_db and uses_schemas and #names >= 2 then
     local schema = Classifier._find_schema(connected_db, name1)
     if schema then
-      types[1] = "schema"
-      -- Smart load: ensure this schema's objects are loaded
+      -- Verify that the second part exists as an object in this schema
       Classifier._ensure_schema_objects_loaded(schema)
+      local obj_type, obj = Classifier._find_object_in_schema(schema, names[2])
 
-      if #names >= 2 then
-        -- Look for object in this schema
-        local obj_type, obj = Classifier._find_object_in_schema(schema, names[2])
-        if obj_type then
-          types[2] = obj_type
-          Classifier._ensure_object_details_loaded(obj)
+      if obj_type then
+        -- Confirmed: schema.object in current database
+        types[1] = "schema"
+        types[2] = obj_type
+        Classifier._ensure_object_details_loaded(obj)
 
-          -- Verify columns
-          for i = 3, #names do
-            if Classifier._find_column_in_object(obj, names[i]) then
-              types[i] = "column"
-            else
-              types[i] = "unresolved"
-            end
-          end
-        else
-          types[2] = "unresolved"
-          for i = 3, #names do
+        -- Verify remaining parts as columns
+        for i = 3, #names do
+          if Classifier._find_column_in_object(obj, names[i]) then
+            types[i] = "column"
+          else
             types[i] = "unresolved"
           end
         end
+        return types
+      end
+      -- Schema exists but object not found/not loaded yet
+      -- Don't return here - fall through to check if it could be a database reference
+      -- But if schema is loaded and object not found, prefer schema interpretation
+      if schema.is_loaded then
+        -- Schema is loaded and object doesn't exist → still classify as schema.unresolved
+        -- (prefer lowest hierarchy level: schema.table over database.schema)
+        types[1] = "schema"
+        types[2] = "unresolved"
+        for i = 3, #names do
+          types[i] = "unresolved"
+        end
+        return types
+      end
+    end
+  end
+
+  -- ============================================================================
+  -- Step 5: Cross-database reference (database.schema.object or database.object)
+  -- Only checked AFTER schema in current DB
+  -- ============================================================================
+  local db = Classifier._find_database(name1)
+  if db then
+    return Classifier._resolve_as_database_qualified(names, db)
+  end
+
+  -- ============================================================================
+  -- Step 6: Schema reference without verified object (schema not fully loaded)
+  -- If we get here and name1 is a schema in current DB but objects weren't loaded,
+  -- use clause-based heuristics
+  -- ============================================================================
+  if connected_db and uses_schemas and #names >= 2 then
+    local schema = Classifier._find_schema(connected_db, name1)
+    if schema then
+      -- Schema exists but objects not loaded yet
+      types[1] = "schema"
+      -- Use clause heuristics for second part
+      if resolution_context.clause then
+        local clause = resolution_context.clause
+        if clause == "from" or clause == "join" then
+          types[2] = "table"  -- Assume table in FROM/JOIN
+        elseif clause == "exec" then
+          types[2] = "procedure"
+        else
+          types[2] = "unresolved"
+        end
+      else
+        types[2] = "unresolved"
+      end
+      for i = 3, #names do
+        types[i] = "column"
       end
       return types
     end
   end
 
-  -- Not a schema - check if it's an object in the connected database
+  -- ============================================================================
+  -- Step 7: Object in current database (table, view, procedure, etc.)
+  -- ============================================================================
   if connected_db then
     local obj_type, obj
-    
+
     if uses_schemas then
-      -- For schema-based DBs, search default schema (dbo for SQL Server, public for PostgreSQL)
+      -- For schema-based DBs, search default schema first
       local default_schema_name = connected_db:get_default_schema()
       local default_schema = Classifier._find_schema(connected_db, default_schema_name)
       if default_schema then
         Classifier._ensure_schema_objects_loaded(default_schema)
         obj_type, obj = Classifier._find_object_in_schema(default_schema, name1)
       end
-      
-      -- If not found in default schema, search all loaded schemas (non-blocking)
+
+      -- If not found in default schema, search all loaded schemas
       if not obj_type then
-        -- Use internal array directly to avoid blocking
         for _, schema in ipairs(connected_db.schemas or {}) do
-          if schema.is_loaded then  -- Only search already-loaded schemas
+          if schema.is_loaded then
             obj_type, obj = Classifier._find_object_in_schema(schema, name1)
             if obj_type then break end
           end
@@ -1168,7 +1192,6 @@ function Classifier._resolve_multipart_from_cache(names, sql_context, connection
       types[1] = obj_type
       Classifier._ensure_object_details_loaded(obj)
 
-      -- Verify columns
       for i = 2, #names do
         if Classifier._find_column_in_object(obj, names[i]) then
           types[i] = "column"
@@ -1180,7 +1203,9 @@ function Classifier._resolve_multipart_from_cache(names, sql_context, connection
     end
   end
 
-  -- Check if first part is a table from the SQL chunk's tables list
+  -- ============================================================================
+  -- Step 8: Tables from SQL chunk's tables list
+  -- ============================================================================
   for _, tbl in ipairs(sql_context.tables or {}) do
     local tbl_name = tbl.name or tbl.table
     if tbl_name then
@@ -1195,7 +1220,9 @@ function Classifier._resolve_multipart_from_cache(names, sql_context, connection
     end
   end
 
-  -- Check if first part is a column name in any loaded object
+  -- ============================================================================
+  -- Step 9: Single-part column lookup
+  -- ============================================================================
   if #names == 1 and connected_db then
     if Classifier._find_column_in_loaded_objects(connected_db, name1) then
       types[1] = "column"
@@ -1203,9 +1230,126 @@ function Classifier._resolve_multipart_from_cache(names, sql_context, connection
     end
   end
 
-  -- Nothing matched - mark all as unresolved
+  -- ============================================================================
+  -- Step 10: Clause-based heuristics for unloaded objects
+  -- When we can't verify, use clause position as hint
+  -- ============================================================================
+  if #names >= 2 and resolution_context.clause then
+    local clause = resolution_context.clause
+
+    if #names == 2 then
+      if clause == "from" or clause == "join" then
+        -- In FROM/JOIN: likely schema.table
+        types[1] = "schema"
+        types[2] = "table"
+        return types
+      elseif clause == "select" or clause == "where" or clause == "on" or
+             clause == "group_by" or clause == "having" or clause == "order_by" then
+        -- In SELECT/WHERE/ON: likely table.column or alias.column
+        -- Since we already checked aliases, assume table.column
+        types[1] = "table"
+        types[2] = "column"
+        return types
+      elseif clause == "exec" then
+        -- In EXEC: likely schema.procedure
+        types[1] = "schema"
+        types[2] = "procedure"
+        return types
+      end
+    elseif #names == 3 then
+      if clause == "from" or clause == "join" then
+        -- In FROM/JOIN: likely schema.table.alias (rare) or we already resolved
+        types[1] = "schema"
+        types[2] = "table"
+        types[3] = "column"
+        return types
+      elseif clause == "select" or clause == "where" or clause == "on" then
+        -- In SELECT/WHERE: likely schema.table.column
+        types[1] = "schema"
+        types[2] = "table"
+        types[3] = "column"
+        return types
+      end
+    end
+  end
+
+  -- ============================================================================
+  -- Step 11: Fallback - mark all as unresolved
+  -- ============================================================================
   for i = 1, #names do
     types[i] = "unresolved"
+  end
+
+  return types
+end
+
+---Helper: Resolve identifier as database-qualified (database.schema.object or database.object)
+---@param names string[] Array of identifier names
+---@param db DbClass The database object
+---@return string[] types Array of semantic types
+function Classifier._resolve_as_database_qualified(names, db)
+  local types = {}
+  types[1] = "database"
+
+  Classifier._ensure_schemas_loaded(db)
+
+  if #names == 1 then
+    return types
+  end
+
+  if Classifier._db_uses_schemas(db) then
+    -- Schema-based database: database.schema.object.column
+    local schema = Classifier._find_schema(db, names[2])
+    if schema then
+      types[2] = "schema"
+      Classifier._ensure_schema_objects_loaded(schema)
+
+      if #names >= 3 then
+        local obj_type, obj = Classifier._find_object_in_schema(schema, names[3])
+        if obj_type then
+          types[3] = obj_type
+          Classifier._ensure_object_details_loaded(obj)
+
+          for i = 4, #names do
+            if Classifier._find_column_in_object(obj, names[i]) then
+              types[i] = "column"
+            else
+              types[i] = "unresolved"
+            end
+          end
+        else
+          types[3] = "unresolved"
+          for i = 4, #names do
+            types[i] = "unresolved"
+          end
+        end
+      end
+    else
+      types[2] = "unresolved"
+      for i = 3, #names do
+        types[i] = "unresolved"
+      end
+    end
+  else
+    -- Non-schema database: database.object.column
+    local obj_type, obj = Classifier._find_object_in_db(db, names[2])
+    if obj_type then
+      types[2] = obj_type
+      Classifier._ensure_object_details_loaded(obj)
+
+      for i = 3, #names do
+        if Classifier._find_column_in_object(obj, names[i]) then
+          types[i] = "column"
+        else
+          types[i] = "unresolved"
+        end
+      end
+    else
+      types[2] = "unresolved"
+      for i = 3, #names do
+        types[i] = "unresolved"
+      end
+    end
   end
 
   return types
