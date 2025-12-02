@@ -25,14 +25,23 @@ function UiQuery.generate_buffer_name(object_name, server, database)
     UiQuery.buffer_counter[base_name] = 0
   end
 
-  -- Increment counter
-  UiQuery.buffer_counter[base_name] = UiQuery.buffer_counter[base_name] + 1
-  local count = UiQuery.buffer_counter[base_name]
+  -- Find a unique buffer name by incrementing counter until we find one that doesn't exist
+  local buf_name
+  local max_attempts = 1000  -- Prevent infinite loop
 
-  -- Generate unique name
-  local buf_name = string.format("[%s-%d]", base_name, count)
+  for _ = 1, max_attempts do
+    UiQuery.buffer_counter[base_name] = UiQuery.buffer_counter[base_name] + 1
+    local count = UiQuery.buffer_counter[base_name]
+    buf_name = string.format("[%s-%d]", base_name, count)
 
-  return buf_name
+    -- Use vim.fn.bufexists to properly check if buffer name is taken
+    if vim.fn.bufexists(buf_name) == 0 then
+      return buf_name
+    end
+  end
+
+  -- Fallback: use timestamp to guarantee uniqueness
+  return string.format("[%s-%d]", base_name, os.time())
 end
 
 ---Prepend USE statement for SQL Server databases
