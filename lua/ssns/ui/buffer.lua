@@ -99,12 +99,63 @@ function UiBuffer.open()
   -- Setup cursor positioning autocmd
   UiBuffer.setup_cursor_positioning()
 
+  -- Setup autocmd to close SSNS when it becomes the last window
+  UiBuffer.setup_auto_close()
+
   return UiBuffer.winid
 end
 
+---Setup autocmd to close SSNS tree when all other windows are closed
+function UiBuffer.setup_auto_close()
+  if not UiBuffer.exists() then
+    return
+  end
+
+  -- Create augroup if not exists
+  local augroup = vim.api.nvim_create_augroup("SSNSAutoClose", { clear = true })
+
+  -- Listen for when a window is closed
+  vim.api.nvim_create_autocmd("WinClosed", {
+    group = augroup,
+    callback = function(args)
+      -- Skip if SSNS window is not open
+      if not UiBuffer.is_open() then
+        return
+      end
+
+      -- Skip if the closed window was the SSNS window itself
+      local closed_winid = tonumber(args.match)
+      if closed_winid == UiBuffer.winid then
+        return
+      end
+
+      -- Defer the check to after the window is actually closed
+      vim.schedule(function()
+        -- Check if SSNS is now the only window
+        local windows = vim.api.nvim_list_wins()
+        if #windows == 1 and UiBuffer.is_open() then
+          -- SSNS is the last window, quit Neovim
+          vim.cmd('quit')
+        end
+      end)
+    end,
+  })
+end
+
 ---Close the SSNS window
-function UiBuffer.close()
+---@param force boolean? If true, quit Neovim if this is the last window
+function UiBuffer.close(force)
   if UiBuffer.is_open() then
+    -- Check if this is the last window
+    local windows = vim.api.nvim_list_wins()
+    if #windows == 1 then
+      if force then
+        -- Quit Neovim if forced and this is the last window
+        vim.cmd('quit')
+      end
+      -- Don't close if this is the last window (would cause E444)
+      return
+    end
     vim.api.nvim_win_close(UiBuffer.winid, true)
     UiBuffer.winid = nil
   end
