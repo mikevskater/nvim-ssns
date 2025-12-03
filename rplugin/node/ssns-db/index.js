@@ -1,4 +1,6 @@
+
 const DriverFactory = require('./drivers/factory');
+const { ssnsLog } = require('./ssns-log');
 
 // Driver registry - reuse drivers for same connection strings
 const drivers = new Map();
@@ -26,8 +28,9 @@ function getDriverInstance(connectionString) {
  * Neovim remote plugin entry point
  * @param {Object} plugin - Neovim plugin instance
  */
+
 module.exports = (plugin) => {
-  console.error('[SSNS] Plugin initializing...');
+  ssnsLog('[SSNS] Plugin initializing...');
 
   // Wrap in try-catch to catch any errors during registration
   try {
@@ -59,6 +62,7 @@ module.exports = (plugin) => {
         };
       }
 
+
       // Get driver for this connection
       const driver = getDriverInstance(connectionString);
 
@@ -68,6 +72,7 @@ module.exports = (plugin) => {
       return result;
 
     } catch (err) {
+      ssnsLog(`[SSNSExecuteQuery] Error: ${err && err.stack ? err.stack : err}`);
       return {
         resultSets: [],
         metadata: {},
@@ -114,6 +119,7 @@ module.exports = (plugin) => {
       return metadata;
 
     } catch (err) {
+      ssnsLog(`[SSNSGetMetadata] Error: ${err && err.stack ? err.stack : err}`);
       return {
         columns: [],
         error: err.message || 'Unknown error occurred'
@@ -131,47 +137,47 @@ module.exports = (plugin) => {
    * @returns {Promise<Object>} { success: boolean, message: string }
    */
   plugin.registerFunction('SSNSTestConnection', async (args) => {
-    console.error('[SSNS] SSNSTestConnection called');
-    console.error('[SSNS] args:', JSON.stringify(args));
-    console.error('[SSNS] args length:', args.length);
-    console.error('[SSNS] args[0]:', args[0]);
-    console.error('[SSNS] args[0] type:', typeof args[0]);
-    console.error('[SSNS] args[0] isArray:', Array.isArray(args[0]));
+    ssnsLog('[index] SSNSTestConnection called');
+    ssnsLog(`[index] args: ${JSON.stringify(args)}`);
+    ssnsLog(`[index] args length: ${args.length}`);
+    ssnsLog(`[index] args[0]: ${args[0]}`);
+    ssnsLog(`[index] args[0] type: ${typeof args[0]}`);
+    ssnsLog(`[index] args[0] isArray: ${Array.isArray(args[0])}`);
 
     if (Array.isArray(args[0])) {
-      console.error('[SSNS] args[0][0]:', args[0][0]);
-      console.error('[SSNS] args[0][0] type:', typeof args[0][0]);
+      ssnsLog(`[index] args[0][0]: ${args[0][0]}`);
+      ssnsLog(`[index] args[0][0] type: ${typeof args[0][0]}`);
     }
 
     try {
       // If Neovim double-wraps the array, unwrap it
       const connectionString = Array.isArray(args[0]) ? args[0][0] : args[0];
-      console.error('[SSNS] Final connectionString:', connectionString, 'type:', typeof connectionString);
+      ssnsLog(`[index] Final connectionString: ${connectionString}, type: ${typeof connectionString}`);
 
       if (!connectionString) {
-        console.error('[SSNS] No connection string provided');
+        ssnsLog('[index] No connection string provided');
         return {
           success: false,
           message: 'Missing required parameter: connectionString'
         };
       }
 
-      console.error('[SSNS] Getting driver for:', connectionString);
+      ssnsLog(`[index] Getting driver for: ${connectionString}`);
       // Get driver for this connection
       const driver = getDriverInstance(connectionString);
 
-      console.error('[SSNS] Testing connection...');
+      ssnsLog('[index] Testing connection...');
       // Test connection
       await driver.connect();
 
-      console.error('[SSNS] Connection successful!');
+      ssnsLog('[index] Connection successful!');
       return {
         success: true,
         message: 'Connection successful'
       };
 
     } catch (err) {
-      console.error('[SSNS] Connection failed:', err.message);
+      ssnsLog(`[index] Connection failed: ${err.message}`);
       return {
         success: false,
         message: err.message || 'Connection failed'
@@ -211,11 +217,10 @@ module.exports = (plugin) => {
     }
   }, { sync: true }); // Changed to sync: true
 
-  console.error('[SSNS] All functions registered successfully');
+  ssnsLog('[index] All functions registered successfully');
 
   } catch (err) {
-    console.error('[SSNS] ERROR during plugin initialization:', err);
-    console.error('[SSNS] Stack:', err.stack);
+    ssnsLog(`[index] ERROR during plugin initialization: ${err && err.stack ? err.stack : err}`);
     throw err;
   }
 };

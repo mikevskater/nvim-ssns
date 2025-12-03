@@ -1,6 +1,7 @@
 const sql = require('mssql');
 const msnodesqlv8 = require('msnodesqlv8'); // Use raw msnodesqlv8, not mssql wrapper
 const BaseDriver = require('./base');
+const { ssnsLog } = require('../ssns-log');
 
 /**
  * SqlServerDriver - SQL Server database driver using mssql package
@@ -32,7 +33,7 @@ class SqlServerDriver extends BaseDriver {
   parseConnectionString() {
     const connStr = this.connectionString;
 
-    console.error('[DEBUG] Original connection string:', connStr);
+    ssnsLog(`[DEBUG] Original connection string: ${connStr}`);
 
     // Extract query parameters (e.g., ?driver=...)
     let cleaned = connStr.replace(/^sqlserver:\/\//, '');
@@ -44,13 +45,13 @@ class SqlServerDriver extends BaseDriver {
       driverParam = params.get('driver');
       if (driverParam) {
         // URL decode the driver name (URLSearchParams does this automatically)
-        console.error('[DEBUG] Extracted driver parameter:', driverParam);
+        ssnsLog(`[DEBUG] Extracted driver parameter: ${driverParam}`);
       }
       // Remove query params from connection string
       cleaned = cleaned.replace(/\?.*$/, '');
     }
 
-    console.error('[DEBUG] After removing prefix and params:', cleaned);
+    ssnsLog(`[DEBUG] After removing prefix and params: ${cleaned}`);
 
     // Parse authentication (if present)
     let auth = null;
@@ -65,8 +66,8 @@ class SqlServerDriver extends BaseDriver {
 
     // Parse server and database
     const [serverWithInstance, database] = serverPart.split('/');
-    console.error('[DEBUG] serverWithInstance:', serverWithInstance);
-    console.error('[DEBUG] database:', database);
+    ssnsLog(`[DEBUG] serverWithInstance: ${serverWithInstance}`);
+    ssnsLog(`[DEBUG] database: ${database}`);
 
     // Parse server and instance (if present)
     // Handle both single backslash (\) and double backslash (\\)
@@ -76,15 +77,15 @@ class SqlServerDriver extends BaseDriver {
       const parts = serverWithInstance.split('\\');
       server = parts[0];
       instanceName = parts[1];
-      console.error('[DEBUG] Parsed server:', server, 'instance:', instanceName);
+      ssnsLog(`[DEBUG] Parsed server: ${server} instance: ${instanceName}`);
     }
 
     // Replace "." with "localhost" for mssql config object
     if (server === '.') {
       server = 'localhost';
-      console.error('[DEBUG] Replaced "." with "localhost"');
+      ssnsLog('[DEBUG] Replaced "." with "localhost"');
     } else {
-      console.error('[DEBUG] Keeping server as:', server);
+      ssnsLog(`[DEBUG] Keeping server as: ${server}`);
     }
 
     // Build mssql config
@@ -126,8 +127,8 @@ class SqlServerDriver extends BaseDriver {
 
       const connectionString = `Driver={${driver}};Server=${server}${instancePart};Database=${database || 'master'};Trusted_Connection=yes;TrustServerCertificate=yes;`;
 
-      console.error('[DEBUG] Using Windows auth with driver:', driver);
-      console.error('[DEBUG] Connection string:', connectionString);
+      ssnsLog(`[DEBUG] Using Windows auth with driver: ${driver}`);
+      ssnsLog(`[DEBUG] Connection string: ${connectionString}`);
 
       return {
         config: {
@@ -138,7 +139,7 @@ class SqlServerDriver extends BaseDriver {
       };
     }
 
-    console.error('[DEBUG] Using SQL auth with config:', JSON.stringify(config, null, 2));
+    ssnsLog(`[DEBUG] Using SQL auth with config: ${JSON.stringify(config, null, 2)}`);
     return {
       config: config,
       useNativeDriver: false
@@ -149,38 +150,42 @@ class SqlServerDriver extends BaseDriver {
    * Establish connection pool
    */
   async connect() {
+    ssnsLog('[sqlserver] connect() called');
     if (this.isConnected && this.connection) {
+      ssnsLog('[sqlserver] Already connected');
       return; // Already connected
     }
 
     if (this.useNativeDriver) {
       // Use msnodesqlv8 for Windows authentication (callback-based API)
-      console.error('[DEBUG] Connecting with msnodesqlv8 (Windows auth)');
-      console.error('[DEBUG] Connection string:', this.config.connectionString);
+      ssnsLog('[sqlserver] Connecting with msnodesqlv8 (Windows auth)');
+      ssnsLog(`[sqlserver] Connection string: ${this.config.connectionString}`);
       return new Promise((resolve, reject) => {
         msnodesqlv8.open(this.config.connectionString, (err, conn) => {
           if (err) {
             this.isConnected = false;
-            console.error('[DEBUG] Connection error:', err);
-            console.error('[DEBUG] Error details:', JSON.stringify(err, null, 2));
+            ssnsLog(`[sqlserver] Connection error: ${err}`);
+            ssnsLog(`[sqlserver] Error details: ${JSON.stringify(err, null, 2)}`);
             reject(new Error(`SQL Server Windows Auth connection failed: ${err.message || err}\nConnection string: ${this.config.connectionString}`));
             return;
           }
 
           this.connection = conn;
           this.isConnected = true;
-          console.error('[DEBUG] Successfully connected with msnodesqlv8');
+          ssnsLog('[sqlserver] Successfully connected with msnodesqlv8');
           resolve();
         });
       });
     } else {
       // Use tedious for SQL Server authentication (promise-based API)
-      console.error('[DEBUG] Connecting with tedious (SQL auth)');
+      ssnsLog('[sqlserver] Connecting with tedious (SQL auth)');
       try {
         this.pool = await sql.connect(this.config);
         this.isConnected = true;
+        ssnsLog('[sqlserver] Successfully connected with tedious');
       } catch (err) {
         this.isConnected = false;
+        ssnsLog(`[sqlserver] Connection failed: ${err.message}`);
         throw new Error(`SQL Server connection failed: ${err.message}`);
       }
     }
@@ -212,25 +217,29 @@ class SqlServerDriver extends BaseDriver {
    * @returns {Promise<Object>} Structured result object
    */
   async execute(query, options = {}) {
+    ssnsLog(`[sqlserver] execute() called with query: ${query}`);
     const startTime = Date.now();
 
     try {
       // Ensure connection
       if (!this.isConnected) {
+        ssnsLog('[sqlserver] Not connected, calling connect()');
         await this.connect();
       }
 
       // Use different execution based on driver
       if (this.useNativeDriver) {
+        ssnsLog('[sqlserver] Using msnodesqlv8 for execution');
         return await this.executeWithMsnodesqlv8(query, startTime);
       } else {
+        ssnsLog('[sqlserver] Using tedious for execution');
         return await this.executeWithTedious(query, startTime);
       }
 
     } catch (err) {
       const endTime = Date.now();
       const executionTime = endTime - startTime;
-
+      ssnsLog(`[sqlserver] execute() error: ${err && err.stack ? err.stack : err}`);
       return {
         resultSets: [],
         metadata: {
@@ -474,8 +483,10 @@ class SqlServerDriver extends BaseDriver {
    * @returns {Promise<Object>} Rich metadata object
    */
   async getMetadata(objectType, objectName, schemaName = 'dbo') {
+    ssnsLog(`[sqlserver] getMetadata() called with objectType: ${objectType}, objectName: ${objectName}, schemaName: ${schemaName}`);
     try {
       if (!this.isConnected) {
+        ssnsLog('[sqlserver] Not connected, calling connect() in getMetadata');
         await this.connect();
       }
 
@@ -528,7 +539,9 @@ class SqlServerDriver extends BaseDriver {
           ORDER BY c.ORDINAL_POSITION
         `;
 
+        ssnsLog(`[sqlserver] getMetadata() running query: ${query}`);
         const result = await this.pool.request().query(query);
+        ssnsLog(`[sqlserver] getMetadata() query result: ${JSON.stringify(result.recordset)}`);
 
         return {
           columns: result.recordset.map(row => ({
@@ -547,9 +560,11 @@ class SqlServerDriver extends BaseDriver {
         };
       }
 
+      ssnsLog('[sqlserver] getMetadata() objectType not table/view, returning empty columns');
       return { columns: [] };
 
     } catch (err) {
+      ssnsLog(`[sqlserver] getMetadata() error: ${err && err.stack ? err.stack : err}`);
       throw new Error(`Failed to get metadata: ${err.message}`);
     }
   }
