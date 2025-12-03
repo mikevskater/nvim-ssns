@@ -134,6 +134,8 @@ end
 function UiTree.render()
   local Cache = require('ssns').get_cache()
   local Buffer = require('ssns.ui.buffer')
+  local Config = require('ssns.config')
+  local icons = Config.get_ui().icons
 
   -- Clear mappings
   UiTree.line_map = {}
@@ -143,13 +145,34 @@ function UiTree.render()
   local lines = {}
   local line_number = 1
 
+  -- Add "+ Add Server" action at the top (always visible)
+  local add_server_action = {
+    name = "+ Add Server",
+    object_type = "add_server_action",
+    is_action = true,
+    ui_state = {
+      expanded = false,
+      visible = true,
+    },
+    has_children = function() return false end,
+  }
+  local add_icon = icons.action or ""
+  table.insert(lines, string.format("  %s + Add Server", add_icon))
+  UiTree.line_map[#lines] = add_server_action
+  line_number = #lines + 1
+
+  -- Add separator line
+  table.insert(lines, "")
+  line_number = #lines + 1
+
   -- Get all servers
   local servers = Cache.get_all_servers()
 
   if #servers == 0 then
-    table.insert(lines, "No servers configured")
+    table.insert(lines, "No servers connected")
     table.insert(lines, "")
-    table.insert(lines, "Add servers in your setup():")
+    table.insert(lines, "Press Enter on '+ Add Server' above")
+    table.insert(lines, "or add servers in your setup():")
     table.insert(lines, "  connections = {")
     table.insert(lines, '    my_server = "sqlserver://.\\\\SQLEXPRESS/master"')
     table.insert(lines, "  }")
@@ -176,6 +199,7 @@ end
 ---@param indent_level number
 function UiTree.render_server(server, lines, line_number, indent_level)
   local Config = require('ssns.config')
+  local Connections = require('ssns.connections')
   local icons = Config.get_ui().icons
 
   local indent = string.rep("  ", indent_level)
@@ -198,8 +222,15 @@ function UiTree.render_server(server, lines, line_number, indent_level)
 
   local status = server:get_status_icon()
 
+  -- Check if server is a favorite (show star icon)
+  local favorite_icon = ""
+  local conn = Connections.find(server.name)
+  if conn and (conn.favorite or conn.auto_connect) then
+    favorite_icon = " ★"
+  end
+
   -- Server line with icon
-  local line = string.format("%s%s %s %s %s", indent, expand_icon, server_icon, server.name, status)
+  local line = string.format("%s%s %s %s%s %s", indent, expand_icon, server_icon, server.name, favorite_icon, status)
   table.insert(lines, line)
 
   -- Map line to object
@@ -876,6 +907,13 @@ function UiTree.toggle_node()
   -- Get object at current line
   local obj = UiTree.line_map[line_number]
   if not obj then
+    return
+  end
+
+  -- Handle "+ Add Server" action
+  if obj.object_type == "add_server_action" then
+    local AddServerUI = require('ssns.ui.add_server')
+    AddServerUI.open()
     return
   end
 
@@ -1590,6 +1628,57 @@ function UiTree.toggle_connection()
     end
   else
     vim.notify("Can only toggle connection on servers/databases", vim.log.levels.WARN)
+  end
+end
+
+---Toggle favorite status for server at current cursor
+function UiTree.toggle_favorite()
+  local Buffer = require('ssns.ui.buffer')
+  local Connections = require('ssns.connections')
+  local Config = require('ssns.config')
+  local smart_positioning = Config.get_ui().smart_cursor_positioning
+  local line_number = Buffer.get_current_line()
+
+  -- Get object at current line
+  local obj = UiTree.line_map[line_number]
+  if not obj then
+    return
+  end
+
+  -- Only allow on servers
+  if obj.object_type ~= "server" then
+    vim.notify("Can only toggle favorite on servers", vim.log.levels.WARN)
+    return
+  end
+
+  -- Check if this server has a saved connection
+  local conn = Connections.find(obj.name)
+  if not conn then
+    -- Offer to save the connection first
+    vim.notify(string.format("'%s' is not saved. Use :SSNSAddServer to save it first.", obj.name), vim.log.levels.WARN)
+    return
+  end
+
+  -- Toggle favorite
+  local success, new_state = Connections.toggle_favorite(obj.name)
+
+  if success then
+    local status = new_state and "added to" or "removed from"
+    vim.notify(string.format("'%s' %s favorites", obj.name, status), vim.log.levels.INFO)
+
+    -- Re-render tree to show updated star icon
+    UiTree.render()
+
+    -- Restore cursor position with smart column
+    local col = smart_positioning and Buffer.get_name_column(line_number) or 0
+    Buffer.set_cursor(line_number, col)
+    if smart_positioning then
+      Buffer.last_indent_info = {
+        line = line_number,
+        indent_level = Buffer.get_indent_level(line_number),
+        column = col,
+      }
+    end
   end
 end
 

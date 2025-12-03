@@ -31,6 +31,9 @@ function UiHighlights.setup()
   vim.api.nvim_set_hl(0, "SsnsAction", hl.action)
   vim.api.nvim_set_hl(0, "SsnsGroup", hl.group)
 
+  -- Add server action (green to indicate "add")
+  vim.api.nvim_set_hl(0, "SsnsAddServerAction", { fg = "#4EC9B0", bold = true })
+
   -- Icon highlights (for the icon characters themselves) - use default = true for optional styling
   vim.api.nvim_set_hl(0, "SsnsIcon", { link = "SpecialChar", default = true })
   vim.api.nvim_set_hl(0, "SsnsIconServer", vim.tbl_extend("force", hl.server, { default = true }))
@@ -168,6 +171,7 @@ function UiHighlights.get_highlight_group(obj)
     sequence = "SsnsSequence",
     synonym = "SsnsSynonym",
     action = "SsnsAction",
+    add_server_action = "SsnsAddServerAction",
     -- Groups
     databases_group = "SsnsGroup",
     tables_group = "SsnsGroup",

@@ -26,6 +26,8 @@ function Ssns.setup(user_config)
 
   -- Load servers from configuration
   local Cache = require('ssns.cache')
+  local Connections = require('ssns.connections')
+
   local servers, errors = Cache.load_from_config(Config.get())
 
   -- Report any connection errors
@@ -38,12 +40,46 @@ function Ssns.setup(user_config)
     end
   end
 
+  -- Load favorite connections from connections.json (shown in tree but not connected)
+  local favorites = Connections.get_favorites()
+  local favorite_count = 0
+  local auto_connect_count = 0
+
+  for _, conn in ipairs(favorites) do
+    -- Skip if already loaded from config
+    if not Cache.server_exists(conn.name) then
+      local server, err = Cache.add_server_from_connection(conn)
+      if server then
+        favorite_count = favorite_count + 1
+        -- Auto-connect if configured
+        if conn.auto_connect then
+          local success, connect_err = server:connect()
+          if success then
+            auto_connect_count = auto_connect_count + 1
+          else
+            vim.notify(
+              string.format("SSNS: Failed to auto-connect '%s': %s", conn.name, connect_err or "Unknown error"),
+              vim.log.levels.WARN
+            )
+          end
+        end
+      else
+        vim.notify(
+          string.format("SSNS: Failed to load favorite '%s': %s", conn.name, err or "Unknown error"),
+          vim.log.levels.WARN
+        )
+      end
+    end
+  end
+
   -- Report successful initialization
-  if #servers > 0 then
-    vim.notify(
-      string.format("SSNS: Initialized with %d connection(s)", #servers),
-      vim.log.levels.INFO
-    )
+  local total_servers = #servers + favorite_count
+  if total_servers > 0 then
+    local msg = string.format("SSNS: Initialized with %d connection(s)", total_servers)
+    if auto_connect_count > 0 then
+      msg = msg .. string.format(" (%d auto-connected)", auto_connect_count)
+    end
+    vim.notify(msg, vim.log.levels.INFO)
   end
 
   -- Setup UI highlights
@@ -187,11 +223,31 @@ function Ssns._register_commands()
     desc = "Connect to a saved SSNS connection",
     complete = function()
       local Config = require('ssns.config')
-      local connections = Config.get_connections()
+      local Connections = require('ssns.connections')
       local names = {}
-      for name, _ in pairs(connections) do
+
+      -- Get from config
+      local config_connections = Config.get_connections()
+      for name, _ in pairs(config_connections) do
         table.insert(names, name)
       end
+
+      -- Get from connections file
+      local file_connections = Connections.load()
+      for _, conn in ipairs(file_connections) do
+        -- Avoid duplicates
+        local exists = false
+        for _, n in ipairs(names) do
+          if n == conn.name then
+            exists = true
+            break
+          end
+        end
+        if not exists then
+          table.insert(names, conn.name)
+        end
+      end
+
       return names
     end,
   })
@@ -348,6 +404,24 @@ function Ssns._register_commands()
     desc = "View metadata of object under cursor in floating window",
   })
 
+  -- :SSNSAddServer - Open add server UI
+  vim.api.nvim_create_user_command("SSNSAddServer", function()
+    local AddServerUI = require('ssns.ui.add_server')
+    AddServerUI.open()
+  end, {
+    nargs = 0,
+    desc = "Add a new server connection",
+  })
+
+  -- :SSNSManageConnections - Open connection manager (alias for SSNSAddServer)
+  vim.api.nvim_create_user_command("SSNSManageConnections", function()
+    local AddServerUI = require('ssns.ui.add_server')
+    AddServerUI.open()
+  end, {
+    nargs = 0,
+    desc = "Manage saved server connections",
+  })
+
   -- Testing Framework Commands
 
   -- :SSNSRunTests - Run all IntelliSense tests
@@ -479,6 +553,7 @@ end
 function Ssns.connect(connection_name)
   local Config = require('ssns.config')
   local Cache = require('ssns.cache')
+  local Connections = require('ssns.connections')
 
   -- Check if already in cache
   local existing_server = Cache.find_server(connection_name)
@@ -492,12 +567,23 @@ function Ssns.connect(connection_name)
     return
   end
 
-  -- Get connection string from config
-  local connections = Config.get_connections()
-  local connection_string = connections[connection_name]
+  -- Get connection string from config or connections file
+  local connection_string = nil
+
+  -- First check config
+  local config_connections = Config.get_connections()
+  connection_string = config_connections[connection_name]
+
+  -- If not in config, check connections file
+  if not connection_string then
+    local file_conn = Connections.find(connection_name)
+    if file_conn then
+      connection_string = file_conn.connection_string
+    end
+  end
 
   if not connection_string then
-    vim.notify(string.format("SSNS: Connection '%s' not found in configuration", connection_name), vim.log.levels.ERROR)
+    vim.notify(string.format("SSNS: Connection '%s' not found", connection_name), vim.log.levels.ERROR)
     return
   end
 

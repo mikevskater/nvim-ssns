@@ -493,6 +493,20 @@ function UiBuffer.setup_keymaps()
     desc = "Toggle parent group",
   })
 
+  -- Add server
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.add_server or "a", "<Cmd>lua require('ssns.ui.add_server').open()<CR>", {
+    noremap = true,
+    silent = true,
+    desc = "Add server connection",
+  })
+
+  -- Toggle favorite on server
+  vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.toggle_favorite or "*", "<Cmd>lua require('ssns.ui.tree').toggle_favorite()<CR>", {
+    noremap = true,
+    silent = true,
+    desc = "Toggle server favorite",
+  })
+
   -- Show query history for current server
   vim.api.nvim_buf_set_keymap(bufnr, "n", keymaps.show_history or "<Leader>@", "<Cmd>lua require('ssns.ui.tree').show_history_from_context()<CR>", {
     noremap = true,
@@ -665,6 +679,8 @@ function UiBuffer.show_help()
     "  q            - Close SSNS window",
     "",
     "Actions:",
+    "  a            - Add server connection",
+    "  *            - Toggle favorite (server)",
     "  r            - Refresh current node",
     "  R            - Refresh all servers",
     "  d            - Toggle connection",

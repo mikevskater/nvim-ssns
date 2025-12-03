@@ -87,6 +87,8 @@
 ---@field goto_first_child string Go to first child in group (default: "<C-[>")
 ---@field goto_last_child string Go to last child in group (default: "<C-]>")
 ---@field toggle_group string Toggle expand/collapse of parent group (default: "g")
+---@field add_server string Open add server UI (default: "a")
+---@field toggle_favorite string Toggle favorite status on server (default: "*")
 ---Query buffer keymaps
 ---@field execute string Execute query in buffer (default: "<Leader>r")
 ---@field execute_selection string Execute visual selection (default: "<Leader>r")
@@ -343,6 +345,8 @@ local default_config = {
     goto_first_child = "<C-[>",  -- Go to first child in group
     goto_last_child = "<C-]>",  -- Go to last child in group
     toggle_group = "g",  -- Toggle expand/collapse of parent group
+    add_server = "a",  -- Open add server UI
+    toggle_favorite = "*",  -- Toggle favorite on server
     -- Query buffer keymaps
     execute = "<Leader>r",  -- Execute query
     execute_selection = "<Leader>r",  -- Execute visual selection (in visual mode)

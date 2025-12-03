@@ -292,6 +292,74 @@ function Cache.load_from_config(config)
   return servers, errors
 end
 
+---Load servers from connections JSON file
+---@param auto_connect_only boolean? Only load connections with auto_connect=true
+---@return ServerClass[] servers Created servers
+---@return table<string, string> errors Map of failed connections to error messages
+function Cache.load_from_connections_file(auto_connect_only)
+  local Connections = require('ssns.connections')
+  local Factory = require('ssns.factory')
+
+  local connections
+  if auto_connect_only then
+    connections = Connections.get_auto_connect()
+  else
+    connections = Connections.load()
+  end
+
+  if #connections == 0 then
+    return {}, {}
+  end
+
+  local servers = {}
+  local errors = {}
+
+  for _, conn in ipairs(connections) do
+    -- Skip if server with this name already exists
+    if Cache.server_exists(conn.name) then
+      goto continue
+    end
+
+    local server, err = Factory.create_server(conn.name, conn.connection_string)
+
+    if server then
+      Cache.add_server(server)
+      table.insert(servers, server)
+    else
+      errors[conn.name] = err or "Unknown error"
+    end
+
+    ::continue::
+  end
+
+  return servers, errors
+end
+
+---Add a server from a ConnectionData object and connect it
+---@param connection_data table Connection data with name, connection_string, type
+---@return ServerClass? server The created server or nil
+---@return string? error Error message if failed
+function Cache.add_server_from_connection(connection_data)
+  if not connection_data or not connection_data.name or not connection_data.connection_string then
+    return nil, "Invalid connection data"
+  end
+
+  -- Check if server already exists
+  if Cache.server_exists(connection_data.name) then
+    return nil, string.format("Server '%s' already exists in tree", connection_data.name)
+  end
+
+  local Factory = require('ssns.factory')
+  local server, err = Factory.create_server(connection_data.name, connection_data.connection_string)
+
+  if not server then
+    return nil, err or "Failed to create server"
+  end
+
+  Cache.add_server(server)
+  return server, nil
+end
+
 ---Check if a server name is already in use
 ---@param server_name string
 ---@return boolean exists
