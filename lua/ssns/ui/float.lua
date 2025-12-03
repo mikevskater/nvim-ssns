@@ -157,7 +157,7 @@ function FloatWindow:_calculate_dimensions()
 
   -- Auto-calculate height if not specified
   if not height then
-    height = self.config.min_height or #self.lines
+    height = #self.lines  -- Use content height, constraints applied below
   end
 
   -- Apply constraints
