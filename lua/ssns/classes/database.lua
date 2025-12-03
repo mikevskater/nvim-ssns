@@ -254,9 +254,10 @@ function DbClass:_ensure_schemas_loaded()
   end
 
   local adapter = self:get_adapter()
-  
+
   if not adapter.features.schemas then
-    self.schemas = {}
+    -- Don't set self.schemas for non-schema servers (keep as nil)
+    -- This ensures truthy checks like "if self.schemas" work correctly
     return false  -- Not a schema-based server
   end
 
@@ -513,8 +514,27 @@ function DbClass:get_tables(schema_filter, opts)
     return all_tables
   end
 
-  -- Non-schema servers: return direct array
+  -- Non-schema servers: load tables lazily if not loaded yet
+  if self.tables == nil and not opts.skip_load then
+    self:_load_tables_direct()
+  end
   return self.tables or {}
+end
+
+---Load tables directly for non-schema servers (MySQL, SQLite)
+---@return boolean success
+function DbClass:_load_tables_direct()
+  local adapter = self:get_adapter()
+  local query = adapter:get_tables_query(self.db_name, nil)
+  local results = adapter:execute(self:_get_db_connection_string(), query)
+  local table_data_list = adapter:parse_tables(results)
+
+  self.tables = {}
+  for _, table_data in ipairs(table_data_list) do
+    local tbl = adapter:create_table(self, table_data)
+    table.insert(self.tables, tbl)
+  end
+  return true
 end
 
 ---Get all views (server-type aware - aggregates from schemas if needed)
@@ -558,8 +578,33 @@ function DbClass:get_views(schema_filter, opts)
     return all_views
   end
 
-  -- Non-schema servers: return direct array
+  -- Non-schema servers: load views lazily if not loaded yet
+  if self.views == nil and not opts.skip_load then
+    self:_load_views_direct()
+  end
   return self.views or {}
+end
+
+---Load views directly for non-schema servers (MySQL, SQLite)
+---@return boolean success
+function DbClass:_load_views_direct()
+  local adapter = self:get_adapter()
+
+  if not adapter.features.views then
+    self.views = {}
+    return true
+  end
+
+  local query = adapter:get_views_query(self.db_name, nil)
+  local results = adapter:execute(self:_get_db_connection_string(), query)
+  local view_data_list = adapter:parse_views(results)
+
+  self.views = {}
+  for _, view_data in ipairs(view_data_list) do
+    local view = adapter:create_view(self, view_data)
+    table.insert(self.views, view)
+  end
+  return true
 end
 
 ---Get all procedures (server-type aware - aggregates from schemas if needed)
@@ -603,8 +648,33 @@ function DbClass:get_procedures(schema_filter, opts)
     return all_procedures
   end
 
-  -- Non-schema servers: return direct array
+  -- Non-schema servers: load procedures lazily if not loaded yet
+  if self.procedures == nil and not opts.skip_load then
+    self:_load_procedures_direct()
+  end
   return self.procedures or {}
+end
+
+---Load procedures directly for non-schema servers (MySQL)
+---@return boolean success
+function DbClass:_load_procedures_direct()
+  local adapter = self:get_adapter()
+
+  if not adapter.features.procedures then
+    self.procedures = {}
+    return true
+  end
+
+  local query = adapter:get_procedures_query(self.db_name, nil)
+  local results = adapter:execute(self:_get_db_connection_string(), query)
+  local proc_data_list = adapter:parse_procedures(results)
+
+  self.procedures = {}
+  for _, proc_data in ipairs(proc_data_list) do
+    local proc = adapter:create_procedure(self, proc_data)
+    table.insert(self.procedures, proc)
+  end
+  return true
 end
 
 ---Get all functions (server-type aware - aggregates from schemas if needed)
@@ -648,8 +718,33 @@ function DbClass:get_functions(schema_filter, opts)
     return all_functions
   end
 
-  -- Non-schema servers: return direct array
+  -- Non-schema servers: load functions lazily if not loaded yet
+  if self.functions == nil and not opts.skip_load then
+    self:_load_functions_direct()
+  end
   return self.functions or {}
+end
+
+---Load functions directly for non-schema servers (MySQL)
+---@return boolean success
+function DbClass:_load_functions_direct()
+  local adapter = self:get_adapter()
+
+  if not adapter.features.functions then
+    self.functions = {}
+    return true
+  end
+
+  local query = adapter:get_functions_query(self.db_name, nil)
+  local results = adapter:execute(self:_get_db_connection_string(), query)
+  local func_data_list = adapter:parse_functions(results)
+
+  self.functions = {}
+  for _, func_data in ipairs(func_data_list) do
+    local func = adapter:create_function(self, func_data)
+    table.insert(self.functions, func)
+  end
+  return true
 end
 
 ---Get all synonyms (server-type aware - aggregates from schemas if needed)

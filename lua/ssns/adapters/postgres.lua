@@ -184,7 +184,29 @@ WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
 ]], where_clause)
 end
 
----Get query to list all functions in a schema (PostgreSQL uses functions for procedures)
+---Get query to list all stored procedures in a schema (PostgreSQL 11+)
+---@param database_name string
+---@param schema_name string?
+---@return string query
+function PostgresAdapter:get_procedures_query(database_name, schema_name)
+  local where_clause = ""
+  if schema_name then
+    where_clause = string.format("  AND n.nspname = '%s'\n", schema_name)
+  end
+
+  return string.format([[
+SELECT
+  n.nspname AS schema_name,
+  p.proname AS name
+FROM pg_proc p
+JOIN pg_namespace n ON p.pronamespace = n.oid
+WHERE p.prokind = 'p'
+  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+%sORDER BY n.nspname, p.proname;
+]], where_clause)
+end
+
+---Get query to list all functions in a schema (excludes procedures)
 ---@param database_name string
 ---@param schema_name string?
 ---@return string query
@@ -194,20 +216,21 @@ function PostgresAdapter:get_functions_query(database_name, schema_name)
     where_clause = string.format("  AND n.nspname = '%s'\n", schema_name)
   end
 
+  -- prokind: 'f' = function, 'a' = aggregate, 'w' = window (excludes 'p' = procedure)
   return string.format([[
 SELECT
   n.nspname AS schema_name,
   p.proname AS name,
   CASE p.prokind
     WHEN 'f' THEN 'FUNCTION'
-    WHEN 'p' THEN 'PROCEDURE'
     WHEN 'a' THEN 'AGGREGATE'
     WHEN 'w' THEN 'WINDOW'
     ELSE 'UNKNOWN'
   END AS type
 FROM pg_proc p
 JOIN pg_namespace n ON p.pronamespace = n.oid
-WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+WHERE p.prokind != 'p'
+  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
 %sORDER BY n.nspname, p.proname;
 ]], where_clause)
 end
@@ -499,6 +522,23 @@ function PostgresAdapter:parse_views(result)
   return views
 end
 
+---Parse procedure list results
+---@param result table Node.js result object { success, resultSets, metadata, error }
+---@return table procedures
+function PostgresAdapter:parse_procedures(result)
+  local procedures = {}
+  if result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      table.insert(procedures, {
+        schema = row.schema_name,
+        name = row.name,
+      })
+    end
+  end
+  return procedures
+end
+
 ---Parse function list results
 ---@param result table Node.js result object { success, resultSets, metadata, error }
 ---@return table functions
@@ -647,6 +687,19 @@ end
 function PostgresAdapter:create_view(parent, row)
   local ViewClass = require('ssns.classes.view')
   return ViewClass.new({
+    name = row.name,
+    schema_name = row.schema,
+    parent = parent,
+  })
+end
+
+---Create a procedure object from parsed row data
+---@param parent BaseDbObject
+---@param row table
+---@return BaseDbObject
+function PostgresAdapter:create_procedure(parent, row)
+  local ProcedureClass = require('ssns.classes.procedure')
+  return ProcedureClass.new({
     name = row.name,
     schema_name = row.schema,
     parent = parent,
