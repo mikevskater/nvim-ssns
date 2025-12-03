@@ -173,6 +173,30 @@ local function cleanup_float_resize_handler()
   end
 end
 
+---Setup autocmd to close float when it loses focus
+local function setup_float_focus_handler()
+  -- Create augroup for focus handling
+  local augroup = vim.api.nvim_create_augroup("SsnsFloatFocus", { clear = true })
+
+  vim.api.nvim_create_autocmd("WinLeave", {
+    group = augroup,
+    buffer = UiBuffer.bufnr,
+    callback = function()
+      -- Schedule the close to avoid issues during window transition
+      vim.schedule(function()
+        if UiBuffer._is_float and UiBuffer.is_open() then
+          UiBuffer.close()
+        end
+      end)
+    end,
+  })
+end
+
+---Clean up float focus handler
+local function cleanup_float_focus_handler()
+  pcall(vim.api.nvim_del_augroup_by_name, "SsnsFloatFocus")
+end
+
 ---Open the SSNS window
 ---@param mode_override string? Optional mode override: "float" or "docked" (uses config's left/right for docked)
 ---@return number winid The window ID
@@ -213,6 +237,9 @@ function UiBuffer.open(mode_override)
 
     -- Setup resize handler for float mode
     setup_float_resize_handler()
+
+    -- Setup focus loss handler (auto-close when losing focus)
+    setup_float_focus_handler()
   else
     -- Create split window
     if position == "left" then
@@ -313,6 +340,7 @@ function UiBuffer.close(force)
     if UiBuffer._is_float then
       UiBuffer._is_float = false
       cleanup_float_resize_handler()
+      cleanup_float_focus_handler()
     end
   end
 end
