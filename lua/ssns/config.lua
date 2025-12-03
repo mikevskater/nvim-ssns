@@ -72,32 +72,87 @@
 ---@field exclude_patterns string[] Queries to exclude from history (default: {"SELECT 1", "SELECT @@"})
 
 ---@class KeymapsConfig
----Tree buffer keymaps
----@field toggle string Toggle expand/collapse or execute action (default: "<CR>")
+---@field common CommonKeymaps Common keymaps shared across multiple UIs
+---@field tree TreeKeymaps Tree buffer keymaps
+---@field query QueryKeymaps Query buffer keymaps
+---@field history HistoryKeymaps History UI keymaps
+---@field filter FilterKeymaps Filter UI keymaps
+---@field param ParamKeymaps Parameter input keymaps
+---@field add_server AddServerKeymaps Add server UI keymaps
+
+---@class CommonKeymaps Common keymaps shared across multiple UIs
+---@field close string Close window (default: "q")
+---@field cancel string Cancel/escape (default: "<Esc>")
+---@field confirm string Confirm/apply (default: "<CR>")
+---@field nav_down string Navigate down (default: "j")
+---@field nav_up string Navigate up (default: "k")
+---@field nav_down_alt string Navigate down alternate (default: "<Down>")
+---@field nav_up_alt string Navigate up alternate (default: "<Up>")
+---@field next_field string Next field (default: "<Tab>")
+---@field prev_field string Previous field (default: "<S-Tab>")
+---@field edit string Edit/insert mode (default: "i")
+
+---@class TreeKeymaps Tree buffer specific keymaps
+---@field toggle string Toggle expand/collapse (default: "<CR>")
 ---@field toggle_alt string Alternate toggle key (default: "o")
----@field close string Close SSNS window (default: "q")
 ---@field refresh string Refresh current node (default: "r")
 ---@field refresh_all string Refresh all servers (default: "R")
----@field filter string Open filter UI for group (default: "f")
----@field filter_clear string Clear all filters on group (default: "F")
+---@field filter string Open filter UI (default: "f")
+---@field filter_clear string Clear all filters (default: "F")
 ---@field toggle_connection string Toggle server connection (default: "d")
----@field set_lualine_color string Set lualine color for server/database (default: "<Leader>c")
+---@field set_lualine_color string Set lualine color (default: "<Leader>c")
 ---@field help string Show help (default: "?")
----@field new_query string New query buffer with USE statement (default: "<C-n>")
----@field goto_first_child string Go to first child in group (default: "<C-[>")
----@field goto_last_child string Go to last child in group (default: "<C-]>")
----@field toggle_group string Toggle expand/collapse of parent group (default: "g")
+---@field new_query string New query buffer (default: "<C-n>")
+---@field goto_first_child string Go to first child (default: "<C-[>")
+---@field goto_last_child string Go to last child (default: "<C-]>")
+---@field toggle_group string Toggle parent group (default: "g")
 ---@field add_server string Open add server UI (default: "a")
----@field toggle_favorite string Toggle favorite status on server (default: "*")
----Query buffer keymaps
----@field execute string Execute query in buffer (default: "<Leader>r")
+---@field toggle_favorite string Toggle favorite (default: "*")
+---@field show_history string Show query history (default: "<Leader>@")
+
+---@class QueryKeymaps Query buffer specific keymaps
+---@field execute string Execute query (default: "<Leader>r")
 ---@field execute_selection string Execute visual selection (default: "<Leader>r")
 ---@field execute_statement string Execute statement under cursor (default: "<Leader>R")
----@field save_query string Save current query to file (default: "<Leader>s")
----@field expand_asterisk string Expand asterisk to column list (default: "<Leader>ce")
----@field go_to string Go to object under cursor in tree (default: "gd")
----@field view_definition string View definition of object under cursor (default: "K")
----@field view_metadata string View metadata of object under cursor (default: "M")
+---@field save_query string Save query to file (default: "<Leader>s")
+---@field expand_asterisk string Expand asterisk to columns (default: "<Leader>ce")
+---@field go_to string Go to object in tree (default: "gd")
+---@field view_definition string View object definition (default: "K")
+---@field view_metadata string View object metadata (default: "M")
+---@field new_query string New query buffer (default: "<C-n>")
+---@field show_history string Show query history (default: "<Leader>@")
+
+---@class HistoryKeymaps History UI specific keymaps
+---@field switch_panel string Switch between panels (default: "<Tab>")
+---@field toggle_preview string Toggle preview panel (default: "<S-Tab>")
+---@field load_query string Load selected query (default: "<CR>")
+---@field delete string Delete entry (default: "d")
+---@field clear_all string Clear all entries (default: "c")
+---@field export string Export history (default: "x")
+---@field search string Search history (default: "/")
+
+---@class FilterKeymaps Filter UI specific keymaps
+---@field apply string Apply filters (default: "<CR>")
+---@field clear string Clear all filters (default: "F")
+---@field toggle_checkbox string Toggle checkbox (default: "<Space>")
+
+---@class ParamKeymaps Parameter input specific keymaps
+---@field execute string Execute with parameters (default: "<CR>")
+
+---@class AddServerKeymaps Add server UI specific keymaps
+---@field add string Add to tree (default: "a")
+---@field new string New connection (default: "n")
+---@field delete string Delete connection (default: "d")
+---@field edit_connection string Edit connection (default: "e")
+---@field toggle_favorite string Toggle favorite (default: "f")
+---@field toggle_favorite_alt string Toggle favorite alternate (default: "*")
+---@field db_type string Change database type (default: "t")
+---@field set_name string Set connection name (default: "n")
+---@field set_path string Set server path (default: "p")
+---@field save string Save connection (default: "s")
+---@field test string Test connection (default: "T")
+---@field back string Go back (default: "b")
+---@field toggle_auto_connect string Toggle auto-connect (default: "a")
 
 ---@class TableHelpersConfig
 ---@field sqlserver table<string, string>? SQL Server helper templates
@@ -330,33 +385,93 @@ local default_config = {
   },
 
   keymaps = {
+    -- Common keymaps shared across multiple UIs
+    common = {
+      close = "q",           -- Close window
+      cancel = "<Esc>",      -- Cancel/escape
+      confirm = "<CR>",      -- Confirm/apply
+      nav_down = "j",        -- Navigate down
+      nav_up = "k",          -- Navigate up
+      nav_down_alt = "<Down>",  -- Navigate down alternate
+      nav_up_alt = "<Up>",   -- Navigate up alternate
+      next_field = "<Tab>",  -- Next field
+      prev_field = "<S-Tab>", -- Previous field
+      edit = "i",            -- Edit/insert mode
+    },
+
     -- Tree buffer keymaps
-    toggle = "<CR>",  -- Toggle expand/collapse or execute action
-    toggle_alt = "o",  -- Alternate toggle key
-    close = "q",  -- Close SSNS window
-    refresh = "r",  -- Refresh current node
-    refresh_all = "R",  -- Refresh all servers
-    filter = "f",  -- Open filter UI for group
-    filter_clear = "F",  -- Clear all filters on group
-    toggle_connection = "d",  -- Toggle server connection
-    set_lualine_color = "<Leader>c",  -- Set lualine color for server/database
-    help = "?",  -- Show help
-    new_query = "<C-n>",  -- New query buffer with USE statement
-    goto_first_child = "<C-[>",  -- Go to first child in group
-    goto_last_child = "<C-]>",  -- Go to last child in group
-    toggle_group = "g",  -- Toggle expand/collapse of parent group
-    add_server = "a",  -- Open add server UI
-    toggle_favorite = "*",  -- Toggle favorite on server
+    tree = {
+      toggle = "<CR>",       -- Toggle expand/collapse or execute action
+      toggle_alt = "o",      -- Alternate toggle key
+      refresh = "r",         -- Refresh current node
+      refresh_all = "R",     -- Refresh all servers
+      filter = "f",          -- Open filter UI for group
+      filter_clear = "F",    -- Clear all filters on group
+      toggle_connection = "d", -- Toggle server connection
+      set_lualine_color = "<Leader>c", -- Set lualine color
+      help = "?",            -- Show help
+      new_query = "<C-n>",   -- New query buffer
+      goto_first_child = "<C-[>", -- Go to first child
+      goto_last_child = "<C-]>",  -- Go to last child
+      toggle_group = "g",    -- Toggle parent group
+      add_server = "a",      -- Open add server UI
+      toggle_favorite = "*", -- Toggle favorite
+      show_history = "<Leader>@", -- Show query history
+    },
+
     -- Query buffer keymaps
-    execute = "<Leader>r",  -- Execute query
-    execute_selection = "<Leader>r",  -- Execute visual selection (in visual mode)
-    execute_statement = "<Leader>R",  -- Execute statement under cursor
-    save_query = "<Leader>s",  -- Save query to file
-    expand_asterisk = "<Leader>ce",  -- Expand asterisk to column list
-    go_to = "gd",  -- Go to object under cursor in tree
-    view_definition = "K",  -- View definition of object under cursor
-    view_metadata = "M",  -- View metadata of object under cursor
-    show_history = "<Leader>@",  -- Show query history panel
+    query = {
+      execute = "<Leader>r", -- Execute query
+      execute_selection = "<Leader>r", -- Execute visual selection
+      execute_statement = "<Leader>R", -- Execute statement under cursor
+      save_query = "<Leader>s", -- Save query to file
+      expand_asterisk = "<Leader>ce", -- Expand asterisk to columns
+      go_to = "gd",          -- Go to object in tree
+      view_definition = "K", -- View object definition
+      view_metadata = "M",   -- View object metadata
+      new_query = "<C-n>",   -- New query buffer
+      show_history = "<Leader>@", -- Show query history
+    },
+
+    -- History UI keymaps
+    history = {
+      switch_panel = "<Tab>",    -- Switch between panels
+      toggle_preview = "<S-Tab>", -- Toggle preview panel
+      load_query = "<CR>",       -- Load selected query
+      delete = "d",              -- Delete entry
+      clear_all = "c",           -- Clear all entries
+      export = "x",              -- Export history
+      search = "/",              -- Search history
+    },
+
+    -- Filter UI keymaps
+    filter = {
+      apply = "<CR>",        -- Apply filters
+      clear = "F",           -- Clear all filters
+      toggle_checkbox = "<Space>", -- Toggle checkbox
+    },
+
+    -- Parameter input keymaps
+    param = {
+      execute = "<CR>",      -- Execute with parameters
+    },
+
+    -- Add server UI keymaps
+    add_server = {
+      add = "a",             -- Add to tree (list view)
+      new = "n",             -- New connection
+      delete = "d",          -- Delete connection
+      edit_connection = "e", -- Edit connection
+      toggle_favorite = "f", -- Toggle favorite
+      toggle_favorite_alt = "*", -- Toggle favorite alternate
+      db_type = "t",         -- Change database type
+      set_name = "n",        -- Set connection name (form view)
+      set_path = "p",        -- Set server path
+      save = "s",            -- Save connection
+      test = "T",            -- Test connection
+      back = "b",            -- Go back
+      toggle_auto_connect = "a", -- Toggle auto-connect (form view)
+    },
   },
 
   table_helpers = {

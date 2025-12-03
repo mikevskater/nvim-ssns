@@ -467,85 +467,121 @@ function UiHistory._render_code_preview()
   vim.api.nvim_buf_set_option(state.code_buf, 'modifiable', false)
 end
 
----Setup keymaps for all panels
+---Setup keymaps for all panels using KeymapManager for conflict handling
 function UiHistory._setup_keymaps()
+  local KeymapManager = require('ssns.keymap_manager')
+
+  -- Get keymaps from history group (with common as fallback)
+  local km = KeymapManager.get_group("history")
+  local common = KeymapManager.get_group("common")
+
   local buffers = {state.buffers_buf, state.history_buf}
 
   for _, bufnr in ipairs(buffers) do
-    -- Close window
-    vim.keymap.set('n', 'q', function()
-      UiHistory._close()
-    end, { buffer = bufnr, noremap = true, silent = true, desc = "Close history" })
+    -- Build keymap definitions for main panels
+    local keymaps = {
+      -- Close window
+      {
+        lhs = common.close or "q",
+        rhs = function() UiHistory._close() end,
+        desc = "Close history",
+      },
+      {
+        lhs = common.cancel or "<Esc>",
+        rhs = function() UiHistory._close() end,
+        desc = "Close history",
+      },
+      -- Switch panels
+      {
+        lhs = km.switch_panel or common.next_field or "<Tab>",
+        rhs = function() UiHistory._switch_panel() end,
+        desc = "Switch panel",
+      },
+      -- Toggle preview
+      {
+        lhs = km.toggle_preview or common.prev_field or "<S-Tab>",
+        rhs = function() UiHistory._toggle_preview() end,
+        desc = "Toggle preview",
+      },
+      -- Navigation
+      {
+        lhs = common.nav_down or "j",
+        rhs = function() UiHistory._move_down() end,
+        desc = "Move down",
+      },
+      {
+        lhs = common.nav_up or "k",
+        rhs = function() UiHistory._move_up() end,
+        desc = "Move up",
+      },
+      {
+        lhs = common.nav_down_alt or "<Down>",
+        rhs = function() UiHistory._move_down() end,
+        desc = "Move down",
+      },
+      {
+        lhs = common.nav_up_alt or "<Up>",
+        rhs = function() UiHistory._move_up() end,
+        desc = "Move up",
+      },
+      -- Load query
+      {
+        lhs = km.load_query or common.confirm or "<CR>",
+        rhs = function() UiHistory._load_query() end,
+        desc = "Load query",
+      },
+      -- Delete
+      {
+        lhs = km.delete or "d",
+        rhs = function() UiHistory._delete_entry() end,
+        desc = "Delete entry",
+      },
+      -- Clear all
+      {
+        lhs = km.clear_all or "c",
+        rhs = function() UiHistory._clear_all() end,
+        desc = "Clear all",
+      },
+      -- Export
+      {
+        lhs = km.export or "x",
+        rhs = function() UiHistory._export() end,
+        desc = "Export history",
+      },
+      -- Search
+      {
+        lhs = km.search or "/",
+        rhs = function() UiHistory._search() end,
+        desc = "Search history",
+      },
+    }
 
-    vim.keymap.set('n', '<Esc>', function()
-      UiHistory._close()
-    end, { buffer = bufnr, noremap = true, silent = true, desc = "Close history" })
-
-    -- Switch between buffers and history panels
-    vim.keymap.set('n', '<Tab>', function()
-      UiHistory._switch_panel()
-    end, { buffer = bufnr, noremap = true, silent = true, desc = "Switch panel" })
-
-    -- Toggle preview panel
-    vim.keymap.set('n', '<S-Tab>', function()
-      UiHistory._toggle_preview()
-    end, { buffer = bufnr, noremap = true, silent = true, desc = "Toggle preview" })
-
-    -- Navigation
-    vim.keymap.set('n', 'j', function()
-      UiHistory._move_down()
-    end, { buffer = bufnr, noremap = true, silent = true, desc = "Move down" })
-
-    vim.keymap.set('n', 'k', function()
-      UiHistory._move_up()
-    end, { buffer = bufnr, noremap = true, silent = true, desc = "Move up" })
-
-    vim.keymap.set('n', '<Down>', function()
-      UiHistory._move_down()
-    end, { buffer = bufnr, noremap = true, silent = true, desc = "Move down" })
-
-    vim.keymap.set('n', '<Up>', function()
-      UiHistory._move_up()
-    end, { buffer = bufnr, noremap = true, silent = true, desc = "Move up" })
-
-    -- Load query
-    vim.keymap.set('n', '<CR>', function()
-      UiHistory._load_query()
-    end, { buffer = bufnr, noremap = true, silent = true, desc = "Load query" })
-
-    -- Delete
-    vim.keymap.set('n', 'd', function()
-      UiHistory._delete_entry()
-    end, { buffer = bufnr, noremap = true, silent = true, desc = "Delete entry" })
-
-    -- Clear all
-    vim.keymap.set('n', 'c', function()
-      UiHistory._clear_all()
-    end, { buffer = bufnr, noremap = true, silent = true, desc = "Clear all" })
-
-    -- Export
-    vim.keymap.set('n', 'x', function()
-      UiHistory._export()
-    end, { buffer = bufnr, noremap = true, silent = true, desc = "Export history" })
-
-    -- Search
-    vim.keymap.set('n', '/', function()
-      UiHistory._search()
-    end, { buffer = bufnr, noremap = true, silent = true, desc = "Search history" })
+    -- Set all keymaps with conflict handling
+    KeymapManager.set_multiple(bufnr, keymaps, true)
+    KeymapManager.mark_group_active(bufnr, "history")
   end
 
   -- Setup keymaps for code preview buffer (allows visual selection but not editing)
-  vim.keymap.set('n', 'q', function()
-    UiHistory._close()
-  end, { buffer = state.code_buf, noremap = true, silent = true, desc = "Close history" })
+  local preview_keymaps = {
+    {
+      lhs = common.close or "q",
+      rhs = function() UiHistory._close() end,
+      desc = "Close history",
+    },
+    {
+      lhs = common.cancel or "<Esc>",
+      rhs = function() UiHistory._close() end,
+      desc = "Close history",
+    },
+    {
+      lhs = km.toggle_preview or common.prev_field or "<S-Tab>",
+      rhs = function() UiHistory._toggle_preview() end,
+      desc = "Return to last panel",
+    },
+  }
 
-  vim.keymap.set('n', '<Esc>', function()
-    UiHistory._close()
-  end, { buffer = state.code_buf, noremap = true, silent = true, desc = "Close history" })
-
-  vim.keymap.set('n', '<S-Tab>', function()
-    UiHistory._toggle_preview()
-  end, { buffer = state.code_buf, noremap = true, silent = true, desc = "Return to last panel" })
+  KeymapManager.set_multiple(state.code_buf, preview_keymaps, true)
+  KeymapManager.mark_group_active(state.code_buf, "history")
 end
 
 ---Setup autocmds for cleanup and resize

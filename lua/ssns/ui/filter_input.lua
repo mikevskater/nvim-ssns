@@ -321,53 +321,79 @@ function UiFilterInput._render()
   end
 end
 
----Setup keymaps
+---Setup keymaps using KeymapManager for conflict handling
 function UiFilterInput._setup_keymaps()
-  -- Cancel
-  vim.keymap.set('n', '<Esc>', function()
-    UiFilterInput._close(false)
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Cancel" })
+  local KeymapManager = require('ssns.keymap_manager')
 
-  vim.keymap.set('n', 'q', function()
-    UiFilterInput._close(false)
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Cancel" })
+  -- Get keymaps from filter group (with common as fallback)
+  local km = KeymapManager.get_group("filter")
+  local common = KeymapManager.get_group("common")
 
-  -- Apply
-  vim.keymap.set('n', '<CR>', function()
-    UiFilterInput._apply()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Apply filters" })
+  local bufnr = state.main_buf
 
-  -- Clear all filters
-  vim.keymap.set('n', 'F', function()
-    UiFilterInput._clear_all()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Clear all filters" })
+  -- Build keymap definitions
+  local keymaps = {
+    -- Cancel/Close
+    {
+      lhs = common.cancel or "<Esc>",
+      rhs = function() UiFilterInput._close(false) end,
+      desc = "Cancel",
+    },
+    {
+      lhs = common.close or "q",
+      rhs = function() UiFilterInput._close(false) end,
+      desc = "Cancel",
+    },
+    -- Apply
+    {
+      lhs = km.apply or common.confirm or "<CR>",
+      rhs = function() UiFilterInput._apply() end,
+      desc = "Apply filters",
+    },
+    -- Clear all filters
+    {
+      lhs = km.clear or "F",
+      rhs = function() UiFilterInput._clear_all() end,
+      desc = "Clear all filters",
+    },
+    -- Navigation
+    {
+      lhs = common.nav_down or "j",
+      rhs = function() UiFilterInput._move_down() end,
+      desc = "Next field",
+    },
+    {
+      lhs = common.nav_up or "k",
+      rhs = function() UiFilterInput._move_up() end,
+      desc = "Previous field",
+    },
+    {
+      lhs = common.next_field or "<Tab>",
+      rhs = function() UiFilterInput._move_down() end,
+      desc = "Next field",
+    },
+    {
+      lhs = common.prev_field or "<S-Tab>",
+      rhs = function() UiFilterInput._move_up() end,
+      desc = "Previous field",
+    },
+    -- Edit text field
+    {
+      lhs = common.edit or "i",
+      rhs = function() UiFilterInput._edit_field() end,
+      desc = "Edit field",
+    },
+    -- Toggle checkbox
+    {
+      lhs = km.toggle_checkbox or "<Space>",
+      rhs = function() UiFilterInput._toggle_checkbox() end,
+      desc = "Toggle checkbox",
+    },
+  }
 
-  -- Navigation
-  vim.keymap.set('n', 'j', function()
-    UiFilterInput._move_down()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Next field" })
-
-  vim.keymap.set('n', 'k', function()
-    UiFilterInput._move_up()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Previous field" })
-
-  vim.keymap.set('n', '<Tab>', function()
-    UiFilterInput._move_down()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Next field" })
-
-  vim.keymap.set('n', '<S-Tab>', function()
-    UiFilterInput._move_up()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Previous field" })
-
-  -- Edit text field
-  vim.keymap.set('n', 'i', function()
-    UiFilterInput._edit_field()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Edit field" })
-
-  -- Toggle checkbox
-  vim.keymap.set('n', '<Space>', function()
-    UiFilterInput._toggle_checkbox()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Toggle checkbox" })
+  -- Set all keymaps with conflict handling
+  KeymapManager.set_multiple(bufnr, keymaps, true)
+  KeymapManager.mark_group_active(bufnr, "filter")
 end
 
 ---Move to next field

@@ -5,6 +5,7 @@ local AddServerUI = {}
 local UiFloat = require('ssns.ui.float')
 local Connections = require('ssns.connections')
 local Cache = require('ssns.cache')
+local KeymapManager = require('ssns.keymap_manager')
 
 -- Current state
 local current_float = nil
@@ -231,6 +232,26 @@ function AddServerUI.show_connection_list()
     table.insert(highlights, {i, 24, 32, "Special"})
   end
 
+  -- Get keymaps from config
+  local km = KeymapManager.get_group("add_server")
+  local common = KeymapManager.get_group("common")
+
+  -- Build keymaps table dynamically
+  local keymaps = {}
+  keymaps[common.close or "q"] = function() AddServerUI.close() end
+  keymaps[common.cancel or "<Esc>"] = function() AddServerUI.close() end
+  keymaps[common.nav_down or "j"] = function() AddServerUI.navigate(1) end
+  keymaps[common.nav_up or "k"] = function() AddServerUI.navigate(-1) end
+  keymaps[common.nav_down_alt or "<Down>"] = function() AddServerUI.navigate(1) end
+  keymaps[common.nav_up_alt or "<Up>"] = function() AddServerUI.navigate(-1) end
+  keymaps[km.add or "a"] = function() AddServerUI.add_selected_to_tree() end
+  keymaps[common.confirm or "<CR>"] = function() AddServerUI.add_selected_to_tree() end
+  keymaps[km.new or "n"] = function() AddServerUI.show_new_connection_form() end
+  keymaps[km.delete or "d"] = function() AddServerUI.delete_selected() end
+  keymaps[km.edit_connection or "e"] = function() AddServerUI.edit_selected() end
+  keymaps[km.toggle_favorite or "f"] = function() AddServerUI.toggle_favorite_selected() end
+  keymaps[km.toggle_favorite_alt or "*"] = function() AddServerUI.toggle_favorite_selected() end
+
   -- Create floating window
   current_float = UiFloat.create(lines, {
     title = " Server Connections ",
@@ -242,21 +263,7 @@ function AddServerUI.show_connection_list()
     min_height = 10,
     centered = true,
     default_keymaps = false,
-    keymaps = {
-      ["q"] = function() AddServerUI.close() end,
-      ["<Esc>"] = function() AddServerUI.close() end,
-      ["j"] = function() AddServerUI.navigate(1) end,
-      ["k"] = function() AddServerUI.navigate(-1) end,
-      ["<Down>"] = function() AddServerUI.navigate(1) end,
-      ["<Up>"] = function() AddServerUI.navigate(-1) end,
-      ["a"] = function() AddServerUI.add_selected_to_tree() end,
-      ["<CR>"] = function() AddServerUI.add_selected_to_tree() end,
-      ["n"] = function() AddServerUI.show_new_connection_form() end,
-      ["d"] = function() AddServerUI.delete_selected() end,
-      ["e"] = function() AddServerUI.edit_selected() end,
-      ["f"] = function() AddServerUI.toggle_favorite_selected() end,
-      ["*"] = function() AddServerUI.toggle_favorite_selected() end,
-    },
+    keymaps = keymaps,
   })
 
   -- Apply highlights after window creation
@@ -552,6 +559,55 @@ function AddServerUI.show_new_connection_form_with_state(form_state, edit_connec
 
   local title = is_edit and " Edit Connection " or " New Connection "
 
+  -- Get keymaps from config
+  local km = KeymapManager.get_group("add_server")
+  local common = KeymapManager.get_group("common")
+
+  -- Build keymaps table dynamically
+  local keymaps = {}
+  keymaps[common.close or "q"] = function() AddServerUI.close() end
+  keymaps[common.cancel or "<Esc>"] = function()
+    if #connections_list > 0 then
+      AddServerUI.show_connection_list()
+    else
+      AddServerUI.close()
+    end
+  end
+  keymaps[km.back or "b"] = function()
+    if #connections_list > 0 then
+      AddServerUI.show_connection_list()
+    else
+      AddServerUI.close()
+    end
+  end
+  keymaps[km.db_type or "t"] = function()
+    AddServerUI.prompt_db_type(form_state, edit_connection)
+  end
+  keymaps[km.set_name or "n"] = function()
+    AddServerUI.prompt_name(form_state, edit_connection)
+  end
+  keymaps[km.set_path or "p"] = function()
+    AddServerUI.prompt_server_path(form_state, edit_connection)
+  end
+  keymaps[km.toggle_favorite or "f"] = function()
+    form_state.favorite = not form_state.favorite
+    AddServerUI.show_new_connection_form_with_state(form_state, edit_connection)
+  end
+  keymaps[km.toggle_auto_connect or "a"] = function()
+    form_state.auto_connect = not form_state.auto_connect
+    -- Auto-connect implies favorite
+    if form_state.auto_connect then
+      form_state.favorite = true
+    end
+    AddServerUI.show_new_connection_form_with_state(form_state, edit_connection)
+  end
+  keymaps[km.save or "s"] = function()
+    AddServerUI.save_connection(form_state, edit_connection)
+  end
+  keymaps[km.test or "T"] = function()
+    AddServerUI.test_connection(form_state)
+  end
+
   -- Create fresh float with keymaps
   current_float = UiFloat.create(lines, {
     title = title,
@@ -561,54 +617,7 @@ function AddServerUI.show_new_connection_form_with_state(form_state, edit_connec
     min_height = 20,
     centered = true,
     default_keymaps = false,
-    keymaps = {
-      ["q"] = function() AddServerUI.close() end,
-      ["<Esc>"] = function()
-        if #connections_list > 0 then
-          AddServerUI.show_connection_list()
-        else
-          AddServerUI.close()
-        end
-      end,
-      ["b"] = function()
-        if #connections_list > 0 then
-          AddServerUI.show_connection_list()
-        else
-          AddServerUI.close()
-        end
-      end,
-      ["t"] = function()
-        AddServerUI.prompt_db_type(form_state, edit_connection)
-      end,
-      ["n"] = function()
-        AddServerUI.prompt_name(form_state, edit_connection)
-      end,
-      ["p"] = function()
-        AddServerUI.prompt_server_path(form_state, edit_connection)
-      end,
-      ["c"] = function()
-        -- Legacy: 'c' also works for server path
-        AddServerUI.prompt_server_path(form_state, edit_connection)
-      end,
-      ["f"] = function()
-        form_state.favorite = not form_state.favorite
-        AddServerUI.show_new_connection_form_with_state(form_state, edit_connection)
-      end,
-      ["a"] = function()
-        form_state.auto_connect = not form_state.auto_connect
-        -- Auto-connect implies favorite
-        if form_state.auto_connect then
-          form_state.favorite = true
-        end
-        AddServerUI.show_new_connection_form_with_state(form_state, edit_connection)
-      end,
-      ["s"] = function()
-        AddServerUI.save_connection(form_state, edit_connection)
-      end,
-      ["T"] = function()
-        AddServerUI.test_connection(form_state)
-      end,
-    },
+    keymaps = keymaps,
   })
 
   -- Apply highlights after window creation

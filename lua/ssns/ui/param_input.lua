@@ -182,41 +182,31 @@ end
 
 ---Setup keymaps
 function UiParamInput._setup_keymaps()
-  -- Cancel
-  vim.keymap.set('n', '<Esc>', function()
-    UiParamInput._close(false)
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Cancel" })
+  local KeymapManager = require('ssns.keymap_manager')
+  local km = KeymapManager.get_group("param")
+  local common = KeymapManager.get_group("common")
+  local bufnr = state.main_buf
 
-  vim.keymap.set('n', 'q', function()
-    UiParamInput._close(false)
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Cancel" })
+  local keymaps = {
+    -- Cancel
+    { lhs = common.cancel or "<Esc>", rhs = function() UiParamInput._close(false) end, desc = "Cancel" },
+    { lhs = common.close or "q", rhs = function() UiParamInput._close(false) end, desc = "Close" },
 
-  -- Execute
-  vim.keymap.set('n', '<CR>', function()
-    UiParamInput._execute()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Execute" })
+    -- Execute
+    { lhs = km.execute or common.confirm or "<CR>", rhs = function() UiParamInput._execute() end, desc = "Execute" },
 
-  -- Navigation
-  vim.keymap.set('n', 'j', function()
-    UiParamInput._move_down()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Next parameter" })
+    -- Navigation
+    { lhs = common.nav_down or "j", rhs = function() UiParamInput._move_down() end, desc = "Next parameter" },
+    { lhs = common.nav_up or "k", rhs = function() UiParamInput._move_up() end, desc = "Previous parameter" },
+    { lhs = common.next_field or "<Tab>", rhs = function() UiParamInput._move_down() end, desc = "Next parameter" },
+    { lhs = common.prev_field or "<S-Tab>", rhs = function() UiParamInput._move_up() end, desc = "Previous parameter" },
 
-  vim.keymap.set('n', 'k', function()
-    UiParamInput._move_up()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Previous parameter" })
+    -- Edit value
+    { lhs = common.edit or "i", rhs = function() UiParamInput._edit_value() end, desc = "Edit value" },
+  }
 
-  vim.keymap.set('n', '<Tab>', function()
-    UiParamInput._move_down()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Next parameter" })
-
-  vim.keymap.set('n', '<S-Tab>', function()
-    UiParamInput._move_up()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Previous parameter" })
-
-  -- Edit value
-  vim.keymap.set('n', 'i', function()
-    UiParamInput._edit_value()
-  end, { buffer = state.main_buf, noremap = true, silent = true, desc = "Edit value" })
+  KeymapManager.set_multiple(bufnr, keymaps, true)
+  KeymapManager.mark_group_active(bufnr, "param")
 end
 
 ---Move to next parameter

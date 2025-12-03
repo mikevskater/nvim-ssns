@@ -3,6 +3,7 @@
 local UiQuery = {}
 
 local QueryHistory = require('ssns.query_history')
+local KeymapManager = require('ssns.keymap_manager')
 
 ---Track query buffers
 ---@type table<number, {server: ServerClass, database: DbClass?, last_database: string?}>
@@ -174,45 +175,49 @@ end
 ---Setup keymaps for query buffer
 ---@param bufnr number The buffer number
 function UiQuery.setup_query_keymaps(bufnr)
-  local Config = require('ssns.config')
-  local keymaps = Config.get_keymaps()
-  local opts = { noremap = true, silent = true, buffer = bufnr }
+  local km = KeymapManager.get_group("query")
 
-  -- Execute query (visual selection or entire buffer)
-  vim.keymap.set('n', keymaps.execute or '<Leader>r', function()
-    UiQuery.execute_query(bufnr, false)
-  end, vim.tbl_extend('force', opts, { desc = 'Execute query' }))
+  local keymaps = {
+    -- Execute query (normal mode - entire buffer)
+    { mode = "n", lhs = km.execute or "<Leader>r", rhs = function()
+      UiQuery.execute_query(bufnr, false)
+    end, desc = "Execute query" },
 
-  vim.keymap.set('v', keymaps.execute_selection or '<Leader>r', function()
-    UiQuery.execute_query(bufnr, true)
-  end, vim.tbl_extend('force', opts, { desc = 'Execute selected query' }))
+    -- Execute query (visual mode - selection)
+    { mode = "v", lhs = km.execute_selection or km.execute or "<Leader>r", rhs = function()
+      UiQuery.execute_query(bufnr, true)
+    end, desc = "Execute selected query" },
 
-  -- Execute query under cursor
-  vim.keymap.set('n', keymaps.execute_statement or '<Leader>R', function()
-    UiQuery.execute_statement_under_cursor(bufnr)
-  end, vim.tbl_extend('force', opts, { desc = 'Execute statement under cursor' }))
+    -- Execute query under cursor
+    { mode = "n", lhs = km.execute_statement or "<Leader>R", rhs = function()
+      UiQuery.execute_statement_under_cursor(bufnr)
+    end, desc = "Execute statement under cursor" },
 
-  -- Save query
-  vim.keymap.set('n', keymaps.save_query or '<Leader>s', function()
-    UiQuery.save_query(bufnr)
-  end, vim.tbl_extend('force', opts, { desc = 'Save query' }))
+    -- Save query
+    { mode = "n", lhs = km.save or "<Leader>s", rhs = function()
+      UiQuery.save_query(bufnr)
+    end, desc = "Save query" },
 
-  -- Expand asterisk
-  vim.keymap.set('n', keymaps.expand_asterisk or '<Leader>ce', function()
-    local ExpandAsterisk = require('ssns.features.expand_asterisk')
-    ExpandAsterisk.expand_asterisk_at_cursor()
-  end, vim.tbl_extend('force', opts, { desc = 'Expand asterisk (Columns Expand)' }))
+    -- Expand asterisk
+    { mode = "n", lhs = km.expand_asterisk or "<Leader>ce", rhs = function()
+      local ExpandAsterisk = require('ssns.features.expand_asterisk')
+      ExpandAsterisk.expand_asterisk_at_cursor()
+    end, desc = "Expand asterisk (Columns Expand)" },
 
-  -- New query buffer (inherits current database context)
-  vim.keymap.set('n', keymaps.new_query or '<C-n>', function()
-    UiQuery.new_query_from_buffer(bufnr)
-  end, vim.tbl_extend('force', opts, { desc = 'New query buffer' }))
+    -- New query buffer (inherits current database context)
+    { mode = "n", lhs = km.new or "<C-n>", rhs = function()
+      UiQuery.new_query_from_buffer(bufnr)
+    end, desc = "New query buffer" },
 
-  -- Show query history
-  vim.keymap.set('n', keymaps.show_history or '<Leader>@', function()
-    local UiHistory = require('ssns.ui.history')
-    UiHistory.show_history()
-  end, vim.tbl_extend('force', opts, { desc = 'Show query history' }))
+    -- Show query history
+    { mode = "n", lhs = km.show_history or "<Leader>@", rhs = function()
+      local UiHistory = require('ssns.ui.history')
+      UiHistory.show_history()
+    end, desc = "Show query history" },
+  }
+
+  KeymapManager.set_multiple(bufnr, keymaps, true)
+  KeymapManager.mark_group_active(bufnr, "query")
 end
 
 ---Execute query in buffer
@@ -521,7 +526,8 @@ function UiQuery.display_error(error, sql, query_bufnr)
   end
 
   -- Set keymap to close
-  vim.api.nvim_buf_set_keymap(result_buf, 'n', 'q', ':close<CR>', { noremap = true, silent = true })
+  local common = KeymapManager.get_group("common")
+  vim.api.nvim_buf_set_keymap(result_buf, 'n', common.close or 'q', ':close<CR>', { noremap = true, silent = true })
 end
 
 ---Display query results
@@ -577,7 +583,8 @@ function UiQuery.display_results(result, sql, execution_time_ms)
   end
 
   -- Setup close keymap
-  vim.api.nvim_buf_set_keymap(result_buf, 'n', 'q', ':close<CR>', { noremap = true, silent = true })
+  local common = KeymapManager.get_group("common")
+  vim.api.nvim_buf_set_keymap(result_buf, 'n', common.close or 'q', ':close<CR>', { noremap = true, silent = true })
 end
 
 ---Parse divider format string and generate lines
