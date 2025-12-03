@@ -404,4 +404,62 @@ function FunctionClass:to_string()
   )
 end
 
+---Get metadata info for display in floating window
+---@return table metadata Standardized metadata structure with sections
+function FunctionClass:get_metadata_info()
+  local sections = {}
+
+  -- Parameters section
+  local parameters = self:get_parameters()
+  local param_rows = {}
+
+  for _, param in ipairs(parameters or {}) do
+    local name = param.parameter_name or param.name or ""
+    local full_type = param.get_full_type and param:get_full_type() or param.data_type or ""
+    local mode = param.mode or param.direction or "IN"
+    local has_default = param.has_default
+    local default_val = "-"
+    if param.default_value and param.default_value ~= "" then
+      default_val = param.default_value
+    elseif has_default then
+      default_val = "(has default)"
+    end
+
+    table.insert(param_rows, {name, full_type, mode, default_val})
+  end
+
+  table.insert(sections, {
+    title = "PARAMETERS",
+    headers = {"Name", "Type", "Mode", "Default"},
+    rows = param_rows,
+  })
+
+  -- For table-valued functions, add return columns section
+  if self:is_table_valued() then
+    local columns = self:get_columns()
+    local col_rows = {}
+
+    for _, col in ipairs(columns or {}) do
+      local name = col.column_name or col.name or ""
+      local full_type = col.get_full_type and col:get_full_type() or col.data_type or ""
+      local nullable = "YES"
+      if col.is_nullable == false or col.nullable == false then
+        nullable = "NO"
+      end
+
+      table.insert(col_rows, {name, full_type, nullable})
+    end
+
+    table.insert(sections, {
+      title = "RETURN COLUMNS (Table-Valued)",
+      headers = {"Name", "Type", "Nullable"},
+      rows = col_rows,
+    })
+  end
+
+  return {
+    sections = sections,
+  }
+end
+
 return FunctionClass

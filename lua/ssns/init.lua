@@ -112,6 +112,19 @@ function Ssns.setup(user_config)
         })
       end
 
+      -- View metadata keymap
+      if keymaps.view_metadata then
+        vim.keymap.set('n', keymaps.view_metadata, function()
+          local ViewMetadata = require('ssns.features.view_metadata')
+          ViewMetadata.view_metadata_at_cursor()
+        end, {
+          buffer = bufnr,
+          noremap = true,
+          silent = true,
+          desc = 'SSNS: View object metadata'
+        })
+      end
+
       -- Enable semantic highlighting for SQL files
       local sh_config = Config.get_semantic_highlighting()
       if sh_config.enabled then
@@ -324,6 +337,15 @@ function Ssns._register_commands()
   end, {
     nargs = 0,
     desc = "View definition of object under cursor in floating window",
+  })
+
+  -- :SSNSViewMetadata - View metadata of object under cursor
+  vim.api.nvim_create_user_command("SSNSViewMetadata", function()
+    local ViewMetadata = require('ssns.features.view_metadata')
+    ViewMetadata.view_metadata_at_cursor()
+  end, {
+    nargs = 0,
+    desc = "View metadata of object under cursor in floating window",
   })
 
   -- Testing Framework Commands

@@ -274,4 +274,33 @@ function ViewClass:to_string()
   )
 end
 
+---Get metadata info for display in floating window
+---@return table metadata Standardized metadata structure with sections
+function ViewClass:get_metadata_info()
+  local columns = self:get_columns()
+  local rows = {}
+
+  for _, col in ipairs(columns or {}) do
+    local name = col.column_name or col.name or ""
+    local full_type = col.get_full_type and col:get_full_type() or col.data_type or ""
+    local nullable = "YES"
+    if col.is_nullable == false or col.nullable == false then
+      nullable = "NO"
+    end
+    local default_val = col.default_value or col.default or "-"
+
+    table.insert(rows, {name, full_type, nullable, default_val})
+  end
+
+  return {
+    sections = {
+      {
+        title = "COLUMNS",
+        headers = {"Name", "Type", "Nullable", "Default"},
+        rows = rows,
+      },
+    },
+  }
+end
+
 return ViewClass

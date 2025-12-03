@@ -286,4 +286,36 @@ function ProcedureClass:to_string()
   )
 end
 
+---Get metadata info for display in floating window
+---@return table metadata Standardized metadata structure with sections
+function ProcedureClass:get_metadata_info()
+  local parameters = self:get_parameters()
+  local rows = {}
+
+  for _, param in ipairs(parameters or {}) do
+    local name = param.parameter_name or param.name or ""
+    local full_type = param.get_full_type and param:get_full_type() or param.data_type or ""
+    local mode = param.mode or param.direction or "IN"
+    local has_default = param.has_default
+    local default_val = "-"
+    if param.default_value and param.default_value ~= "" then
+      default_val = param.default_value
+    elseif has_default then
+      default_val = "(has default)"
+    end
+
+    table.insert(rows, {name, full_type, mode, default_val})
+  end
+
+  return {
+    sections = {
+      {
+        title = "PARAMETERS",
+        headers = {"Name", "Type", "Mode", "Default"},
+        rows = rows,
+      },
+    },
+  }
+end
+
 return ProcedureClass

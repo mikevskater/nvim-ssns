@@ -95,6 +95,7 @@
 ---@field expand_asterisk string Expand asterisk to column list (default: "<Leader>ce")
 ---@field go_to string Go to object under cursor in tree (default: "gd")
 ---@field view_definition string View definition of object under cursor (default: "K")
+---@field view_metadata string View metadata of object under cursor (default: "M")
 
 ---@class TableHelpersConfig
 ---@field sqlserver table<string, string>? SQL Server helper templates
@@ -350,6 +351,7 @@ local default_config = {
     expand_asterisk = "<Leader>ce",  -- Expand asterisk to column list
     go_to = "gd",  -- Go to object under cursor in tree
     view_definition = "K",  -- View definition of object under cursor
+    view_metadata = "M",  -- View metadata of object under cursor
     show_history = "<Leader>@",  -- Show query history panel
   },
 

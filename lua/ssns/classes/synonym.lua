@@ -536,4 +536,48 @@ function SynonymClass:generate_exec()
   return string.format("EXEC [%s].[%s];", self.schema_name, self.synonym_name)
 end
 
+---Get metadata info for display in floating window
+---@return table metadata Standardized metadata structure with sections
+function SynonymClass:get_metadata_info()
+  local sections = {}
+
+  -- Synonym target info section
+  table.insert(sections, {
+    title = "SYNONYM TARGET",
+    headers = {"Property", "Value"},
+    rows = {
+      {"Base Object", self.base_object_name or "(unknown)"},
+      {"Object Type", self.base_object_type or "(unknown)"},
+    },
+  })
+
+  -- Try to resolve to base object and get its metadata
+  if self.resolve then
+    local base_object, error_msg = self:resolve()
+    if base_object and base_object.get_metadata_info then
+      local base_metadata = base_object:get_metadata_info()
+      if base_metadata and base_metadata.sections then
+        -- Add base object sections with modified titles
+        for _, section in ipairs(base_metadata.sections) do
+          table.insert(sections, {
+            title = "BASE: " .. section.title,
+            headers = section.headers,
+            rows = section.rows,
+          })
+        end
+      end
+    elseif error_msg then
+      table.insert(sections, {
+        title = "RESOLUTION ERROR",
+        headers = {"Message"},
+        rows = {{error_msg}},
+      })
+    end
+  end
+
+  return {
+    sections = sections,
+  }
+end
+
 return SynonymClass
