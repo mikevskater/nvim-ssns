@@ -11,6 +11,8 @@ local BaseDbObject = require('ssns.classes.base')
 ---@field columns_loaded boolean Whether columns have been loaded
 ---@field indexes_loaded boolean Whether indexes have been loaded
 ---@field constraints_loaded boolean Whether constraints have been loaded
+---@field definition string? The table definition SQL (CREATE TABLE script)
+---@field definition_loaded boolean Whether definition has been loaded
 local TableClass = setmetatable({}, { __index = BaseDbObject })
 TableClass.__index = TableClass
 
@@ -33,6 +35,8 @@ function TableClass.new(opts)
   self.columns_loaded = false
   self.indexes_loaded = false
   self.constraints_loaded = false
+  self.definition = nil
+  self.definition_loaded = false
 
   -- Set appropriate icon for table
 
@@ -608,11 +612,15 @@ function TableClass:get_qualified_name()
   )
 end
 
----Get the table definition (CREATE TABLE script)
----@return string sql The CREATE TABLE script
-function TableClass:get_definition()
+---Load the table definition (CREATE TABLE script)
+---@return string? definition The CREATE TABLE script
+function TableClass:load_definition()
+  if self.definition_loaded then
+    return self.definition
+  end
+
   local adapter = self:get_adapter()
-  
+
   -- Navigate to database based on server type:
   -- Schema-based (SQL Server, PostgreSQL): Table -> Schema -> Database
   -- Non-schema (MySQL, SQLite): Table -> Database
@@ -625,7 +633,9 @@ function TableClass:get_definition()
 
   -- Validate we have a database
   if not db or not db.db_name then
-    return string.format("-- Error: Unable to get definition for table %s", self.table_name)
+    self.definition = string.format("-- Error: Unable to get definition for table %s", self.table_name)
+    self.definition_loaded = true
+    return self.definition
   end
 
   -- Use adapter to get the definition query
@@ -636,17 +646,31 @@ function TableClass:get_definition()
   local success, results = pcall(adapter.execute, adapter, server.connection_string, query, { use_delimiter = false })
 
   if not success then
-    return string.format("-- Error getting definition: %s", tostring(results))
+    self.definition = string.format("-- Error getting definition: %s", tostring(results))
+    self.definition_loaded = true
+    return self.definition
   end
 
   -- Use adapter's parse method for consistent result handling
   local definition = adapter:parse_table_definition(results)
   if definition then
-    return definition
+    self.definition = definition
+  else
+    -- Fallback: construct CREATE TABLE from columns metadata
+    self.definition = self:construct_create_table_from_metadata()
   end
 
-  -- Fallback: construct CREATE TABLE from columns metadata
-  return self:construct_create_table_from_metadata()
+  self.definition_loaded = true
+  return self.definition
+end
+
+---Get the table definition (load if not already loaded)
+---@return string? definition The CREATE TABLE script
+function TableClass:get_definition()
+  if not self.definition_loaded then
+    self:load_definition()
+  end
+  return self.definition
 end
 
 ---Construct a CREATE TABLE script from metadata (fallback)

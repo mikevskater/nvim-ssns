@@ -99,6 +99,19 @@ function Ssns.setup(user_config)
         })
       end
 
+      -- View definition keymap
+      if keymaps.view_definition then
+        vim.keymap.set('n', keymaps.view_definition, function()
+          local ViewDefinition = require('ssns.features.view_definition')
+          ViewDefinition.view_definition_at_cursor()
+        end, {
+          buffer = bufnr,
+          noremap = true,
+          silent = true,
+          desc = 'SSNS: View object definition'
+        })
+      end
+
       -- Enable semantic highlighting for SQL files
       local sh_config = Config.get_semantic_highlighting()
       if sh_config.enabled then
@@ -302,6 +315,15 @@ function Ssns._register_commands()
   end, {
     nargs = 0,
     desc = "Go to object under cursor in tree",
+  })
+
+  -- :SSNSViewDefinition - View definition of object under cursor
+  vim.api.nvim_create_user_command("SSNSViewDefinition", function()
+    local ViewDefinition = require('ssns.features.view_definition')
+    ViewDefinition.view_definition_at_cursor()
+  end, {
+    nargs = 0,
+    desc = "View definition of object under cursor in floating window",
   })
 
   -- Testing Framework Commands
