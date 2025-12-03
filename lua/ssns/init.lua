@@ -85,6 +85,20 @@ function Ssns.setup(user_config)
         desc = 'Expand asterisk (Columns Expand)'
       })
 
+      -- Go-to object in tree keymap
+      local keymaps = Config.get_keymaps()
+      if keymaps.go_to then
+        vim.keymap.set('n', keymaps.go_to, function()
+          local GoTo = require('ssns.features.go_to')
+          GoTo.go_to_object_at_cursor()
+        end, {
+          buffer = bufnr,
+          noremap = true,
+          silent = true,
+          desc = 'SSNS: Go to object in tree'
+        })
+      end
+
       -- Enable semantic highlighting for SQL files
       local sh_config = Config.get_semantic_highlighting()
       if sh_config.enabled then
@@ -279,6 +293,15 @@ function Ssns._register_commands()
   end, {
     nargs = 0,
     desc = "Toggle semantic highlighting for current buffer",
+  })
+
+  -- :SSNSGoTo - Go to object under cursor in database tree
+  vim.api.nvim_create_user_command("SSNSGoTo", function()
+    local GoTo = require('ssns.features.go_to')
+    GoTo.go_to_object_at_cursor()
+  end, {
+    nargs = 0,
+    desc = "Go to object under cursor in tree",
   })
 
   -- Testing Framework Commands

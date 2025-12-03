@@ -93,6 +93,7 @@
 ---@field execute_statement string Execute statement under cursor (default: "<Leader>R")
 ---@field save_query string Save current query to file (default: "<Leader>s")
 ---@field expand_asterisk string Expand asterisk to column list (default: "<Leader>ce")
+---@field go_to string Go to object under cursor in tree (default: "gd")
 
 ---@class TableHelpersConfig
 ---@field sqlserver table<string, string>? SQL Server helper templates
@@ -346,6 +347,7 @@ local default_config = {
     execute_statement = "<Leader>R",  -- Execute statement under cursor
     save_query = "<Leader>s",  -- Save query to file
     expand_asterisk = "<Leader>ce",  -- Expand asterisk to column list
+    go_to = "gd",  -- Go to object under cursor in tree
     show_history = "<Leader>@",  -- Show query history panel
   },
 
