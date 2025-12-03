@@ -25,6 +25,8 @@ local TOKEN_TYPES = {
   GO = "go",
   AT = "at",
   HASH = "hash",
+  COMMENT = "comment",
+  LINE_COMMENT = "line_comment",
 }
 
 -- Map semantic types to highlight groups
@@ -57,6 +59,7 @@ local HIGHLIGHT_MAP = {
   number = "SsnsNumber",
   parameter = "SsnsParameter", -- @parameters and @@system_variables
   unresolved = "SsnsUnresolved",
+  comment = "SsnsComment",  -- Block and line comments
 }
 
 -- Keywords that indicate the next identifier is a database name
@@ -592,6 +595,16 @@ function Classifier.classify(tokens, chunks, connection, config)
     elseif token.type == TOKEN_TYPES.SEMICOLON then
       -- Semicolon resets keyword context (new statement)
       last_keyword = nil
+      prev_token = token
+      i = i + 1
+
+    elseif token.type == TOKEN_TYPES.COMMENT or token.type == TOKEN_TYPES.LINE_COMMENT then
+      -- Comment token (block or line comment)
+      result = {
+        token = token,
+        semantic_type = "comment",
+        highlight_group = HIGHLIGHT_MAP.comment,
+      }
       prev_token = token
       i = i + 1
 

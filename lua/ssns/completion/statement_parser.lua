@@ -216,11 +216,26 @@ ParserState.__index = ParserState
 ---@param tokens table[]
 ---@return ParserState
 function ParserState.new(tokens)
-  return setmetatable({
+  local state = setmetatable({
     tokens = tokens,
     pos = 1,
     go_batch_index = 0,  -- 0-indexed: first batch is 0, incremented after GO
   }, ParserState)
+  -- Skip any leading comments
+  state:skip_comments()
+  return state
+end
+
+---Skip over comment tokens at current position
+function ParserState:skip_comments()
+  while self.pos <= #self.tokens do
+    local token = self.tokens[self.pos]
+    if token.type == "comment" or token.type == "line_comment" then
+      self.pos = self.pos + 1
+    else
+      break
+    end
+  end
 end
 
 ---Get current token
@@ -232,21 +247,33 @@ function ParserState:current()
   return self.tokens[self.pos]
 end
 
----Peek ahead n tokens
+---Peek ahead n tokens (skipping comments)
 ---@param offset number
 ---@return table?
 function ParserState:peek(offset)
   offset = offset or 1
-  local new_pos = self.pos + offset
+  local new_pos = self.pos
+  local skipped = 0
+  -- Skip 'offset' non-comment tokens
+  while skipped < offset and new_pos <= #self.tokens do
+    new_pos = new_pos + 1
+    if new_pos <= #self.tokens then
+      local token = self.tokens[new_pos]
+      if token.type ~= "comment" and token.type ~= "line_comment" then
+        skipped = skipped + 1
+      end
+    end
+  end
   if new_pos > #self.tokens then
     return nil
   end
   return self.tokens[new_pos]
 end
 
----Advance to next token
+---Advance to next token (skipping comments)
 function ParserState:advance()
   self.pos = self.pos + 1
+  self:skip_comments()
 end
 
 ---Check if current token matches type

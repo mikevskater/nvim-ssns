@@ -21,6 +21,8 @@ local TOKEN_TYPE = {
   GO = "go",                   -- GO batch separator
   AT = "at",                   -- @ for variables/parameters (@UserId, @@ROWCOUNT)
   HASH = "hash",               -- # for temp tables (#temp, ##global)
+  COMMENT = "comment",         -- Block comments /* ... */
+  LINE_COMMENT = "line_comment", -- Line comments -- ...
 }
 
 local STATE = {
@@ -460,6 +462,8 @@ function Tokenizer.tokenize(text)
       -- Check for block comment start /*
       elseif char == '/' and next_char == '*' then
         emit_token()
+        start_token()  -- Track start position for comment token
+        current_token = "/*"  -- Start accumulating with delimiter
         state = STATE.IN_BLOCK_COMMENT
         comment_depth = 1
         col = col + 2
@@ -468,6 +472,8 @@ function Tokenizer.tokenize(text)
       -- Check for line comment start --
       elseif char == '-' and next_char == '-' then
         emit_token()
+        start_token()  -- Track start position for comment token
+        current_token = "--"  -- Start accumulating with delimiter
         state = STATE.IN_LINE_COMMENT
         col = col + 2
         i = i + 2
@@ -587,52 +593,73 @@ function Tokenizer.tokenize(text)
       -- Check for nested comment start /*
       if char == '/' and next_char == '*' then
         comment_depth = comment_depth + 1
+        current_token = current_token .. "/*"  -- Accumulate nested delimiter
         col = col + 2
         i = i + 2
       -- Check for comment end */
       elseif char == '*' and next_char == '/' then
         comment_depth = comment_depth - 1
+        current_token = current_token .. "*/"  -- Accumulate closing delimiter
         col = col + 2
         i = i + 2
         if comment_depth == 0 then
+          emit_token(TOKEN_TYPE.COMMENT)  -- Emit complete comment token
           state = STATE.NORMAL
         end
       else
-        -- Track line/col for newlines in comments
+        -- Accumulate content and track line/col for newlines in comments
+        current_token = current_token .. char
         if char == '\n' then
           line = line + 1
           col = 1
+          i = i + 1
         elseif char == '\r' then
           if next_char == '\n' then
+            current_token = current_token .. '\n'
+            i = i + 2
+          else
             i = i + 1
           end
           line = line + 1
           col = 1
         else
           col = col + 1
+          i = i + 1
         end
-        i = i + 1
       end
 
     elseif state == STATE.IN_LINE_COMMENT then
       if char == '\n' or char == '\r' then
-        -- End of line comment
+        -- End of line comment - emit token (excludes newline)
+        emit_token(TOKEN_TYPE.LINE_COMMENT)
         state = STATE.NORMAL
         if char == '\r' and next_char == '\n' then
+          i = i + 2
+        else
           i = i + 1
         end
         line = line + 1
         col = 1
-        i = i + 1
       else
+        -- Accumulate comment content
+        current_token = current_token .. char
         col = col + 1
         i = i + 1
       end
     end
   end
 
-  -- Emit any remaining token
-  emit_token()
+  -- Handle EOF cases for comment states
+  if state == STATE.IN_LINE_COMMENT and current_token ~= "" then
+    -- Line comment reaches EOF without newline
+    emit_token(TOKEN_TYPE.LINE_COMMENT)
+  elseif state == STATE.IN_BLOCK_COMMENT and current_token ~= "" then
+    -- Unclosed block comment - emit what we have (for highlighting)
+    emit_token(TOKEN_TYPE.COMMENT)
+  else
+    -- Emit any remaining token
+    emit_token()
+  end
 
   return tokens
 end
