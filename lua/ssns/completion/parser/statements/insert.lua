@@ -71,12 +71,7 @@ function InsertStatement._parse_into(state, chunk, scope)
   state:advance()  -- consume INTO
 
   -- Build known_ctes for table reference parsing
-  local known_ctes = {}
-  if scope then
-    for name, _ in pairs(scope.ctes) do
-      known_ctes[name] = true
-    end
-  end
+  local known_ctes = scope:get_known_ctes_table()
 
   local table_ref = state:parse_table_reference(known_ctes)
   if table_ref then

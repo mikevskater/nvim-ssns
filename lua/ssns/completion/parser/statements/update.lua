@@ -27,15 +27,10 @@ function UpdateStatement.parse(state, scope, temp_tables)
   state:advance()  -- consume UPDATE
 
   -- Handle UPDATE TOP (n) [PERCENT] clause
-  UpdateStatement._skip_top_clause(state)
+  state:skip_top_clause()
 
   -- Build known_ctes for table reference parsing
-  local known_ctes = {}
-  if scope then
-    for name, _ in pairs(scope.ctes) do
-      known_ctes[name] = true
-    end
-  end
+  local known_ctes = scope:get_known_ctes_table()
 
   -- Extract UPDATE target (could be table in simple UPDATE, or alias in extended UPDATE with FROM)
   -- We store it temporarily - if there's a FROM clause later, this might be an alias
@@ -46,35 +41,6 @@ function UpdateStatement.parse(state, scope, temp_tables)
   -- The main loop will call UpdateStatement.parse_from() when it encounters FROM
 
   return chunk
-end
-
----Skip TOP (n) [PERCENT] clause if present
----@param state ParserState
-function UpdateStatement._skip_top_clause(state)
-  if not state:is_keyword("TOP") then
-    return
-  end
-
-  state:advance()  -- consume TOP
-
-  -- Skip the (n) or (n) PERCENT
-  if state:is_type("paren_open") then
-    local depth = 1
-    state:advance()
-    while state:current() and depth > 0 do
-      if state:is_type("paren_open") then
-        depth = depth + 1
-      elseif state:is_type("paren_close") then
-        depth = depth - 1
-      end
-      state:advance()
-    end
-  end
-
-  -- Skip optional PERCENT keyword
-  if state:is_keyword("PERCENT") then
-    state:advance()
-  end
 end
 
 ---Parse FROM clause for extended UPDATE syntax

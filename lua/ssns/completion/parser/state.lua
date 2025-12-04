@@ -2,31 +2,7 @@
 --- Handles token navigation, keyword detection, and basic parsing utilities
 
 require('ssns.completion.parser.types')
-
--- Statement-starting keywords (temporary - will be moved to utils/keywords.lua in Phase 1)
-local STATEMENT_STARTERS = {
-  SELECT = true,
-  INSERT = true,
-  UPDATE = true,
-  DELETE = true,
-  MERGE = true,
-  CREATE = true,
-  ALTER = true,
-  DROP = true,
-  TRUNCATE = true,
-  WITH = true,
-  EXEC = true,
-  EXECUTE = true,
-  DECLARE = true,
-  SET = true,
-}
-
----Check if keyword starts a new statement
----@param keyword string
----@return boolean
-local function is_statement_starter(keyword)
-  return STATEMENT_STARTERS[keyword:upper()] == true
-end
+local Keywords = require('ssns.completion.parser.utils.keywords')
 
 ---Parser state for navigating tokens
 ---@class ParserState
@@ -172,12 +148,57 @@ function ParserState:consume_until_statement_end(paren_depth)
     end
 
     -- Stop at new statement starter (only at paren_depth 0)
-    if paren_depth == 0 and is_statement_starter(token.text) then
+    if paren_depth == 0 and Keywords.is_statement_starter(token.text) then
       break
     end
 
     self:advance()
   end
+end
+
+---Skip over parenthesized content including nested parens
+---Expects to be positioned AT the opening paren, consumes it and everything up to and including the closing paren.
+---@return boolean success True if closing paren was found
+function ParserState:skip_paren_contents()
+  if not self:is_type("paren_open") then
+    return false
+  end
+
+  local depth = 1
+  self:advance()  -- consume (
+
+  while self:current() and depth > 0 do
+    if self:is_type("paren_open") then
+      depth = depth + 1
+    elseif self:is_type("paren_close") then
+      depth = depth - 1
+    end
+    self:advance()
+  end
+
+  return depth == 0
+end
+
+---Skip TOP (n) [PERCENT] clause if present (used by UPDATE and DELETE)
+---@return boolean skipped True if TOP clause was found and skipped
+function ParserState:skip_top_clause()
+  if not self:is_keyword("TOP") then
+    return false
+  end
+
+  self:advance()  -- consume TOP
+
+  -- Skip the (n) or (n) PERCENT expression
+  if self:is_type("paren_open") then
+    self:skip_paren_contents()
+  end
+
+  -- Skip optional PERCENT keyword
+  if self:is_keyword("PERCENT") then
+    self:advance()
+  end
+
+  return true
 end
 
 ---Parse a parameter/variable (@name or @@system_var)

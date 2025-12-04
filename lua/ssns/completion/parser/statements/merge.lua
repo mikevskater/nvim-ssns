@@ -27,12 +27,7 @@ function MergeStatement.parse(state, scope, temp_tables)
   state:advance()  -- consume MERGE
 
   -- Build known_ctes for table reference parsing
-  local known_ctes = {}
-  if scope then
-    for name, _ in pairs(scope.ctes) do
-      known_ctes[name] = true
-    end
-  end
+  local known_ctes = scope:get_known_ctes_table()
 
   -- Parse MERGE INTO target_table [AS alias]
   if state:is_keyword("INTO") then

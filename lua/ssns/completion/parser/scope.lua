@@ -117,6 +117,17 @@ function ScopeContext:add_subquery(subquery)
   table.insert(self.subqueries, subquery)
 end
 
+---Get known CTEs as a simple name -> true table (for backward compatibility)
+---This is used by functions that need a simple CTE lookup table rather than full CTEInfo
+---@return table<string, boolean>
+function ScopeContext:get_known_ctes_table()
+  local known = {}
+  for name, _ in pairs(self.ctes) do
+    known[name] = true
+  end
+  return known
+end
+
 ---Create a child scope for a nested query
 ---@return ScopeContext
 function ScopeContext:create_child()

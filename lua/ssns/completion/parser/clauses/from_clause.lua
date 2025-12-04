@@ -54,12 +54,7 @@ function FromClauseParser.parse(state, scope, from_start_token)
   local join_count = 0
 
   -- Build known_ctes table for compatibility with parse_subquery/parse_table_reference
-  local known_ctes = {}
-  if scope then
-    for name, _ in pairs(scope.ctes) do
-      known_ctes[name] = true
-    end
-  end
+  local known_ctes = scope and scope:get_known_ctes_table() or {}
 
   while state:current() do
     local token = state:current()

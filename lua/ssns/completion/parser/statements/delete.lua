@@ -28,15 +28,10 @@ function DeleteStatement.parse(state, scope, temp_tables)
   state:advance()  -- consume DELETE
 
   -- Handle DELETE TOP (n) [PERCENT] clause
-  DeleteStatement._skip_top_clause(state)
+  state:skip_top_clause()
 
   -- Build known_ctes for table reference parsing
-  local known_ctes = {}
-  if scope then
-    for name, _ in pairs(scope.ctes) do
-      known_ctes[name] = true
-    end
-  end
+  local known_ctes = scope:get_known_ctes_table()
 
   -- Handle DELETE syntax variants
   if state:is_keyword("FROM") then
@@ -56,35 +51,6 @@ function DeleteStatement.parse(state, scope, temp_tables)
   end
 
   return chunk
-end
-
----Skip TOP (n) [PERCENT] clause if present
----@param state ParserState
-function DeleteStatement._skip_top_clause(state)
-  if not state:is_keyword("TOP") then
-    return
-  end
-
-  state:advance()  -- consume TOP
-
-  -- Skip the (n) or (n) PERCENT
-  if state:is_type("paren_open") then
-    local depth = 1
-    state:advance()
-    while state:current() and depth > 0 do
-      if state:is_type("paren_open") then
-        depth = depth + 1
-      elseif state:is_type("paren_close") then
-        depth = depth - 1
-      end
-      state:advance()
-    end
-  end
-
-  -- Skip optional PERCENT keyword
-  if state:is_keyword("PERCENT") then
-    state:advance()
-  end
 end
 
 ---Parse FROM clause for extended DELETE syntax

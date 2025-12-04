@@ -84,15 +84,10 @@ function CteClauseParser.parse(state, scope)
     end
 
     if state:is_keyword("SELECT") then
-      -- Build known_ctes table for parse_subquery
-      local known_ctes_map = {}
+      -- Build known_ctes table for parse_subquery (merge local cte_names with scope ctes)
+      local known_ctes_map = scope and scope:get_known_ctes_table() or {}
       for name, _ in pairs(cte_names) do
         known_ctes_map[name] = true
-      end
-      if scope then
-        for name, _ in pairs(scope.ctes) do
-          known_ctes_map[name] = true
-        end
       end
 
       local subquery = state:parse_subquery(known_ctes_map)

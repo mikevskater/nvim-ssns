@@ -109,7 +109,7 @@ function ColumnDefsParser._skip_constraint(state)
   while state:current() and not state:is_type("comma") and not state:is_type("paren_close") do
     if state:is_type("paren_open") then
       -- Skip parenthesized content (column list, etc.)
-      ColumnDefsParser._skip_paren_content(state)
+      state:skip_paren_contents()
     else
       state:advance()
     end
@@ -137,7 +137,7 @@ function ColumnDefsParser._parse_data_type(state)
 
   -- Handle parameterized types like VARCHAR(50), DECIMAL(10,2)
   if state:is_type("paren_open") then
-    ColumnDefsParser._skip_paren_content(state)
+    state:skip_paren_contents()
   end
 
   return data_type
@@ -150,31 +150,10 @@ function ColumnDefsParser._skip_column_modifiers(state)
   while state:current() and not state:is_type("comma") and not state:is_type("paren_close") do
     if state:is_type("paren_open") then
       -- Skip parenthesized content (DEFAULT value, IDENTITY seed, etc.)
-      ColumnDefsParser._skip_paren_content(state)
+      state:skip_paren_contents()
     else
       state:advance()
     end
-  end
-end
-
----Skip parenthesized content including nested parens
----@param state ParserState
----@private
-function ColumnDefsParser._skip_paren_content(state)
-  if not state:is_type("paren_open") then
-    return
-  end
-
-  local paren_depth = 1
-  state:advance()  -- consume (
-
-  while state:current() and paren_depth > 0 do
-    if state:is_type("paren_open") then
-      paren_depth = paren_depth + 1
-    elseif state:is_type("paren_close") then
-      paren_depth = paren_depth - 1
-    end
-    state:advance()
   end
 end
 

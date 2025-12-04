@@ -207,12 +207,7 @@ function DdlStatement.parse_truncate(state, scope, temp_tables)
   end
 
   -- Build known_ctes for table reference parsing
-  local known_ctes = {}
-  if scope then
-    for name, _ in pairs(scope.ctes) do
-      known_ctes[name] = true
-    end
-  end
+  local known_ctes = scope:get_known_ctes_table()
 
   -- Extract table name
   local table_ref = state:parse_table_reference(known_ctes)
@@ -269,7 +264,7 @@ function DdlStatement._parse_alter_add_columns(state, temp_table)
 
         -- Handle parameterized types like VARCHAR(50)
         if state:is_type("paren_open") then
-          DdlStatement._skip_parenthesized(state)
+          state:skip_paren_contents()
         end
       end
 
@@ -310,27 +305,10 @@ function DdlStatement._skip_until_comma_or_end(state)
       end
     end
     if state:is_type("paren_open") then
-      DdlStatement._skip_parenthesized(state)
+      state:skip_paren_contents()
     else
       state:advance()
     end
-  end
-end
-
----Skip parenthesized content
----@param state ParserState
-function DdlStatement._skip_parenthesized(state)
-  if not state:is_type("paren_open") then return end
-
-  local depth = 1
-  state:advance()  -- consume (
-  while state:current() and depth > 0 do
-    if state:is_type("paren_open") then
-      depth = depth + 1
-    elseif state:is_type("paren_close") then
-      depth = depth - 1
-    end
-    state:advance()
   end
 end
 

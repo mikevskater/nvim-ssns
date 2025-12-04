@@ -51,11 +51,8 @@ function SelectListParser.parse(state, scope, select_start_token)
         -- This is a subquery in SELECT list
         state:advance()  -- consume (
         if scope then
-          -- parse_subquery is still on ParserState (will be refactored later)
-          local known_ctes = {}
-          for name, _ in pairs(scope.ctes) do
-            known_ctes[name] = true
-          end
+          -- parse_subquery is still on ParserState
+          local known_ctes = scope:get_known_ctes_table()
           local subquery = state:parse_subquery(known_ctes)
           if subquery then
             scope:add_subquery(subquery)
@@ -66,7 +63,7 @@ function SelectListParser.parse(state, scope, select_start_token)
           end
         else
           -- Skip if no scope provided
-          SelectListParser._skip_paren_contents(state)
+          state:skip_paren_contents()
         end
       else
         -- Regular parenthesized expression
@@ -201,21 +198,6 @@ function SelectListParser.parse(state, scope, select_start_token)
   end
 
   return columns, clause_pos
-end
-
----Skip contents inside parentheses (utility for when we don't need to parse)
----@param state ParserState
----@private
-function SelectListParser._skip_paren_contents(state)
-  local depth = 1
-  while state:current() and depth > 0 do
-    if state:is_type("paren_open") then
-      depth = depth + 1
-    elseif state:is_type("paren_close") then
-      depth = depth - 1
-    end
-    state:advance()
-  end
 end
 
 return SelectListParser
