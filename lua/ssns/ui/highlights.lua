@@ -3,84 +3,11 @@
 local UiHighlights = {}
 
 ---Setup highlight groups
+---Now delegates to ThemeManager for actual highlight setup
 function UiHighlights.setup()
-  local Config = require('ssns.config')
-  local hl = Config.get_ui().highlights
-
-  -- Server type-specific highlights (by database type)
-  vim.api.nvim_set_hl(0, "SsnsServerSqlServer", hl.server_sqlserver)
-  vim.api.nvim_set_hl(0, "SsnsServerPostgres", hl.server_postgres)
-  vim.api.nvim_set_hl(0, "SsnsServerMysql", hl.server_mysql)
-  vim.api.nvim_set_hl(0, "SsnsServerSqlite", hl.server_sqlite)
-  vim.api.nvim_set_hl(0, "SsnsServerBigQuery", hl.server_bigquery)
-  vim.api.nvim_set_hl(0, "SsnsServer", hl.server)
-
-  -- Object type highlights
-  vim.api.nvim_set_hl(0, "SsnsDatabase", hl.database)
-  vim.api.nvim_set_hl(0, "SsnsSchema", hl.schema)
-  vim.api.nvim_set_hl(0, "SsnsTable", hl.table)
-  vim.api.nvim_set_hl(0, "SsnsView", hl.view)
-  vim.api.nvim_set_hl(0, "SsnsProcedure", hl.procedure)
-  vim.api.nvim_set_hl(0, "SsnsFunction", hl["function"])
-  vim.api.nvim_set_hl(0, "SsnsColumn", hl.column)
-  vim.api.nvim_set_hl(0, "SsnsIndex", hl.index)
-  vim.api.nvim_set_hl(0, "SsnsKey", hl.key)
-  vim.api.nvim_set_hl(0, "SsnsParameter", hl.parameter)
-  vim.api.nvim_set_hl(0, "SsnsSequence", hl.sequence)
-  vim.api.nvim_set_hl(0, "SsnsSynonym", hl.synonym)
-  vim.api.nvim_set_hl(0, "SsnsAction", hl.action)
-  vim.api.nvim_set_hl(0, "SsnsGroup", hl.group)
-
-  -- Add server action (green to indicate "add")
-  vim.api.nvim_set_hl(0, "SsnsAddServerAction", { fg = "#4EC9B0", bold = true })
-
-  -- Icon highlights (for the icon characters themselves) - use default = true for optional styling
-  vim.api.nvim_set_hl(0, "SsnsIcon", { link = "SpecialChar", default = true })
-  vim.api.nvim_set_hl(0, "SsnsIconServer", vim.tbl_extend("force", hl.server, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsIconDatabase", vim.tbl_extend("force", hl.database, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsIconSchema", vim.tbl_extend("force", hl.schema, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsIconTable", vim.tbl_extend("force", hl.table, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsIconView", vim.tbl_extend("force", hl.view, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsIconProcedure", vim.tbl_extend("force", hl.procedure, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsIconFunction", vim.tbl_extend("force", hl["function"], { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsIconColumn", vim.tbl_extend("force", hl.column, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsIconIndex", vim.tbl_extend("force", hl.index, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsIconKey", vim.tbl_extend("force", hl.key, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsIconParameter", vim.tbl_extend("force", hl.parameter, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsIconSequence", vim.tbl_extend("force", hl.sequence, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsIconSynonym", vim.tbl_extend("force", hl.synonym, { default = true }))
-
-  -- Status highlights
-  vim.api.nvim_set_hl(0, "SsnsStatusConnected", vim.tbl_extend("force", hl.status_connected, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsStatusDisconnected", vim.tbl_extend("force", hl.status_disconnected, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsStatusConnecting", vim.tbl_extend("force", hl.status_connecting, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsStatusError", vim.tbl_extend("force", hl.status_error, { default = true }))
-
-  -- Tree expand/collapse indicators
-  vim.api.nvim_set_hl(0, "SsnsExpanded", vim.tbl_extend("force", hl.expanded, { default = true }))
-  vim.api.nvim_set_hl(0, "SsnsCollapsed", vim.tbl_extend("force", hl.collapsed, { default = true }))
-
-  -- Semantic highlighting for query buffers
-  -- Legacy keyword (fallback)
-  vim.api.nvim_set_hl(0, "SsnsKeyword", hl.keyword or { fg = "#569CD6", bold = true })
-
-  -- Categorized keyword highlight groups
-  vim.api.nvim_set_hl(0, "SsnsKeywordStatement", hl.keyword_statement or { fg = "#C586C0", bold = true })  -- Purple: SELECT, INSERT, CREATE, etc.
-  vim.api.nvim_set_hl(0, "SsnsKeywordClause", hl.keyword_clause or { fg = "#569CD6", bold = true })       -- Blue: FROM, WHERE, JOIN, etc.
-  vim.api.nvim_set_hl(0, "SsnsKeywordFunction", hl.keyword_function or { fg = "#DCDCAA" })                -- Yellow: COUNT, SUM, GETDATE, etc.
-  vim.api.nvim_set_hl(0, "SsnsKeywordDatatype", hl.keyword_datatype or { fg = "#4EC9B0" })                -- Cyan: INT, VARCHAR, DATETIME, etc.
-  vim.api.nvim_set_hl(0, "SsnsKeywordOperator", hl.keyword_operator or { fg = "#569CD6" })                -- Blue: AND, OR, NOT, IN, etc.
-  vim.api.nvim_set_hl(0, "SsnsKeywordConstraint", hl.keyword_constraint or { fg = "#CE9178" })            -- Orange: PRIMARY, KEY, FOREIGN, etc.
-  vim.api.nvim_set_hl(0, "SsnsKeywordModifier", hl.keyword_modifier or { fg = "#9CDCFE" })                -- Light Blue: ASC, DESC, NOLOCK, etc.
-  vim.api.nvim_set_hl(0, "SsnsKeywordMisc", hl.keyword_misc or { fg = "#808080" })                        -- Gray: reserved/misc keywords
-
-  -- Other semantic highlights
-  vim.api.nvim_set_hl(0, "SsnsOperator", hl.operator or { fg = "#D4D4D4" })
-  vim.api.nvim_set_hl(0, "SsnsString", hl.string or { fg = "#CE9178" })
-  vim.api.nvim_set_hl(0, "SsnsNumber", hl.number or { fg = "#B5CEA8" })
-  vim.api.nvim_set_hl(0, "SsnsAlias", hl.alias or { fg = "#4EC9B0", italic = true })
-  vim.api.nvim_set_hl(0, "SsnsUnresolved", hl.unresolved or { fg = "#808080" })
-  vim.api.nvim_set_hl(0, "SsnsComment", hl.comment or { fg = "#6A9955", italic = true })
+  -- Initialize and apply theme manager
+  local ThemeManager = require('ssns.ui.theme_manager')
+  ThemeManager.setup()
 end
 
 ---Apply highlights to buffer

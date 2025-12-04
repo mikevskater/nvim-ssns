@@ -422,6 +422,26 @@ function Ssns._register_commands()
     desc = "Manage saved server connections",
   })
 
+  -- Theme Commands
+
+  -- :SSNSTheme - Open theme picker UI
+  vim.api.nvim_create_user_command("SSNSTheme", function()
+    local ThemePicker = require('ssns.ui.theme_picker')
+    ThemePicker.show()
+  end, {
+    nargs = 0,
+    desc = "Open SSNS theme picker",
+  })
+
+  -- :SSNSThemeClear - Clear theme and use defaults
+  vim.api.nvim_create_user_command("SSNSThemeClear", function()
+    local ThemeManager = require('ssns.ui.theme_manager')
+    ThemeManager.clear_theme()
+  end, {
+    nargs = 0,
+    desc = "Clear SSNS theme (use defaults)",
+  })
+
   -- Testing Framework Commands
 
   -- :SSNSRunTests - Run all IntelliSense tests
