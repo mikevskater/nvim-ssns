@@ -351,7 +351,7 @@ function UsageAnalyzer.analyze_and_record(query_text, connection)
     return
   end
 
-  if not connection or not connection.connection_string then
+  if not connection or not connection.connection_config then
     return
   end
 
