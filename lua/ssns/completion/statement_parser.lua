@@ -92,6 +92,15 @@ local ValuesClauseParser = require('ssns.completion.parser.clauses.values_clause
 local ColumnDefsParser = require('ssns.completion.parser.clauses.column_defs')
 local ScopeContext = require('ssns.completion.parser.scope')
 
+-- Import statement handler modules (Phase 3 refactoring)
+local BaseStatement = require('ssns.completion.parser.statements.base')
+local SelectStatement = require('ssns.completion.parser.statements.select')
+local InsertStatement = require('ssns.completion.parser.statements.insert')
+local UpdateStatement = require('ssns.completion.parser.statements.update')
+local DeleteStatement = require('ssns.completion.parser.statements.delete')
+local MergeStatement = require('ssns.completion.parser.statements.merge')
+local DdlStatement = require('ssns.completion.parser.statements.ddl')
+
 local StatementParser = {}
 
 -- Local aliases for module functions (for convenience and backward compatibility)
