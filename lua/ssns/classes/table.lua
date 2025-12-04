@@ -643,7 +643,7 @@ function TableClass:load_definition()
 
   -- Execute query to get the definition
   local server = self:get_server()
-  local success, results = pcall(adapter.execute, adapter, server.connection_string, query, { use_delimiter = false })
+  local success, results = pcall(adapter.execute, adapter, server.connection_config, query, { use_delimiter = false })
 
   if not success then
     self.definition = string.format("-- Error getting definition: %s", tostring(results))
