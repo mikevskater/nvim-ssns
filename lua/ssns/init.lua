@@ -404,6 +404,15 @@ function Ssns._register_commands()
     desc = "View metadata of object under cursor in floating window",
   })
 
+  -- :SSNSStatementChunks - View parsed statement chunks for debugging
+  vim.api.nvim_create_user_command("SSNSStatementChunks", function()
+    local StatementChunksViewer = require('ssns.features.statement_chunks')
+    StatementChunksViewer.view_statement_chunks()
+  end, {
+    nargs = 0,
+    desc = "View parsed statement chunks in floating window (debugging)",
+  })
+
   -- :SSNSAddServer - Open add server UI
   vim.api.nvim_create_user_command("SSNSAddServer", function()
     local AddServerUI = require('ssns.ui.add_server')

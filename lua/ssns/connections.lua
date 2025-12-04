@@ -32,6 +32,8 @@
 ---Manages persistent connection storage in JSON file
 local Connections = {}
 
+local JsonUtils = require('ssns.utils.json')
+
 -- Current file format version
 local FILE_VERSION = 2
 
@@ -90,18 +92,8 @@ function Connections.save(connections)
     connections = connections,
   }
 
-  -- Encode to JSON with pretty printing
-  local ok, json = pcall(vim.fn.json_encode, data)
-  if not ok then
-    vim.notify("SSNS: Failed to encode connections to JSON", vim.log.levels.ERROR)
-    return false
-  end
-
-  -- Pretty print the JSON for readability
-  local pretty_json = Connections._pretty_json(json)
-
-  -- Split into lines for proper file writing (avoids Windows line ending issues)
-  local lines = vim.split(pretty_json, '\n')
+  -- Prettify using shared JsonUtils
+  local lines = JsonUtils.prettify_lines(data)
 
   -- Write to file
   local write_ok = pcall(vim.fn.writefile, lines, path)
@@ -410,50 +402,6 @@ function Connections.with_database(connection, new_database)
   end
   modified.server.database = new_database
   return modified
-end
-
----Pretty print JSON with indentation
----@param json string JSON string
----@return string pretty_json Formatted JSON
-function Connections._pretty_json(json)
-  -- Simple pretty printer for our connection structure
-  -- Handles nested objects with 2-space indentation
-  local result = {}
-  local indent = 0
-  local in_string = false
-  local i = 1
-
-  while i <= #json do
-    local char = json:sub(i, i)
-
-    if char == '"' and json:sub(i - 1, i - 1) ~= '\\' then
-      in_string = not in_string
-      table.insert(result, char)
-    elseif not in_string then
-      if char == '{' or char == '[' then
-        table.insert(result, char)
-        indent = indent + 1
-        table.insert(result, '\n' .. string.rep('  ', indent))
-      elseif char == '}' or char == ']' then
-        indent = indent - 1
-        table.insert(result, '\n' .. string.rep('  ', indent))
-        table.insert(result, char)
-      elseif char == ',' then
-        table.insert(result, char)
-        table.insert(result, '\n' .. string.rep('  ', indent))
-      elseif char == ':' then
-        table.insert(result, ': ')
-      elseif char ~= ' ' and char ~= '\n' and char ~= '\t' then
-        table.insert(result, char)
-      end
-    else
-      table.insert(result, char)
-    end
-
-    i = i + 1
-  end
-
-  return table.concat(result)
 end
 
 return Connections
