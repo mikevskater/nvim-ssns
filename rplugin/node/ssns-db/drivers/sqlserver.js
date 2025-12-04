@@ -11,91 +11,141 @@ const { ssnsLog } = require('../ssns-log');
  * - Multi-result set support (native)
  * - Structured errors with line numbers
  * - Rich column metadata (types, nullable, precision)
+ *
+ * Authentication modes:
+ * - Windows: Uses msnodesqlv8 with ODBC driver
+ * - SQL: Uses mssql/tedious with username/password
  */
 class SqlServerDriver extends BaseDriver {
-  constructor(connectionString) {
-    super(connectionString);
-    const parsed = this.parseConnectionString();
-    this.config = parsed.config;
-    this.useNativeDriver = parsed.useNativeDriver;
+  /**
+   * @param {Object} config - Connection configuration object
+   * @param {string} config.type - "sqlserver"
+   * @param {Object} config.server - Server details
+   * @param {string} config.server.host - Server hostname or IP
+   * @param {string} [config.server.instance] - Named instance
+   * @param {number} [config.server.port] - Port number (default: 1433)
+   * @param {string} [config.server.database] - Database name (default: master)
+   * @param {Object} config.auth - Authentication details
+   * @param {string} config.auth.type - "windows" or "sql"
+   * @param {string} [config.auth.username] - SQL auth username
+   * @param {string} [config.auth.password] - SQL auth password
+   * @param {Object} [config.options] - Additional options
+   * @param {string} [config.options.odbc_driver] - ODBC driver name
+   * @param {boolean} [config.options.trust_server_certificate] - Trust cert (default: true)
+   */
+  constructor(config) {
+    super(config);
+    this.useNativeDriver = config.auth && config.auth.type === 'windows';
+    this.odbcConnectionString = null;
+    this.tediousConfig = null;
+
+    if (this.useNativeDriver) {
+      this.odbcConnectionString = this.buildOdbcConnectionString(config);
+    } else {
+      this.tediousConfig = this.buildTediousConfig(config);
+    }
   }
 
   /**
-   * Parse SQL Server connection string
-   * Formats:
-   *   sqlserver://server/database
-   *   sqlserver://user:pass@server/database
-   *   sqlserver://server\\INSTANCE/database
-   *   sqlserver://user:pass@server\\INSTANCE/database
+   * Escape a value for use in ODBC connection string
+   * ODBC values containing special chars must be wrapped in braces
    *
-   * @returns {Object} mssql configuration object
+   * @param {string} value - Value to escape
+   * @returns {string} Escaped value
    */
-  parseConnectionString() {
-    const connStr = this.connectionString;
+  escapeOdbcValue(value) {
+    if (!value) return '';
 
-    ssnsLog(`[DEBUG] Original connection string: ${connStr}`);
-
-    // Extract query parameters (e.g., ?driver=...)
-    let cleaned = connStr.replace(/^sqlserver:\/\//, '');
-    let driverParam = null;
-
-    const queryParamMatch = cleaned.match(/\?(.+)$/);
-    if (queryParamMatch) {
-      const params = new URLSearchParams(queryParamMatch[1]);
-      driverParam = params.get('driver');
-      if (driverParam) {
-        // URL decode the driver name (URLSearchParams does this automatically)
-        ssnsLog(`[DEBUG] Extracted driver parameter: ${driverParam}`);
-      }
-      // Remove query params from connection string
-      cleaned = cleaned.replace(/\?.*$/, '');
+    // Check if value contains special characters that need escaping
+    if (value.includes(';') || value.includes('=') || value.includes('{') || value.includes('}')) {
+      // Escape braces by doubling them, then wrap in braces
+      const escaped = value.replace(/\}/g, '}}');
+      return `{${escaped}}`;
     }
 
-    ssnsLog(`[DEBUG] After removing prefix and params: ${cleaned}`);
+    return value;
+  }
 
-    // Parse authentication (if present)
-    let auth = null;
-    let serverPart = cleaned;
+  /**
+   * Build ODBC connection string from config for Windows Authentication
+   *
+   * @param {Object} config - Connection configuration
+   * @returns {string} ODBC connection string
+   */
+  buildOdbcConnectionString(config) {
+    const server = config.server || {};
+    const options = config.options || {};
 
-    if (cleaned.includes('@')) {
-      const parts = cleaned.split('@');
-      const [user, password] = parts[0].split(':');
-      auth = { user, password };
-      serverPart = parts[1];
+    // Get ODBC driver (default to ODBC Driver 17)
+    const driver = options.odbc_driver || 'ODBC Driver 17 for SQL Server';
+
+    // Build server string with optional instance
+    let serverStr = server.host || 'localhost';
+
+    // Replace "." with "localhost" for ODBC
+    if (serverStr === '.') {
+      serverStr = 'localhost';
     }
 
-    // Parse server and database
-    const [serverWithInstance, database] = serverPart.split('/');
-    ssnsLog(`[DEBUG] serverWithInstance: ${serverWithInstance}`);
-    ssnsLog(`[DEBUG] database: ${database}`);
-
-    // Parse server and instance (if present)
-    // Handle both single backslash (\) and double backslash (\\)
-    let server = serverWithInstance;
-    let instanceName = null;
-    if (serverWithInstance.includes('\\')) {
-      const parts = serverWithInstance.split('\\');
-      server = parts[0];
-      instanceName = parts[1];
-      ssnsLog(`[DEBUG] Parsed server: ${server} instance: ${instanceName}`);
+    // Add instance name if present
+    if (server.instance) {
+      serverStr += '\\' + server.instance;
     }
 
-    // Replace "." with "localhost" for mssql config object
-    if (server === '.') {
-      server = 'localhost';
-      ssnsLog('[DEBUG] Replaced "." with "localhost"');
-    } else {
-      ssnsLog(`[DEBUG] Keeping server as: ${server}`);
+    // Build connection string parts
+    const parts = [];
+
+    // Driver (always wrapped in braces for ODBC)
+    parts.push(`Driver={${driver}}`);
+
+    // Server
+    parts.push(`Server=${this.escapeOdbcValue(serverStr)}`);
+
+    // Database
+    const database = server.database || 'master';
+    parts.push(`Database=${this.escapeOdbcValue(database)}`);
+
+    // Windows Authentication
+    parts.push('Trusted_Connection=yes');
+
+    // Trust server certificate (default: true for dev)
+    const trustCert = options.trust_server_certificate !== false;
+    if (trustCert) {
+      parts.push('TrustServerCertificate=yes');
     }
 
-    // Build mssql config
-    const config = {
-      server: server || 'localhost',
-      database: database || 'master',
+    const connectionString = parts.join(';') + ';';
+
+    ssnsLog(`[sqlserver] Built ODBC connection string: ${connectionString}`);
+    return connectionString;
+  }
+
+  /**
+   * Build tedious/mssql config from connection config for SQL Authentication
+   *
+   * @param {Object} config - Connection configuration
+   * @returns {Object} mssql config object
+   */
+  buildTediousConfig(config) {
+    const server = config.server || {};
+    const auth = config.auth || {};
+    const options = config.options || {};
+
+    // Build server hostname
+    let host = server.host || 'localhost';
+    if (host === '.') {
+      host = 'localhost';
+    }
+
+    const tediousConfig = {
+      server: host,
+      database: server.database || 'master',
+      user: auth.username || '',
+      password: auth.password || '',
       options: {
-        trustServerCertificate: true, // For development
+        trustServerCertificate: options.trust_server_certificate !== false,
         enableArithAbort: true,
-        encrypt: false, // For local development
+        encrypt: options.ssl === true,
       },
       pool: {
         max: 10,
@@ -104,46 +154,18 @@ class SqlServerDriver extends BaseDriver {
       }
     };
 
-    // Add instance name if present
-    if (instanceName) {
-      config.options.instanceName = instanceName;
+    // Add instance name if present (for tedious, it goes in options)
+    if (server.instance) {
+      tediousConfig.options.instanceName = server.instance;
     }
 
-    // Determine driver and authentication
-    let useNativeDriver = false;
-
-    if (auth) {
-      // SQL Server authentication - use tedious (cross-platform)
-      config.user = auth.user;
-      config.password = auth.password;
-      useNativeDriver = false;
-    } else {
-      // Windows authentication - use msnodesqlv8 (native ODBC)
-      // Build connection string for msnodesqlv8
-      const instancePart = instanceName ? `\\${instanceName}` : '';
-
-      // Use driver from Lua if provided, otherwise use default
-      const driver = driverParam || 'ODBC Driver 17 for SQL Server';
-
-      const connectionString = `Driver={${driver}};Server=${server}${instancePart};Database=${database || 'master'};Trusted_Connection=yes;TrustServerCertificate=yes;`;
-
-      ssnsLog(`[DEBUG] Using Windows auth with driver: ${driver}`);
-      ssnsLog(`[DEBUG] Connection string: ${connectionString}`);
-
-      return {
-        config: {
-          connectionString: connectionString,
-          selectedDriver: driver
-        },
-        useNativeDriver: true
-      };
+    // Add port if specified (only for non-named instances)
+    if (server.port && !server.instance) {
+      tediousConfig.port = server.port;
     }
 
-    ssnsLog(`[DEBUG] Using SQL auth with config: ${JSON.stringify(config, null, 2)}`);
-    return {
-      config: config,
-      useNativeDriver: false
-    };
+    ssnsLog(`[sqlserver] Built tedious config: ${JSON.stringify(tediousConfig, null, 2)}`);
+    return tediousConfig;
   }
 
   /**
@@ -159,14 +181,14 @@ class SqlServerDriver extends BaseDriver {
     if (this.useNativeDriver) {
       // Use msnodesqlv8 for Windows authentication (callback-based API)
       ssnsLog('[sqlserver] Connecting with msnodesqlv8 (Windows auth)');
-      ssnsLog(`[sqlserver] Connection string: ${this.config.connectionString}`);
+      ssnsLog(`[sqlserver] Connection string: ${this.odbcConnectionString}`);
       return new Promise((resolve, reject) => {
-        msnodesqlv8.open(this.config.connectionString, (err, conn) => {
+        msnodesqlv8.open(this.odbcConnectionString, (err, conn) => {
           if (err) {
             this.isConnected = false;
             ssnsLog(`[sqlserver] Connection error: ${err}`);
             ssnsLog(`[sqlserver] Error details: ${JSON.stringify(err, null, 2)}`);
-            reject(new Error(`SQL Server Windows Auth connection failed: ${err.message || err}\nConnection string: ${this.config.connectionString}`));
+            reject(new Error(`SQL Server Windows Auth connection failed: ${err.message || err}\nConnection string: ${this.odbcConnectionString}`));
             return;
           }
 
@@ -180,7 +202,7 @@ class SqlServerDriver extends BaseDriver {
       // Use tedious for SQL Server authentication (promise-based API)
       ssnsLog('[sqlserver] Connecting with tedious (SQL auth)');
       try {
-        this.pool = await sql.connect(this.config);
+        this.pool = await sql.connect(this.tediousConfig);
         this.isConnected = true;
         ssnsLog('[sqlserver] Successfully connected with tedious');
       } catch (err) {
