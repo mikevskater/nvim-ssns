@@ -27,7 +27,7 @@ function SqlServerAdapter.new(connection_config)
 end
 
 ---Execute a query against SQL Server using Node.js backend
----@param connection any The database connection object
+---@param connection ConnectionData? The connection config (optional, uses adapter's config if nil)
 ---@param query string The SQL query to execute
 ---@param opts table? Options (reserved for future use)
 ---@return table result Node.js result object { success, resultSets, metadata, error }
@@ -35,8 +35,9 @@ function SqlServerAdapter:execute(connection, query, opts)
   opts = opts or {}
   local ConnectionModule = require('ssns.connection')
 
-  -- Use adapter's connection config
-  return ConnectionModule.execute(self.connection_config, query, opts)
+  -- Use passed connection config if provided, otherwise use adapter's config
+  local conn_config = connection or self.connection_config
+  return ConnectionModule.execute(conn_config, query, opts)
 end
 
 ---Test SQL Server connection
