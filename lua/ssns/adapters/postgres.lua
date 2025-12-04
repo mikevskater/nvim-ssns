@@ -5,10 +5,10 @@ local PostgresAdapter = setmetatable({}, { __index = BaseAdapter })
 PostgresAdapter.__index = PostgresAdapter
 
 ---Create a new PostgreSQL adapter instance
----@param connection_string string
+---@param connection_config ConnectionData
 ---@return PostgresAdapter
-function PostgresAdapter.new(connection_string)
-  local self = setmetatable(BaseAdapter.new("postgres", connection_string), PostgresAdapter)
+function PostgresAdapter.new(connection_config)
+  local self = setmetatable(BaseAdapter.new("postgres", connection_config), PostgresAdapter)
 
   -- PostgreSQL feature flags
   self.features = {
@@ -27,7 +27,7 @@ function PostgresAdapter.new(connection_string)
 end
 
 ---Execute a query against PostgreSQL using Node.js backend
----@param connection any The database connection object or connection string
+---@param connection any The database connection object
 ---@param query string The SQL query to execute
 ---@param opts table? Options (reserved for future use)
 ---@return table result Node.js result object { success, resultSets, metadata, error }
@@ -35,60 +35,8 @@ function PostgresAdapter:execute(connection, query, opts)
   opts = opts or {}
   local ConnectionModule = require('ssns.connection')
 
-  -- Handle both connection object and connection string
-  local conn_str
-  if type(connection) == "string" then
-    conn_str = connection
-  elseif type(connection) == "table" and connection.connection_string then
-    conn_str = connection.connection_string
-  else
-    -- Fallback to adapter's connection string
-    conn_str = self.connection_string
-  end
-
-  -- Execute via Node.js backend
-  return ConnectionModule.execute(conn_str, query, opts)
-end
-
----Parse PostgreSQL connection string
----@return table connection_info
-function PostgresAdapter:parse_connection_string()
-  -- Format: postgres://[user:password@]host[:port]/database
-  local info = {}
-
-  local pattern = "^postgres(ql)?://(.+)$"
-  local _, rest = self.connection_string:match(pattern)
-
-  if not rest then
-    return info
-  end
-
-  -- Extract user:password if present
-  local auth, host_db = rest:match("^([^@]+)@(.+)$")
-  if auth then
-    info.user, info.password = auth:match("^([^:]+):(.+)$")
-    rest = host_db
-  else
-    rest = rest
-  end
-
-  -- Extract host:port and database
-  local host_part, database = rest:match("^([^/]+)/(.+)$")
-  if host_part then
-    info.database = database
-
-    -- Check for port
-    local host, port = host_part:match("^([^:]+):(.+)$")
-    if host then
-      info.host = host
-      info.port = tonumber(port)
-    else
-      info.host = host_part
-      info.port = 5432 -- Default PostgreSQL port
-    end
-  end
-
-  return info
+  -- Use adapter's connection config
+  return ConnectionModule.execute(self.connection_config, query, opts)
 end
 
 ---Test PostgreSQL connection
@@ -97,18 +45,7 @@ end
 ---@return string? error_message
 function PostgresAdapter:test_connection(connection)
   local ConnectionModule = require('ssns.connection')
-
-  -- Handle both connection object and connection string
-  local conn_str
-  if type(connection) == "string" then
-    conn_str = connection
-  elseif type(connection) == "table" and connection.connection_string then
-    conn_str = connection.connection_string
-  else
-    conn_str = self.connection_string
-  end
-
-  return ConnectionModule.test(conn_str)
+  return ConnectionModule.test(self.connection_config)
 end
 
 -- ============================================================================
@@ -752,7 +689,14 @@ end
 ---Get a string representation for debugging
 ---@return string
 function PostgresAdapter:to_string()
-  return string.format("PostgresAdapter{connection=%s}", self.connection_string)
+  local server_info = ""
+  if self.connection_config and self.connection_config.server then
+    server_info = self.connection_config.server.host or ""
+    if self.connection_config.server.port then
+      server_info = server_info .. ":" .. self.connection_config.server.port
+    end
+  end
+  return string.format("PostgresAdapter{server=%s}", server_info)
 end
 
 return PostgresAdapter
