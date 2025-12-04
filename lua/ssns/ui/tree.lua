@@ -1705,36 +1705,24 @@ function UiTree.set_lualine_color()
   -- Get the name to use for color lookup
   local name = nil
   if is_server then
-    -- For servers, use server name from connection string
-    local ConnectionString = require('ssns.connection_string')
-    local parsed = ConnectionString.parse(obj.connection_string)
+    -- For servers, use server name from connection_config
+    local conn_config = obj.connection_config
 
-    if parsed.scheme == "sqlite" then
-      -- For SQLite, use the full file path
-      -- Note: The parser incorrectly splits Windows paths into host/instance/path
-      if parsed.host then
-        name = parsed.host
-        if parsed.instance then
-          -- Reconstruct full path from split parts
-          name = name .. "/" .. parsed.instance
-        end
-        if parsed.path then
-          name = name .. parsed.path
-        end
+    if conn_config and conn_config.type == "sqlite" then
+      -- For SQLite, use the database path (file path)
+      local server_info = conn_config.server or {}
+      if server_info.database then
         -- Normalize backslashes to forward slashes for consistency
-        name = name:gsub("\\", "/")
-      elseif parsed.path then
-        -- Just path (remove leading slash)
-        name = parsed.path:match("^/(.*)") or parsed.path
-        name = name:gsub("\\", "/")
+        name = server_info.database:gsub("\\", "/")
       else
         name = ":memory:"
       end
-    elseif parsed.host then
+    elseif conn_config and conn_config.server then
       -- Build server name: host[\instance]
-      name = parsed.host
-      if parsed.instance then
-        name = name .. "\\" .. parsed.instance
+      local server_info = conn_config.server
+      name = server_info.host
+      if server_info.instance then
+        name = name .. "\\" .. server_info.instance
       end
     end
   elseif is_database then
