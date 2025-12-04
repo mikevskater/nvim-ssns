@@ -11,73 +11,56 @@ const BaseDriver = require('./base');
  * - Column metadata
  */
 class PostgresDriver extends BaseDriver {
-  constructor(connectionString) {
-    super(connectionString);
-    this.config = this.parseConnectionString();
+  /**
+   * @param {Object} config - Connection configuration object
+   * @param {string} config.type - "postgres"
+   * @param {Object} config.server - Server details
+   * @param {string} config.server.host - Server hostname or IP
+   * @param {number} [config.server.port] - Port number (default: 5432)
+   * @param {string} [config.server.database] - Database name
+   * @param {Object} config.auth - Authentication details
+   * @param {string} [config.auth.username] - Username (default: postgres)
+   * @param {string} [config.auth.password] - Password
+   * @param {Object} [config.options] - Additional options
+   * @param {boolean} [config.options.ssl] - Use SSL
+   */
+  constructor(config) {
+    super(config);
+    this.pgConfig = this.buildPostgresConfig(config);
     this.pool = null;
   }
 
   /**
-   * Parse PostgreSQL connection string
-   * Formats:
-   *   postgres://host/database
-   *   postgres://user:pass@host/database
-   *   postgres://user:pass@host:port/database
-   *   postgresql://user:pass@host:port/database
+   * Build pg configuration from connection config
    *
-   * @returns {Object} pg configuration object
+   * @param {Object} config - Connection configuration
+   * @returns {Object} pg config object
    */
-  parseConnectionString() {
-    const connStr = this.connectionString;
+  buildPostgresConfig(config) {
+    const server = config.server || {};
+    const auth = config.auth || {};
+    const options = config.options || {};
 
-    console.error('[DEBUG] PostgreSQL connection string:', connStr);
-
-    // Remove postgres:// or postgresql:// prefix
-    const cleaned = connStr.replace(/^(postgres|postgresql):\/\//, '');
-
-    // Parse authentication (if present)
-    let auth = null;
-    let serverPart = cleaned;
-
-    if (cleaned.includes('@')) {
-      const parts = cleaned.split('@');
-      const [user, password] = parts[0].split(':');
-      auth = { user, password };
-      serverPart = parts[1];
-    }
-
-    // Parse host, port, and database
-    const [hostWithPort, database] = serverPart.split('/');
-    let host = hostWithPort;
-    let port = 5432; // Default PostgreSQL port
-
-    if (hostWithPort.includes(':')) {
-      const parts = hostWithPort.split(':');
-      host = parts[0];
-      port = parseInt(parts[1], 10);
-    }
-
-    // Build pg config
-    const config = {
-      host: host || 'localhost',
-      port: port,
-      database: database || 'postgres',
+    const pgConfig = {
+      host: server.host || 'localhost',
+      port: server.port || 5432,
+      database: server.database || 'postgres',
       max: 10,                    // Connection pool max size
       idleTimeoutMillis: 30000,   // Close idle connections after 30s
       connectionTimeoutMillis: 2000, // Connection timeout
     };
 
-    if (auth) {
-      config.user = auth.user;
-      config.password = auth.password;
-    } else {
-      // Default to postgres user
-      config.user = 'postgres';
-      config.password = '';
+    // Authentication
+    pgConfig.user = auth.username || 'postgres';
+    pgConfig.password = auth.password || '';
+
+    // SSL option
+    if (options.ssl) {
+      pgConfig.ssl = { rejectUnauthorized: false };
     }
 
-    console.error('[DEBUG] PostgreSQL config:', JSON.stringify(config, null, 2));
-    return config;
+    console.error('[DEBUG] PostgreSQL config:', JSON.stringify(pgConfig, null, 2));
+    return pgConfig;
   }
 
   /**
@@ -89,7 +72,7 @@ class PostgresDriver extends BaseDriver {
     }
 
     try {
-      this.pool = new Pool(this.config);
+      this.pool = new Pool(this.pgConfig);
 
       // Test connection
       const client = await this.pool.connect();
