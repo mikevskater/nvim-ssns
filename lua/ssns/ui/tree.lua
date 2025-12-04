@@ -177,9 +177,9 @@ function UiTree.render()
     table.insert(lines, '    my_server = "sqlserver://.\\\\SQLEXPRESS/master"')
     table.insert(lines, "  }")
   else
-    -- Render each server
+    -- Render each server (indent level 1 to match "+ Add Server" indent)
     for _, server in ipairs(servers) do
-      UiTree.render_server(server, lines, line_number, 0)
+      UiTree.render_server(server, lines, line_number, 1)
       line_number = #lines + 1
     end
   end
