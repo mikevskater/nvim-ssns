@@ -5,15 +5,15 @@ local Factory = {}
 
 ---Create a Server instance from connection configuration
 ---@param name string Display name for the server
----@param connection_string string Database connection string
+---@param connection_config ConnectionData Database connection configuration
 ---@return ServerClass server The created server instance
 ---@return string? error_message Error message if creation failed
-function Factory.create_server(name, connection_string)
+function Factory.create_server(name, connection_config)
   local ServerClass = require('ssns.classes.server')
 
   local server = ServerClass.new({
     name = name,
-    connection_string = connection_string,
+    connection_config = connection_config,
   })
 
   if server.connection_state == ServerClass.ConnectionState.ERROR then
@@ -209,27 +209,6 @@ function Factory.create_parameter(name, data_type, mode, parent, opts)
   })
 end
 
----Create a server from user configuration
----@param config_name string The configuration name (key in config.connections)
----@param connection_string string The connection string
----@return ServerClass? server The created server or nil if failed
----@return string? error_message Error message if creation failed
-function Factory.create_server_from_config(config_name, connection_string)
-  -- Validate connection string
-  if not connection_string or connection_string == "" then
-    return nil, "Connection string is empty"
-  end
-
-  -- Create server with config name as display name
-  local server, err = Factory.create_server(config_name, connection_string)
-
-  if err then
-    return nil, err
-  end
-
-  return server, nil
-end
-
 ---Clone a server configuration with a new connection
 ---Useful for creating multiple connections to the same server
 ---@param source_server ServerClass The source server to clone
@@ -240,53 +219,33 @@ function Factory.clone_server(source_server, new_name)
 
   local cloned = ServerClass.new({
     name = new_name,
-    connection_string = source_server.connection_string,
+    connection_config = vim.deepcopy(source_server.connection_config),
   })
 
   return cloned
 end
 
----Create multiple servers from configuration table
----@param connections table<string, string> Map of connection names to connection strings
----@return ServerClass[] servers Array of created server instances
----@return table<string, string> errors Map of connection names to error messages (for failed connections)
-function Factory.create_servers_from_config(connections)
-  local servers = {}
-  local errors = {}
-
-  for name, connection_string in pairs(connections) do
-    local server, err = Factory.create_server_from_config(name, connection_string)
-
-    if server then
-      table.insert(servers, server)
-    else
-      errors[name] = err or "Unknown error"
-    end
-  end
-
-  return servers, errors
-end
-
----Validate a connection string format
----@param connection_string string
+---Validate a connection config
+---@param connection_config ConnectionData
 ---@return boolean valid
 ---@return string? error_message
-function Factory.validate_connection_string(connection_string)
-  if not connection_string or connection_string == "" then
-    return false, "Connection string is empty"
+function Factory.validate_connection_config(connection_config)
+  if not connection_config then
+    return false, "Connection config is nil"
   end
 
-  -- Check if it matches a known database type pattern
-  local AdapterFactory = require('ssns.adapters.factory')
-  local db_type = AdapterFactory.get_db_type(connection_string)
-
-  if not db_type then
-    return false, "Unknown database type in connection string"
+  if not connection_config.type or connection_config.type == "" then
+    return false, "Database type is required"
   end
 
   -- Check if adapter exists for this database type
-  if not AdapterFactory.adapter_exists(db_type) then
-    return false, string.format("No adapter available for database type: %s", db_type)
+  local AdapterFactory = require('ssns.adapters.factory')
+  if not AdapterFactory.is_supported(connection_config.type) then
+    return false, string.format("No adapter available for database type: %s", connection_config.type)
+  end
+
+  if not connection_config.server or not connection_config.server.host then
+    return false, "Server host is required"
   end
 
   return true, nil
@@ -295,9 +254,22 @@ end
 ---Create a test server (for development/testing)
 ---@return ServerClass server Test server instance
 function Factory.create_test_server()
-  local test_connection = "sqlserver://localhost/vim_dadbod_test"
+  local test_config = {
+    name = "Test Server",
+    type = "sqlserver",
+    server = {
+      host = "localhost",
+      database = "vim_dadbod_test",
+    },
+    auth = {
+      type = "windows",
+    },
+    options = {},
+    favorite = false,
+    auto_connect = false,
+  }
 
-  local server = Factory.create_server("Test Server", test_connection)
+  local server = Factory.create_server("Test Server", test_config)
   return server
 end
 
