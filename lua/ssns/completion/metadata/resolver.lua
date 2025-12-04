@@ -190,19 +190,20 @@ function Resolver.get_columns(table_obj, connection)
   end
 
   -- Fallback: If get_columns() fails, try direct RPC
-  if connection and connection.connection_string then
+  if connection and connection.connection_config then
     debug_log("[RESOLVER] get_columns: Trying RPC fallback")
     local obj_name = table_obj.name or table_obj.table_name or table_obj.view_name
     local obj_schema = table_obj.schema or table_obj.schema_name
 
-    -- Try SSNSGetMetadata RPC
+    -- Try SSNSGetMetadata RPC (pass JSON-encoded config)
+    local config_json = vim.fn.json_encode(connection.connection_config)
     local rpc_success, metadata = pcall(function()
-      return vim.fn.SSNSGetMetadata(
-        connection.connection_string,
+      return vim.fn.SSNSGetMetadata({
+        config_json,
         'columns',
         obj_name,
         obj_schema
-      )
+      })
     end)
 
     if rpc_success and metadata and type(metadata) == 'table' then
@@ -230,7 +231,7 @@ function Resolver.get_columns(table_obj, connection)
       end
     end
   else
-    debug_log("[RESOLVER] get_columns: No connection or connection_string")
+    debug_log("[RESOLVER] get_columns: No connection or connection_config")
   end
 
   -- Return empty array on error (don't crash)

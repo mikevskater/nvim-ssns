@@ -587,29 +587,29 @@ function Ssns.connect(connection_name)
     return
   end
 
-  -- Get connection string from config or connections file
-  local connection_string = nil
+  -- Get connection config from config or connections file
+  local connection_config = nil
 
-  -- First check config
+  -- First check config (now stores ConnectionData objects)
   local config_connections = Config.get_connections()
-  connection_string = config_connections[connection_name]
+  connection_config = config_connections[connection_name]
 
   -- If not in config, check connections file
-  if not connection_string then
+  if not connection_config then
     local file_conn = Connections.find(connection_name)
     if file_conn then
-      connection_string = file_conn.connection_string
+      connection_config = file_conn  -- file_conn IS the ConnectionData
     end
   end
 
-  if not connection_string then
+  if not connection_config then
     vim.notify(string.format("SSNS: Connection '%s' not found", connection_name), vim.log.levels.ERROR)
     return
   end
 
   -- Create and add server
   local Factory = require('ssns.factory')
-  local server, err = Factory.create_server_from_config(connection_name, connection_string)
+  local server, err = Factory.create_server(connection_name, connection_config)
 
   if not server then
     vim.notify(string.format("SSNS: Failed to create connection '%s': %s", connection_name, err), vim.log.levels.ERROR)
@@ -907,7 +907,7 @@ function Ssns.show_usage_stats()
 
   local server = active_db.parent
   local connection = {
-    connection_string = server.connection_string,
+    connection_config = server.connection_config,
     database = active_db.name
   }
 
@@ -1018,7 +1018,8 @@ function Ssns.clear_usage_weights_current()
   end
 
   local server = active_db.parent
-  local connection_key = server.connection_string
+  local Connections = require('ssns.connections')
+  local connection_key = Connections.generate_connection_key(server.connection_config)
 
   -- Confirm with user
   local confirm = vim.fn.input(string.format("Clear weights for '%s'? (yes/no): ", server.name))

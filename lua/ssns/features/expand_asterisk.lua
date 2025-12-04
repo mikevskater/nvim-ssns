@@ -204,7 +204,7 @@ end
 ---Expand asterisk in context
 ---Main entry point for asterisk expansion
 ---@param bufnr number Buffer number
----@param connection table Connection context {server: ServerClass, database: DbClass, connection_string: string}
+---@param connection table Connection context {server: ServerClass, database: DbClass, connection_config: ConnectionData}
 ---@param cursor_pos table {row, col} Cursor position (1-indexed row, 0-indexed col)
 ---@param query_text string? Optional query text (defaults to buffer content)
 ---@return table result {success: boolean, columns: table[]?, replacement_text: string?, start_col: number?, end_col: number?, error: string?}
@@ -220,7 +220,7 @@ function ExpandAsterisk.expand_asterisk_in_context(bufnr, connection, cursor_pos
     }
   end
 
-  if not connection.connection_string then
+  if not connection.connection_config then
     return {
       success = false,
       error = "No database connection available"
@@ -497,29 +497,15 @@ end
 ---@param bufnr number Buffer number
 ---@return table? connection Connection context or nil
 local function get_buffer_connection(bufnr)
-  -- Try to get connection from buffer variable
-  local ok, conn_string = pcall(vim.api.nvim_buf_get_var, bufnr, "ssns_connection_string")
-  if ok and conn_string then
-    local database = nil
-    local ok_db, db = pcall(vim.api.nvim_buf_get_var, bufnr, "ssns_database")
-    if ok_db then
-      database = db
-    end
-
-    return {
-      connection_string = conn_string,
-      database = database,
-    }
-  end
-
   -- Fallback: Get active database from cache
   local Cache = require('ssns.cache')
   local active_db = Cache.get_active_database()
   if active_db then
     local server = active_db.parent
     return {
-      connection_string = server.connection_string,
-      database = active_db.name,
+      server = server,
+      database = active_db,
+      connection_config = server.connection_config,
     }
   end
 

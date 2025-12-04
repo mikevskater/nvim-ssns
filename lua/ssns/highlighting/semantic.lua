@@ -181,7 +181,7 @@ end
 
 ---Get connection context for a buffer
 ---@param bufnr number Buffer number
----@return table? connection Connection with {server, database, connection_string}
+---@return table? connection Connection with {server, database, connection_config}
 function SemanticHighlighter._get_connection(bufnr)
   -- Try to get from UiQuery.query_buffers
   local success, UiQuery = pcall(require, 'ssns.ui.query')
@@ -191,13 +191,13 @@ function SemanticHighlighter._get_connection(bufnr)
       return {
         server = buffer_info.server,
         database = buffer_info.database,
-        connection_string = buffer_info.server.connection_string,
+        connection_config = buffer_info.server.connection_config,
       }
     elseif buffer_info.server then
       return {
         server = buffer_info.server,
         database = nil,
-        connection_string = buffer_info.server.connection_string,
+        connection_config = buffer_info.server.connection_config,
       }
     end
   end
@@ -211,7 +211,7 @@ function SemanticHighlighter._get_connection(bufnr)
       return {
         server = server,
         database = active_db,
-        connection_string = server.connection_string,
+        connection_config = server.connection_config,
       }
     end
   end

@@ -291,7 +291,7 @@ function UiQuery.execute_query(bufnr, visual)
   local Connection = require('ssns.connection')
   local start_time = vim.loop.hrtime()
   local result, last_database = Connection.execute_with_buffer_context(
-    server.connection_string,
+    server.connection_config,
     sql,
     buffer_db
   )
@@ -360,7 +360,7 @@ function UiQuery.execute_query(bufnr, visual)
     local success, err = pcall(function()
       local UsageAnalyzer = require('ssns.completion.usage_analyzer')
       UsageAnalyzer.analyze_and_record(sql, {
-        connection_string = server.connection_string
+        connection_config = server.connection_config
       })
     end)
 
@@ -1045,7 +1045,7 @@ function UiQuery.execute_with_params(bufnr, sql, server, database_name)
   vim.notify("SSNS: Fetching procedure parameters...", vim.log.levels.INFO)
 
   local Connection = require('ssns.connection')
-  local params_result = Connection.execute(server.connection_string, params_query)
+  local params_result = Connection.execute(server.connection_config, params_query)
 
   if not params_result.success then
     vim.notify("SSNS: Failed to fetch parameters: " .. (params_result.error and params_result.error.message or "Unknown error"),

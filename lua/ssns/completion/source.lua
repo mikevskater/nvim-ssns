@@ -156,7 +156,7 @@ local function record_item_selection(ctx, item)
   -- Get connection from context
   local connection = ctx.connection or ctx.provider_ctx.connection
 
-  if not connection or not connection.connection_string then
+  if not connection or not connection.connection_config then
     return  -- No connection available
   end
 
@@ -603,7 +603,7 @@ function Source:get_connection(bufnr)
   return {
     server = server,
     database = database,
-    connection_string = server.connection_string,
+    connection_config = server.connection_config,
   }
 end
 
