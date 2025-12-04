@@ -214,6 +214,24 @@ function UiQuery.setup_query_keymaps(bufnr)
       local UiHistory = require('ssns.ui.history')
       UiHistory.show_history()
     end, desc = "Show query history" },
+
+    -- Go to object under cursor in tree
+    { mode = "n", lhs = km.go_to or "gd", rhs = function()
+      local GoTo = require('ssns.features.go_to')
+      GoTo.go_to_object_at_cursor()
+    end, desc = "Go to object in tree" },
+
+    -- View object definition
+    { mode = "n", lhs = km.view_definition or "K", rhs = function()
+      local ViewDefinition = require('ssns.features.view_definition')
+      ViewDefinition.view_definition_at_cursor()
+    end, desc = "View object definition" },
+
+    -- View object metadata
+    { mode = "n", lhs = km.view_metadata or "M", rhs = function()
+      local ViewMetadata = require('ssns.features.view_metadata')
+      ViewMetadata.view_metadata_at_cursor()
+    end, desc = "View object metadata" },
   }
 
   KeymapManager.set_multiple(bufnr, keymaps, true)

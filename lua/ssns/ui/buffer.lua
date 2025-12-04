@@ -492,6 +492,18 @@ function UiBuffer.setup_keymaps()
       rhs = "<Cmd>lua require('ssns.ui.tree').show_history_from_context()<CR>",
       desc = "Show query history for server",
     },
+    -- View definition (ALTER script)
+    {
+      lhs = km.view_definition or "K",
+      rhs = "<Cmd>lua require('ssns.ui.tree').view_definition()<CR>",
+      desc = "View object definition",
+    },
+    -- View metadata
+    {
+      lhs = km.view_metadata or "M",
+      rhs = "<Cmd>lua require('ssns.ui.tree').view_metadata()<CR>",
+      desc = "View object metadata",
+    },
   }
 
   -- Add escape key for float mode only

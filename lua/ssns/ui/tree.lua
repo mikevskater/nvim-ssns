@@ -2088,4 +2088,134 @@ function UiTree.show_history_from_context()
   end
 end
 
+---View definition (ALTER script) for the object under cursor
+function UiTree.view_definition()
+  local Buffer = require('ssns.ui.buffer')
+  local Query = require('ssns.ui.query')
+
+  local line_number = Buffer.get_current_line()
+  local obj = UiTree.line_map[line_number]
+
+  if not obj then
+    vim.notify("SSNS: No object under cursor", vim.log.levels.WARN)
+    return
+  end
+
+  -- Skip non-definable objects (servers, databases, groups, actions)
+  local skip_types = {
+    server = true,
+    database = true,
+    schema = true,
+    action = true,
+    column_group = true,
+    index_group = true,
+    key_group = true,
+    actions_group = true,
+    tables_group = true,
+    views_group = true,
+    procedures_group = true,
+    functions_group = true,
+    synonyms_group = true,
+  }
+
+  if skip_types[obj.object_type] then
+    vim.notify("SSNS: Cannot view definition for " .. obj.object_type, vim.log.levels.WARN)
+    return
+  end
+
+  -- Get definition
+  if obj.get_definition then
+    local definition = obj:get_definition()
+    if definition then
+      local server = obj:get_server()
+      local database = obj:get_database()
+      Query.create_query_buffer(server, database, definition, obj.name)
+    else
+      vim.notify("SSNS: No definition available for " .. (obj.name or "object"), vim.log.levels.WARN)
+    end
+  else
+    vim.notify("SSNS: Object does not support viewing definition", vim.log.levels.WARN)
+  end
+end
+
+---View metadata for the object under cursor
+function UiTree.view_metadata()
+  local Buffer = require('ssns.ui.buffer')
+  local Float = require('ssns.ui.float')
+
+  local line_number = Buffer.get_current_line()
+  local obj = UiTree.line_map[line_number]
+
+  if not obj then
+    vim.notify("SSNS: No object under cursor", vim.log.levels.WARN)
+    return
+  end
+
+  -- Skip non-metadata objects
+  local skip_types = {
+    action = true,
+    column_group = true,
+    index_group = true,
+    key_group = true,
+    actions_group = true,
+  }
+
+  if skip_types[obj.object_type] then
+    vim.notify("SSNS: Cannot view metadata for " .. obj.object_type, vim.log.levels.WARN)
+    return
+  end
+
+  -- Build metadata display
+  local lines = {}
+  table.insert(lines, "=== " .. (obj.name or "Object") .. " ===")
+  table.insert(lines, "")
+  table.insert(lines, "Type: " .. (obj.object_type or "unknown"))
+
+  -- Add type-specific metadata
+  if obj.object_type == "server" then
+    local conn = obj.connection_config
+    if conn then
+      table.insert(lines, "DB Type: " .. (conn.type or "unknown"))
+      if conn.server then
+        table.insert(lines, "Host: " .. (conn.server.host or "unknown"))
+        if conn.server.instance then
+          table.insert(lines, "Instance: " .. conn.server.instance)
+        end
+        if conn.server.port then
+          table.insert(lines, "Port: " .. conn.server.port)
+        end
+      end
+    end
+  elseif obj.object_type == "database" then
+    table.insert(lines, "Database: " .. (obj.db_name or obj.name))
+  elseif obj.object_type == "schema" then
+    table.insert(lines, "Schema: " .. (obj.schema_name or obj.name))
+  elseif obj.object_type == "table" or obj.object_type == "view" then
+    table.insert(lines, "Schema: " .. (obj.schema_name or "unknown"))
+    if obj.columns_loaded and obj.columns then
+      table.insert(lines, "Columns: " .. #obj.columns)
+    end
+  elseif obj.object_type == "procedure" or obj.object_type == "function" then
+    table.insert(lines, "Schema: " .. (obj.schema_name or "unknown"))
+    if obj.parameters_loaded and obj.parameters then
+      table.insert(lines, "Parameters: " .. #obj.parameters)
+    end
+  elseif obj.object_type == "column" then
+    table.insert(lines, "Data Type: " .. (obj.data_type or "unknown"))
+    if obj.is_nullable ~= nil then
+      table.insert(lines, "Nullable: " .. (obj.is_nullable and "Yes" or "No"))
+    end
+    if obj.is_primary_key then
+      table.insert(lines, "Primary Key: Yes")
+    end
+  end
+
+  -- Show in float window
+  Float.create(lines, {
+    title = "Metadata: " .. (obj.name or "Object"),
+    width = 50,
+    height = #lines + 2,
+  })
+end
+
 return UiTree

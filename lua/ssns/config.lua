@@ -417,6 +417,8 @@ local default_config = {
       add_server = "a",      -- Open add server UI
       toggle_favorite = "*", -- Toggle favorite
       show_history = "<Leader>@", -- Show query history
+      view_definition = "K", -- View object definition (ALTER script)
+      view_metadata = "M",   -- View object metadata
     },
 
     -- Query buffer keymaps
