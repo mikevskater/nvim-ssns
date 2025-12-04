@@ -554,7 +554,7 @@ end
 
 ---Get active database connection for current buffer
 ---@param bufnr number Buffer number
----@return table? connection { server: ServerClass, database: DbClass, connection_string: string }
+---@return table? connection { server: ServerClass, database: DbClass, connection_config: table }
 function Source:get_connection(bufnr)
   local Cache = require('ssns.cache')
 

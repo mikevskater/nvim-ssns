@@ -18,7 +18,7 @@ end
 ---Handles aliases, schema-qualified names, and synonym chains
 ---Enhanced to check buffer cache for temp tables first
 ---@param reference string Table reference (could be alias, table name, temp table, or synonym)
----@param connection table Connection context { server: ServerClass, database: DbClass, connection_string: string }
+---@param connection table Connection context { server: ServerClass, database: DbClass, connection_config: table }
 ---@param context table Pre-built context with aliases
 ---@return table? table_obj Resolved TableClass/ViewClass/TempTableClass or nil if not found
 function Resolver.resolve_table(reference, connection, context)
@@ -571,7 +571,7 @@ end
 ---Pre-resolve all aliases and tables in scope to actual database objects
 ---Avoids repeated tree walks in providers by caching resolved objects
 ---@param sql_context table The context from statement_context
----@param connection table Connection info {server, database, connection_string}
+---@param connection table Connection info {server, database, connection_config}
 ---@return table resolved_scope {resolved_aliases = {}, resolved_tables = {}}
 function Resolver.pre_resolve_scope(sql_context, connection)
   local resolved_scope = {

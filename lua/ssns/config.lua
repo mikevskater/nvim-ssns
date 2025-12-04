@@ -614,9 +614,9 @@ end
 
 ---Add a connection
 ---@param name string Connection name
----@param connection_string string Connection string
-function Config.add_connection(name, connection_string)
-  Config.current.connections[name] = connection_string
+---@param connection_config ConnectionData Connection configuration
+function Config.add_connection(name, connection_config)
+  Config.current.connections[name] = connection_config
 end
 
 ---Remove a connection

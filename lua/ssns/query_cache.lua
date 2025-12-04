@@ -9,16 +9,16 @@ QueryCache.cache = {}
 ---Default TTL in seconds (5 minutes)
 QueryCache.default_ttl = 300
 
----Generate a cache key from connection string and query
----@param connection_string string
+---Generate a cache key from connection key and query
+---@param connection_key string Connection key (from Connections.generate_connection_key)
 ---@param query string
 ---@return string key
-local function generate_key(connection_string, query)
+local function generate_key(connection_key, query)
   -- Normalize query (trim whitespace, convert to lowercase for case-insensitive matching)
   local normalized_query = vim.trim(query):lower()
 
   -- Create a simple hash-like key
-  return connection_string .. ":" .. normalized_query
+  return connection_key .. ":" .. normalized_query
 end
 
 ---Check if a cached result is still valid (not expired)
@@ -34,12 +34,12 @@ local function is_valid(cached_entry, ttl)
 end
 
 ---Get a cached query result if it exists and is still valid
----@param connection_string string
+---@param connection_key string Connection key
 ---@param query string
 ---@param ttl number? TTL in seconds (default: QueryCache.default_ttl)
 ---@return table? result The cached result or nil if not found/expired
-function QueryCache.get(connection_string, query, ttl)
-  local key = generate_key(connection_string, query)
+function QueryCache.get(connection_key, query, ttl)
+  local key = generate_key(connection_key, query)
   local cached = QueryCache.cache[key]
 
   if not cached then
@@ -56,11 +56,11 @@ function QueryCache.get(connection_string, query, ttl)
 end
 
 ---Store a query result in the cache
----@param connection_string string
+---@param connection_key string Connection key
 ---@param query string
 ---@param result table The query result to cache
-function QueryCache.set(connection_string, query, result)
-  local key = generate_key(connection_string, query)
+function QueryCache.set(connection_key, query, result)
+  local key = generate_key(connection_key, query)
 
   QueryCache.cache[key] = {
     result = result,
@@ -69,22 +69,22 @@ function QueryCache.set(connection_string, query, result)
 end
 
 ---Invalidate (remove) a specific cached query
----@param connection_string string
+---@param connection_key string Connection key
 ---@param query string
 ---@return boolean removed True if entry was removed
-function QueryCache.invalidate(connection_string, query)
-  local key = generate_key(connection_string, query)
+function QueryCache.invalidate(connection_key, query)
+  local key = generate_key(connection_key, query)
   local existed = QueryCache.cache[key] ~= nil
   QueryCache.cache[key] = nil
   return existed
 end
 
 ---Invalidate all cached results for a specific connection
----@param connection_string string
+---@param connection_key string Connection key
 ---@return number count Number of entries removed
-function QueryCache.invalidate_connection(connection_string)
+function QueryCache.invalidate_connection(connection_key)
   local count = 0
-  local prefix = connection_string .. ":"
+  local prefix = connection_key .. ":"
 
   for key, _ in pairs(QueryCache.cache) do
     if key:sub(1, #prefix) == prefix then

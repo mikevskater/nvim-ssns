@@ -364,24 +364,34 @@ end
 ---@param connection ConnectionData
 ---@return string key
 function Connections.generate_connection_key(connection)
-  local parts = { connection.type }
-
-  -- Add server info
-  table.insert(parts, connection.server.host)
-  if connection.server.instance then
-    table.insert(parts, connection.server.instance)
-  end
-  if connection.server.port then
-    table.insert(parts, tostring(connection.server.port))
-  end
-  if connection.server.database then
-    table.insert(parts, connection.server.database)
+  if not connection then
+    return "unknown"
   end
 
-  -- Add auth type
-  table.insert(parts, connection.auth.type)
-  if connection.auth.username then
-    table.insert(parts, connection.auth.username)
+  local parts = { connection.type or "unknown" }
+
+  -- Add server info (if available)
+  local server = connection.server or {}
+  if server.host then
+    table.insert(parts, server.host)
+  end
+  if server.instance then
+    table.insert(parts, server.instance)
+  end
+  if server.port then
+    table.insert(parts, tostring(server.port))
+  end
+  if server.database then
+    table.insert(parts, server.database)
+  end
+
+  -- Add auth type (if available)
+  local auth = connection.auth or {}
+  if auth.type then
+    table.insert(parts, auth.type)
+  end
+  if auth.username then
+    table.insert(parts, auth.username)
   end
 
   return table.concat(parts, ":")
@@ -394,6 +404,10 @@ end
 function Connections.with_database(connection, new_database)
   -- Deep copy the connection
   local modified = vim.deepcopy(connection)
+  -- Ensure server table exists
+  if not modified.server then
+    modified.server = {}
+  end
   modified.server.database = new_database
   return modified
 end
