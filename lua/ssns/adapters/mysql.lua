@@ -5,10 +5,10 @@ local MySQLAdapter = setmetatable({}, { __index = BaseAdapter })
 MySQLAdapter.__index = MySQLAdapter
 
 ---Create a new MySQL adapter instance
----@param connection_string string
+---@param connection_config ConnectionData
 ---@return MySQLAdapter
-function MySQLAdapter.new(connection_string)
-  local self = setmetatable(BaseAdapter.new("mysql", connection_string), MySQLAdapter)
+function MySQLAdapter.new(connection_config)
+  local self = setmetatable(BaseAdapter.new("mysql", connection_config), MySQLAdapter)
 
   -- MySQL feature flags
   self.features = {
@@ -27,7 +27,7 @@ function MySQLAdapter.new(connection_string)
 end
 
 ---Execute a query against MySQL using Node.js backend
----@param connection any The database connection object or connection string
+---@param connection any The database connection object
 ---@param query string The SQL query to execute
 ---@param opts table? Options (reserved for future use)
 ---@return table result Node.js result object { success, resultSets, metadata, error }
@@ -35,60 +35,8 @@ function MySQLAdapter:execute(connection, query, opts)
   opts = opts or {}
   local ConnectionModule = require('ssns.connection')
 
-  -- Handle both connection object and connection string
-  local conn_str
-  if type(connection) == "string" then
-    conn_str = connection
-  elseif type(connection) == "table" and connection.connection_string then
-    conn_str = connection.connection_string
-  else
-    -- Fallback to adapter's connection string
-    conn_str = self.connection_string
-  end
-
-  -- Execute via Node.js backend
-  return ConnectionModule.execute(conn_str, query, opts)
-end
-
----Parse MySQL connection string
----@return table connection_info
-function MySQLAdapter:parse_connection_string()
-  -- Format: mysql://[user:password@]host[:port]/database
-  local info = {}
-
-  local pattern = "^mysql://(.+)$"
-  local rest = self.connection_string:match(pattern)
-
-  if not rest then
-    return info
-  end
-
-  -- Extract user:password if present
-  local auth, host_db = rest:match("^([^@]+)@(.+)$")
-  if auth then
-    info.user, info.password = auth:match("^([^:]+):(.+)$")
-    rest = host_db
-  else
-    rest = rest
-  end
-
-  -- Extract host:port and database
-  local host_part, database = rest:match("^([^/]+)/(.+)$")
-  if host_part then
-    info.database = database
-
-    -- Check for port
-    local host, port = host_part:match("^([^:]+):(.+)$")
-    if host then
-      info.host = host
-      info.port = tonumber(port)
-    else
-      info.host = host_part
-      info.port = 3306 -- Default MySQL port
-    end
-  end
-
-  return info
+  -- Use adapter's connection config
+  return ConnectionModule.execute(self.connection_config, query, opts)
 end
 
 ---Test MySQL connection
@@ -97,18 +45,7 @@ end
 ---@return string? error_message
 function MySQLAdapter:test_connection(connection)
   local ConnectionModule = require('ssns.connection')
-
-  -- Handle both connection object and connection string
-  local conn_str
-  if type(connection) == "string" then
-    conn_str = connection
-  elseif type(connection) == "table" and connection.connection_string then
-    conn_str = connection.connection_string
-  else
-    conn_str = self.connection_string
-  end
-
-  return ConnectionModule.test(conn_str)
+  return ConnectionModule.test(self.connection_config)
 end
 
 -- ============================================================================
@@ -628,7 +565,14 @@ end
 ---Get a string representation for debugging
 ---@return string
 function MySQLAdapter:to_string()
-  return string.format("MySQLAdapter{connection=%s}", self.connection_string)
+  local server_info = ""
+  if self.connection_config and self.connection_config.server then
+    server_info = self.connection_config.server.host or ""
+    if self.connection_config.server.port then
+      server_info = server_info .. ":" .. self.connection_config.server.port
+    end
+  end
+  return string.format("MySQLAdapter{server=%s}", server_info)
 end
 
 return MySQLAdapter
