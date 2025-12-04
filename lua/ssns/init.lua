@@ -404,40 +404,42 @@ function Ssns._register_commands()
     desc = "View metadata of object under cursor in floating window",
   })
 
-  -- :SSNSStatementChunks - View parsed statement chunks for debugging
-  vim.api.nvim_create_user_command("SSNSStatementChunks", function()
+  -- Debug Commands (all prefixed with SSNSDebug for discoverability)
+
+  -- :SSNSDebugStatementChunks - View parsed statement chunks
+  vim.api.nvim_create_user_command("SSNSDebugStatementChunks", function()
     local StatementChunksViewer = require('ssns.features.statement_chunks')
     StatementChunksViewer.view_statement_chunks()
   end, {
     nargs = 0,
-    desc = "View parsed statement chunks in floating window (debugging)",
+    desc = "View parsed statement chunks in floating window",
   })
 
-  -- :SSNSTokens - View tokenizer output for debugging
-  vim.api.nvim_create_user_command("SSNSTokens", function()
+  -- :SSNSDebugTokens - View tokenizer output
+  vim.api.nvim_create_user_command("SSNSDebugTokens", function()
     local ViewTokens = require('ssns.features.view_tokens')
     ViewTokens.view_tokens()
   end, {
     nargs = 0,
-    desc = "View tokenizer output in floating window (debugging)",
+    desc = "View tokenizer output in floating window",
   })
 
-  -- :SSNSContext - View statement context at cursor for debugging IntelliSense
-  vim.api.nvim_create_user_command("SSNSContext", function()
+  -- :SSNSDebugContext - View statement context at cursor
+  vim.api.nvim_create_user_command("SSNSDebugContext", function()
     local ViewContext = require('ssns.features.view_context')
     ViewContext.view_context()
   end, {
     nargs = 0,
-    desc = "View statement context at cursor in floating window (debugging)",
+    desc = "View statement context at cursor in floating window",
   })
 
-  -- :SSNSStatementCache - View statement cache for current buffer
-  vim.api.nvim_create_user_command("SSNSStatementCache", function()
+  -- :SSNSDebugStatementCache - View statement cache for current buffer
+  vim.api.nvim_create_user_command("SSNSDebugStatementCache", function()
     local ViewStatementCache = require('ssns.features.view_statement_cache')
     ViewStatementCache.view_cache()
   end, {
     nargs = 0,
-    desc = "View statement cache in floating window (debugging)",
+    desc = "View statement cache in floating window",
   })
 
   -- :SSNSDebugLog - View debug log in floating window
@@ -449,31 +451,31 @@ function Ssns._register_commands()
     desc = "View debug log in floating window (optional filter argument)",
   })
 
-  -- :SSNSQueryCache - View query result cache
-  vim.api.nvim_create_user_command("SSNSQueryCache", function()
+  -- :SSNSDebugQueryCache - View query result cache
+  vim.api.nvim_create_user_command("SSNSDebugQueryCache", function()
     local ViewQueryCache = require('ssns.features.view_query_cache')
     ViewQueryCache.view_cache()
   end, {
     nargs = 0,
-    desc = "View query cache in floating window (debugging)",
+    desc = "View query cache in floating window",
   })
 
-  -- :SSNSUsageWeights - View usage-based ranking weights
-  vim.api.nvim_create_user_command("SSNSUsageWeights", function()
+  -- :SSNSDebugUsageWeights - View usage-based ranking weights
+  vim.api.nvim_create_user_command("SSNSDebugUsageWeights", function()
     local ViewUsageWeights = require('ssns.features.view_usage_weights')
     ViewUsageWeights.view_weights()
   end, {
     nargs = 0,
-    desc = "View usage-based ranking weights in floating window (debugging)",
+    desc = "View usage-based ranking weights in floating window",
   })
 
-  -- :SSNSCompletionMetadata - View completion metadata resolution
-  vim.api.nvim_create_user_command("SSNSCompletionMetadata", function()
+  -- :SSNSDebugCompletionMetadata - View completion metadata resolution
+  vim.api.nvim_create_user_command("SSNSDebugCompletionMetadata", function()
     local ViewCompletionMetadata = require('ssns.features.view_completion_metadata')
     ViewCompletionMetadata.view_metadata()
   end, {
     nargs = 0,
-    desc = "View completion metadata resolution in floating window (debugging)",
+    desc = "View completion metadata resolution in floating window",
   })
 
   -- :SSNSAddServer - Open add server UI
