@@ -71,6 +71,9 @@
 ---@field is_global boolean Whether it's a global temp table (##)
 ---@field dropped_at_line number? Line number where dropped (nil if not dropped)
 
+-- Load type annotations (for LuaLS type checking)
+require('ssns.completion.parser.types')
+
 local StatementParser = {}
 
 --- Resolve parent_table for columns using the aliases map
