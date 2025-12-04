@@ -1,5 +1,6 @@
 const initSqlJs = require('sql.js');
 const fs = require('fs');
+const path = require('path');
 const BaseDriver = require('./base');
 
 /**
@@ -12,46 +13,48 @@ const BaseDriver = require('./base');
  * - Structured errors
  */
 class SQLiteDriver extends BaseDriver {
-  constructor(connectionString) {
-    super(connectionString);
-    this.dbPath = this.parseConnectionString();
+  /**
+   * @param {Object} config - Connection configuration object
+   * @param {string} config.type - "sqlite"
+   * @param {Object} config.server - Server details (for SQLite, contains file path)
+   * @param {string} [config.server.database] - Path to SQLite database file (or :memory:)
+   * @param {string} [config.server.host] - Alternative: file path in host field
+   */
+  constructor(config) {
+    super(config);
+    this.dbPath = this.getSqliteFilePath(config);
     this.db = null;
     this.SQL = null;
   }
 
   /**
-   * Parse SQLite connection string
-   * Formats:
-   *   sqlite://./path/to/database.db
-   *   sqlite:///absolute/path/to/database.db
-   *   sqlite://C:/path/to/database.db (Windows)
+   * Extract SQLite file path from config
    *
+   * @param {Object} config - Connection configuration
    * @returns {string} File path to database
    */
-  parseConnectionString() {
-    const connStr = this.connectionString;
+  getSqliteFilePath(config) {
+    const server = config.server || {};
 
-    console.error('[DEBUG] SQLite connection string:', connStr);
+    // Try database field first, then host (for flexibility)
+    let dbPath = server.database || server.host || ':memory:';
 
-    // Remove sqlite:// prefix
-    let path = connStr.replace(/^sqlite:\/\//, '');
+    console.error('[DEBUG] SQLite database path:', dbPath);
 
-    // Handle different path formats
-    if (path.startsWith('/') && path[2] === ':') {
-      // Windows absolute path: /C:/path/to/db.db -> C:/path/to/db.db
-      path = path.substring(1);
-    } else if (path.startsWith('//')) {
-      // Unix absolute path: //path/to/db.db -> /path/to/db.db
-      path = path.substring(1);
+    // Handle Windows paths
+    if (process.platform === 'win32' && dbPath.startsWith('/')) {
+      // Convert /C:/path to C:/path
+      if (dbPath.length > 2 && dbPath[2] === ':') {
+        dbPath = dbPath.substring(1);
+      }
     }
 
-    // Default to in-memory if no path
-    if (!path || path === ':memory:') {
-      path = ':memory:';
+    // Default to in-memory if empty
+    if (!dbPath || dbPath === '') {
+      dbPath = ':memory:';
     }
 
-    console.error('[DEBUG] SQLite database path:', path);
-    return path;
+    return dbPath;
   }
 
   /**
@@ -236,19 +239,23 @@ class SQLiteDriver extends BaseDriver {
       if (objectType === 'table' || objectType === 'view') {
         // Query SQLite system tables for column metadata
         const query = `PRAGMA table_info(${objectName})`;
-        const stmt = this.db.prepare(query);
-        const rows = stmt.all();
+        const results = this.db.exec(query);
 
-        return {
-          columns: rows.map(row => ({
-            name: row.name,
-            type: row.type,
-            nullable: row.notnull === 0,
-            defaultValue: row.dflt_value,
-            isPrimaryKey: row.pk === 1,
-            isForeignKey: false, // Need separate query for FK info
-          }))
-        };
+        if (results.length === 0 || results[0].values.length === 0) {
+          return { columns: [] };
+        }
+
+        // PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
+        const columns = results[0].values.map(row => ({
+          name: row[1],
+          type: row[2],
+          nullable: row[3] === 0,
+          defaultValue: row[4],
+          isPrimaryKey: row[5] === 1,
+          isForeignKey: false, // Need separate query for FK info
+        }));
+
+        return { columns };
       }
 
       return { columns: [] };
