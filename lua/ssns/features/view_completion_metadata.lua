@@ -28,7 +28,35 @@ end
 local function get_connection()
   local Cache = require('ssns.cache')
   local bufnr = vim.api.nvim_get_current_buf()
-  return Cache.get_buffer_connection(bufnr)
+
+  -- Try to get buffer-local database connection
+  local db_key = vim.b[bufnr].ssns_db_key
+  if not db_key then
+    return nil
+  end
+
+  -- Parse db_key format: "server_name:database_name"
+  local server_name, db_name = db_key:match("^([^:]+):(.+)$")
+  if not server_name or not db_name then
+    return nil
+  end
+
+  -- Find server and database in cache
+  local server = Cache.find_server(server_name)
+  if not server then
+    return nil
+  end
+
+  local database = server:find_database(db_name)
+  if not database then
+    return nil
+  end
+
+  return {
+    server = server,
+    database = database,
+    connection_config = server.connection_config,
+  }
 end
 
 ---Get columns from a resolved table
