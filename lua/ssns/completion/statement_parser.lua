@@ -386,6 +386,12 @@ local function parse_statement_dispatch(state, scope, temp_tables)
     if state:is_keyword("FROM") and chunk.delete_target then
       DeleteStatement.parse_from(state, chunk, scope)
     end
+    -- Parse WHERE clause for DELETE
+    if state:is_keyword("WHERE") then
+      parse_where_clause(state, chunk)
+    end
+    -- Finalize chunk
+    BaseStatement.finalize_chunk(chunk, scope)
     return chunk
   elseif keyword == "MERGE" then
     return MergeStatement.parse(state, scope, temp_tables)
@@ -410,7 +416,7 @@ local function parse_statement_dispatch(state, scope, temp_tables)
   end
 end
 
----Parse remaining clauses after UPDATE (SET, FROM for extended syntax)
+---Parse remaining clauses after UPDATE (SET, FROM for extended syntax, WHERE)
 ---@param state ParserState
 ---@param chunk StatementChunk
 ---@param scope ScopeContext
@@ -453,11 +459,71 @@ function parse_statement_remaining(state, chunk, scope, statement_type)
     UpdateStatement.parse_from(state, chunk, scope)
   end
 
+  -- Parse WHERE clause
+  if state:is_keyword("WHERE") then
+    parse_where_clause(state, chunk)
+  end
+
   -- Finalize UPDATE chunk
   UpdateStatement.finalize(chunk)
 
   -- Finalize chunk
   BaseStatement.finalize_chunk(chunk, scope)
+end
+
+---Parse WHERE clause and track its position (shared by UPDATE/DELETE)
+---@param state ParserState
+---@param chunk StatementChunk
+function parse_where_clause(state, chunk)
+  local where_token = state:current()
+  state:advance()  -- consume WHERE
+
+  local paren_depth = 0
+  local last_token = where_token
+
+  -- Parse until we hit ORDER BY, statement end, or next statement
+  while state:current() do
+    local token = state:current()
+
+    if token.type == "paren_open" then
+      paren_depth = paren_depth + 1
+      last_token = token
+      state:advance()
+    elseif token.type == "paren_close" then
+      paren_depth = paren_depth - 1
+      if paren_depth < 0 then
+        break
+      end
+      last_token = token
+      state:advance()
+    elseif token.type == "go" or (token.type == "identifier" and token.text:upper() == "GO") then
+      break
+    elseif token.type == "semicolon" then
+      break
+    elseif paren_depth == 0 and token.type == "keyword" then
+      local upper_text = token.text:upper()
+      if upper_text == "ORDER" or upper_text == "OPTION"
+         or upper_text == "FOR" then
+        break
+      elseif is_statement_starter(upper_text) and upper_text ~= "WITH" then
+        break
+      else
+        last_token = token
+        state:advance()
+      end
+    else
+      last_token = token
+      state:advance()
+    end
+  end
+
+  -- Track WHERE clause position
+  chunk.clause_positions["where"] = {
+    start_line = where_token.line,
+    start_col = where_token.col,
+    end_line = last_token.line,
+    end_col = last_token.col + #last_token.text - 1,
+  }
 end
 
 ---Parse EXEC/EXECUTE statement

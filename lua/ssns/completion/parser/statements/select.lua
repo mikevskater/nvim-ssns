@@ -9,6 +9,7 @@ local SelectListParser = require('ssns.completion.parser.clauses.select_list')
 local FromClauseParser = require('ssns.completion.parser.clauses.from_clause')
 local Helpers = require('ssns.completion.parser.utils.helpers')
 local QualifiedName = require('ssns.completion.parser.utils.qualified_name')
+local Keywords = require('ssns.completion.parser.utils.keywords')
 
 local SelectStatement = {}
 
@@ -42,6 +43,9 @@ function SelectStatement.parse(state, scope, temp_tables)
   if state:is_keyword("FROM") then
     SelectStatement._parse_from(state, chunk, scope)
   end
+
+  -- Parse remaining clauses (WHERE, GROUP BY, HAVING, ORDER BY)
+  SelectStatement._parse_remaining_clauses(state, chunk)
 
   -- Finalize: build aliases, resolve column parents, copy subqueries
   BaseStatement.finalize_chunk(chunk, scope)
@@ -100,6 +104,377 @@ function SelectStatement._parse_from(state, chunk, scope)
   local from_token = state:current()
   local result = FromClauseParser.parse(state, scope, from_token)
   BaseStatement.process_from_result(chunk, scope, result)
+end
+
+---Parse remaining clauses after FROM (WHERE, GROUP BY, HAVING, ORDER BY)
+---@param state ParserState
+---@param chunk StatementChunk
+function SelectStatement._parse_remaining_clauses(state, chunk)
+  local paren_depth = 0
+  local last_valid_token = nil
+
+  while state:current() do
+    local token = state:current()
+
+    -- Check for statement terminators BEFORE updating last_valid_token
+    if token.type == "go" or (token.type == "identifier" and token.text:upper() == "GO") then
+      -- GO batch separator - stop parsing
+      break
+    elseif paren_depth == 0 and Keywords.is_statement_starter(token.text) then
+      -- New statement starting (but not WITH which could be a table hint in some contexts)
+      if token.text:upper() ~= "WITH" then
+        break
+      end
+    elseif paren_depth == 0 and (token.text:upper() == "UNION" or token.text:upper() == "INTERSECT" or token.text:upper() == "EXCEPT") then
+      -- Set operations - stop parsing this SELECT
+      break
+    end
+
+    -- Update last_valid_token only for tokens that belong to this statement
+    last_valid_token = token
+
+    -- Track parenthesis depth for subqueries/expressions
+    if token.type == "paren_open" then
+      paren_depth = paren_depth + 1
+      state:advance()
+    elseif token.type == "paren_close" then
+      paren_depth = paren_depth - 1
+      if paren_depth < 0 then
+        break
+      end
+      state:advance()
+    elseif paren_depth == 0 and token.type == "keyword" then
+      local upper_text = token.text:upper()
+
+      if upper_text == "WHERE" then
+        SelectStatement._parse_where_clause(state, chunk)
+      elseif upper_text == "GROUP" then
+        SelectStatement._parse_group_by_clause(state, chunk)
+      elseif upper_text == "HAVING" then
+        SelectStatement._parse_having_clause(state, chunk)
+      elseif upper_text == "ORDER" then
+        SelectStatement._parse_order_by_clause(state, chunk)
+      elseif upper_text == "LIMIT" or upper_text == "OFFSET" or upper_text == "FETCH" then
+        -- LIMIT/OFFSET/FETCH - track as part of ORDER BY or separate
+        SelectStatement._parse_limit_offset_clause(state, chunk, upper_text)
+      elseif upper_text == "FOR" or upper_text == "OPTION" then
+        -- FOR XML/JSON or OPTION hints - skip but don't break
+        state:advance()
+      else
+        state:advance()
+      end
+    else
+      state:advance()
+    end
+  end
+
+  -- Update chunk end position based on last processed token or clause positions
+  if last_valid_token then
+    chunk.end_line = last_valid_token.line
+    chunk.end_col = last_valid_token.col + #last_valid_token.text - 1
+  end
+  -- Also check clause positions for the furthest end position
+  for _, pos in pairs(chunk.clause_positions or {}) do
+    if pos.end_line > chunk.end_line or (pos.end_line == chunk.end_line and pos.end_col > chunk.end_col) then
+      chunk.end_line = pos.end_line
+      chunk.end_col = pos.end_col
+    end
+  end
+end
+
+---Parse WHERE clause and track its position
+---@param state ParserState
+---@param chunk StatementChunk
+function SelectStatement._parse_where_clause(state, chunk)
+  local where_token = state:current()
+  state:advance()  -- consume WHERE
+
+  local paren_depth = 0
+  local last_token = where_token
+
+  -- Parse until we hit GROUP BY, HAVING, ORDER BY, or statement end
+  while state:current() do
+    local token = state:current()
+
+    if token.type == "paren_open" then
+      paren_depth = paren_depth + 1
+      last_token = token
+      state:advance()
+    elseif token.type == "paren_close" then
+      paren_depth = paren_depth - 1
+      if paren_depth < 0 then
+        break
+      end
+      last_token = token
+      state:advance()
+    elseif token.type == "go" or (token.type == "identifier" and token.text:upper() == "GO") then
+      break
+    elseif paren_depth == 0 and token.type == "keyword" then
+      local upper_text = token.text:upper()
+      if upper_text == "GROUP" or upper_text == "HAVING" or upper_text == "ORDER"
+         or upper_text == "UNION" or upper_text == "INTERSECT" or upper_text == "EXCEPT"
+         or upper_text == "FOR" or upper_text == "OPTION" or upper_text == "LIMIT"
+         or upper_text == "OFFSET" or upper_text == "FETCH" then
+        break
+      elseif Keywords.is_statement_starter(upper_text) and upper_text ~= "WITH" then
+        break
+      else
+        last_token = token
+        state:advance()
+      end
+    else
+      last_token = token
+      state:advance()
+    end
+  end
+
+  -- Track WHERE clause position
+  chunk.clause_positions["where"] = {
+    start_line = where_token.line,
+    start_col = where_token.col,
+    end_line = last_token.line,
+    end_col = last_token.col + #last_token.text - 1,
+  }
+end
+
+---Parse GROUP BY clause and track its position
+---@param state ParserState
+---@param chunk StatementChunk
+function SelectStatement._parse_group_by_clause(state, chunk)
+  local group_token = state:current()
+  state:advance()  -- consume GROUP
+
+  -- Expect BY keyword
+  if not state:is_keyword("BY") then
+    return
+  end
+  state:advance()  -- consume BY
+
+  local paren_depth = 0
+  local last_token = state.tokens[state.pos - 1] or group_token
+
+  -- Parse until we hit HAVING, ORDER BY, or statement end
+  while state:current() do
+    local token = state:current()
+
+    if token.type == "paren_open" then
+      paren_depth = paren_depth + 1
+      last_token = token
+      state:advance()
+    elseif token.type == "paren_close" then
+      paren_depth = paren_depth - 1
+      if paren_depth < 0 then
+        break
+      end
+      last_token = token
+      state:advance()
+    elseif token.type == "go" or (token.type == "identifier" and token.text:upper() == "GO") then
+      break
+    elseif paren_depth == 0 and token.type == "keyword" then
+      local upper_text = token.text:upper()
+      if upper_text == "HAVING" or upper_text == "ORDER"
+         or upper_text == "UNION" or upper_text == "INTERSECT" or upper_text == "EXCEPT"
+         or upper_text == "FOR" or upper_text == "OPTION" or upper_text == "LIMIT"
+         or upper_text == "OFFSET" or upper_text == "FETCH" then
+        break
+      elseif Keywords.is_statement_starter(upper_text) and upper_text ~= "WITH" then
+        break
+      else
+        last_token = token
+        state:advance()
+      end
+    else
+      last_token = token
+      state:advance()
+    end
+  end
+
+  -- Track GROUP BY clause position
+  chunk.clause_positions["group_by"] = {
+    start_line = group_token.line,
+    start_col = group_token.col,
+    end_line = last_token.line,
+    end_col = last_token.col + #last_token.text - 1,
+  }
+end
+
+---Parse HAVING clause and track its position
+---@param state ParserState
+---@param chunk StatementChunk
+function SelectStatement._parse_having_clause(state, chunk)
+  local having_token = state:current()
+  state:advance()  -- consume HAVING
+
+  local paren_depth = 0
+  local last_token = having_token
+
+  -- Parse until we hit ORDER BY or statement end
+  while state:current() do
+    local token = state:current()
+
+    if token.type == "paren_open" then
+      paren_depth = paren_depth + 1
+      last_token = token
+      state:advance()
+    elseif token.type == "paren_close" then
+      paren_depth = paren_depth - 1
+      if paren_depth < 0 then
+        break
+      end
+      last_token = token
+      state:advance()
+    elseif token.type == "go" or (token.type == "identifier" and token.text:upper() == "GO") then
+      break
+    elseif paren_depth == 0 and token.type == "keyword" then
+      local upper_text = token.text:upper()
+      if upper_text == "ORDER"
+         or upper_text == "UNION" or upper_text == "INTERSECT" or upper_text == "EXCEPT"
+         or upper_text == "FOR" or upper_text == "OPTION" or upper_text == "LIMIT"
+         or upper_text == "OFFSET" or upper_text == "FETCH" then
+        break
+      elseif Keywords.is_statement_starter(upper_text) and upper_text ~= "WITH" then
+        break
+      else
+        last_token = token
+        state:advance()
+      end
+    else
+      last_token = token
+      state:advance()
+    end
+  end
+
+  -- Track HAVING clause position
+  chunk.clause_positions["having"] = {
+    start_line = having_token.line,
+    start_col = having_token.col,
+    end_line = last_token.line,
+    end_col = last_token.col + #last_token.text - 1,
+  }
+end
+
+---Parse ORDER BY clause and track its position
+---@param state ParserState
+---@param chunk StatementChunk
+function SelectStatement._parse_order_by_clause(state, chunk)
+  local order_token = state:current()
+  state:advance()  -- consume ORDER
+
+  -- Expect BY keyword
+  if not state:is_keyword("BY") then
+    return
+  end
+  state:advance()  -- consume BY
+
+  local paren_depth = 0
+  local last_token = state.tokens[state.pos - 1] or order_token
+
+  -- Parse until we hit statement end or set operations
+  while state:current() do
+    local token = state:current()
+
+    if token.type == "paren_open" then
+      paren_depth = paren_depth + 1
+      last_token = token
+      state:advance()
+    elseif token.type == "paren_close" then
+      paren_depth = paren_depth - 1
+      if paren_depth < 0 then
+        break
+      end
+      last_token = token
+      state:advance()
+    elseif token.type == "go" or (token.type == "identifier" and token.text:upper() == "GO") then
+      break
+    elseif paren_depth == 0 and token.type == "keyword" then
+      local upper_text = token.text:upper()
+      -- ORDER BY terminators (but OFFSET/FETCH are part of ORDER BY in SQL Server)
+      if upper_text == "UNION" or upper_text == "INTERSECT" or upper_text == "EXCEPT"
+         or upper_text == "FOR" or upper_text == "OPTION" then
+        break
+      elseif upper_text == "OFFSET" or upper_text == "FETCH" or upper_text == "LIMIT" then
+        -- These are part of ORDER BY clause, continue parsing
+        last_token = token
+        state:advance()
+      elseif Keywords.is_statement_starter(upper_text) and upper_text ~= "WITH" then
+        break
+      else
+        last_token = token
+        state:advance()
+      end
+    else
+      last_token = token
+      state:advance()
+    end
+  end
+
+  -- Track ORDER BY clause position
+  chunk.clause_positions["order_by"] = {
+    start_line = order_token.line,
+    start_col = order_token.col,
+    end_line = last_token.line,
+    end_col = last_token.col + #last_token.text - 1,
+  }
+end
+
+---Parse LIMIT/OFFSET/FETCH clause and track its position
+---@param state ParserState
+---@param chunk StatementChunk
+---@param clause_type string The clause type (LIMIT, OFFSET, or FETCH)
+function SelectStatement._parse_limit_offset_clause(state, chunk, clause_type)
+  local start_token = state:current()
+  state:advance()  -- consume LIMIT/OFFSET/FETCH
+
+  local paren_depth = 0
+  local last_token = start_token
+
+  -- Parse until we hit statement end
+  while state:current() do
+    local token = state:current()
+
+    if token.type == "paren_open" then
+      paren_depth = paren_depth + 1
+      last_token = token
+      state:advance()
+    elseif token.type == "paren_close" then
+      paren_depth = paren_depth - 1
+      if paren_depth < 0 then
+        break
+      end
+      last_token = token
+      state:advance()
+    elseif token.type == "go" or (token.type == "identifier" and token.text:upper() == "GO") then
+      break
+    elseif paren_depth == 0 and token.type == "keyword" then
+      local upper_text = token.text:upper()
+      if upper_text == "UNION" or upper_text == "INTERSECT" or upper_text == "EXCEPT"
+         or upper_text == "FOR" or upper_text == "OPTION" then
+        break
+      elseif upper_text == "OFFSET" or upper_text == "FETCH" or upper_text == "ROWS"
+             or upper_text == "ROW" or upper_text == "NEXT" or upper_text == "ONLY" then
+        -- These are part of the pagination clause, continue
+        last_token = token
+        state:advance()
+      elseif Keywords.is_statement_starter(upper_text) and upper_text ~= "WITH" then
+        break
+      else
+        last_token = token
+        state:advance()
+      end
+    else
+      last_token = token
+      state:advance()
+    end
+  end
+
+  -- Track clause position (use lowercase key)
+  local key = clause_type:lower()
+  chunk.clause_positions[key] = {
+    start_line = start_token.line,
+    start_col = start_token.col,
+    end_line = last_token.line,
+    end_col = last_token.col + #last_token.text - 1,
+  }
 end
 
 return SelectStatement
