@@ -397,7 +397,7 @@ local function parse_statement_dispatch(state, scope, temp_tables)
     end
     -- Parse WHERE clause for DELETE
     if state:is_keyword("WHERE") then
-      parse_where_clause(state, chunk)
+      parse_where_clause(state, chunk, scope)
     end
     -- Finalize chunk
     BaseStatement.finalize_chunk(chunk, scope)
@@ -479,7 +479,7 @@ function parse_statement_remaining(state, chunk, scope, statement_type)
 
   -- Parse WHERE clause
   if state:is_keyword("WHERE") then
-    parse_where_clause(state, chunk)
+    parse_where_clause(state, chunk, scope)
   end
 
   -- Finalize UPDATE chunk
@@ -502,12 +502,16 @@ end
 ---Parse WHERE clause and track its position (shared by UPDATE/DELETE)
 ---@param state ParserState
 ---@param chunk StatementChunk
-function parse_where_clause(state, chunk)
+---@param scope ScopeContext
+function parse_where_clause(state, chunk, scope)
   local where_token = state:current()
   state:advance()  -- consume WHERE
 
   local paren_depth = 0
   local last_token = where_token
+
+  -- Build known_ctes for subquery parsing
+  local known_ctes = scope and scope:get_known_ctes_table() or {}
 
   -- Parse until we hit ORDER BY, statement end, or next statement
   while state:current() do
@@ -517,6 +521,22 @@ function parse_where_clause(state, chunk)
       paren_depth = paren_depth + 1
       last_token = token
       state:advance()
+      -- Check for subquery: (SELECT ...
+      if state:is_keyword("SELECT") then
+        local subquery = state:parse_subquery(known_ctes)
+        if subquery then
+          -- After parse_subquery, parser is AT the closing ) - consume it
+          if state:is_type("paren_close") then
+            last_token = state:current()
+            state:advance()
+          end
+          paren_depth = paren_depth - 1
+          -- Add to scope so it gets copied to chunk in finalize
+          if scope then
+            scope:add_subquery(subquery)
+          end
+        end
+      end
     elseif token.type == "paren_close" then
       paren_depth = paren_depth - 1
       if paren_depth < 0 then
@@ -617,20 +637,23 @@ function StatementParser.parse(text)
       -- Create fresh scope for each statement
       local scope = ScopeContext.new(nil)
 
-      -- Handle WITH clause (CTEs)
+      -- Handle WITH clause (CTEs) - capture the ordered array
+      local parsed_ctes = nil
       if token.text:upper() == "WITH" then
-        local ctes, cte_names = CteClauseParser.parse(state, scope)
+        parsed_ctes = CteClauseParser.parse(state, scope)
         -- ctes are now in scope, continue to parse main statement
-        -- The chunk will get the CTEs from the scope later
       end
 
       -- Now parse the main statement
       local chunk = parse_statement_dispatch(state, scope, temp_tables)
       if chunk then
-        -- Copy CTEs from scope to chunk
-        for _, cte in pairs(scope.ctes) do
-          if type(cte) == "table" and cte.name then
-            table.insert(chunk.ctes, cte)
+        -- Copy CTEs to chunk - use parsed_ctes array to preserve declaration order
+        -- (using pairs on scope.ctes would lose order since it's a dictionary)
+        if parsed_ctes then
+          for _, cte in ipairs(parsed_ctes) do
+            if type(cte) == "table" and cte.name then
+              table.insert(chunk.ctes, cte)
+            end
           end
         end
 
