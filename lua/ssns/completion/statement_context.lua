@@ -688,6 +688,356 @@ function Context._detect_type_from_line(before_cursor, chunk)
   return Context.Type.KEYWORD, "general", extra
 end
 
+---Detect special cases that have highest priority (before clause-based routing)
+---These patterns need to be checked first because they override normal clause detection
+---Uses TOKEN-BASED detection for multi-line SQL support
+---@param tokens Token[] Parsed tokens
+---@param line number 1-indexed line
+---@param col number 1-indexed column
+---@return string? ctx_type Context type or nil if no special case
+---@return string? mode Sub-mode for provider routing
+---@return table? extra Extra context info
+function Context._detect_special_cases(tokens, line, col)
+  local ctx_type, mode, extra
+
+  -- 1. OUTPUT inserted./deleted. detection (highest priority for OUTPUT qualified columns)
+  -- Check if we're after a dot following INSERTED or DELETED in an OUTPUT context
+  local is_after_dot, _ = TokenContext.is_dot_triggered(tokens, line, col)
+  if is_after_dot then
+    local prev_tokens = TokenContext.get_tokens_before_cursor(tokens, line, col, 15)
+    local found_inserted_or_deleted = nil
+    local found_output = false
+
+    for _, t in ipairs(prev_tokens) do
+      if t.type == "keyword" then
+        local kw = t.text:upper()
+        if (kw == "INSERTED" or kw == "DELETED") and not found_inserted_or_deleted then
+          found_inserted_or_deleted = kw:lower()
+        elseif kw == "OUTPUT" and found_inserted_or_deleted then
+          found_output = true
+          break
+        elseif kw == "INSERT" or kw == "UPDATE" or kw == "DELETE" or kw == "MERGE" or kw == "SELECT" then
+          break
+        end
+      end
+    end
+
+    if found_output and found_inserted_or_deleted then
+      return Context.Type.COLUMN, "output", {
+        is_output_clause = true,
+        output_pseudo_table = found_inserted_or_deleted,
+        table_ref = found_inserted_or_deleted,
+      }
+    end
+  end
+
+  -- 2. OUTPUT INTO table detection (needs TABLE completion, not COLUMN)
+  ctx_type, mode, extra = TokenContext.detect_output_into_from_tokens(tokens, line, col)
+  if ctx_type then
+    return ctx_type, mode, extra
+  end
+
+  -- 3. EXEC/EXECUTE detection (procedure context)
+  ctx_type, mode, extra = TokenContext.detect_other_context_from_tokens(tokens, line, col)
+  if ctx_type == "procedure" then
+    return ctx_type, mode, extra
+  end
+
+  -- 4. INSERT column list detection
+  ctx_type, mode, extra = TokenContext.detect_insert_columns_from_tokens(tokens, line, col)
+  if ctx_type then
+    return ctx_type, mode, extra
+  end
+
+  -- 5. ON clause detection (JOIN conditions)
+  ctx_type, mode, extra = TokenContext.detect_on_clause_from_tokens(tokens, line, col)
+  if ctx_type then
+    return ctx_type, mode, extra
+  end
+
+  return nil, nil, nil
+end
+
+---Detect context from StatementParser clause positions
+---Uses TOKEN-BASED detection for multi-line SQL support
+---@param bufnr number Buffer number
+---@param line_num number 1-indexed line
+---@param col number 1-indexed column
+---@param tokens Token[] Parsed tokens
+---@param chunk StatementChunk Parsed statement chunk
+---@param cache_ctx table StatementCache context
+---@return string? ctx_type Context type or nil if no clause match
+---@return string? mode Sub-mode for provider routing
+---@return table? extra Extra context info
+function Context._detect_from_clause(bufnr, line_num, col, tokens, chunk, cache_ctx)
+  local StatementParser = require('ssns.completion.statement_parser')
+
+  -- Check if we're inside a subquery with its own clause positions
+  local clause_source = chunk
+  if cache_ctx and cache_ctx.subquery and cache_ctx.subquery.clause_positions then
+    clause_source = { clause_positions = cache_ctx.subquery.clause_positions }
+  end
+
+  local clause = StatementParser.get_clause_at_position(clause_source, line_num, col)
+  Debug.log(string.format("[statement_context] get_clause_at_position returned: %s", tostring(clause)))
+
+  if clause then
+    return Context._handle_clause_context(bufnr, line_num, col, tokens, chunk, clause)
+  end
+
+  -- Clause detection returned nil - check if we're just past a FROM or JOIN clause
+  return Context._handle_clause_continuation(line_num, col, tokens, chunk)
+end
+
+---Handle known clause context
+---Uses TOKEN-BASED detection for multi-line SQL support
+---@param bufnr number Buffer number
+---@param line_num number 1-indexed line
+---@param col number 1-indexed column
+---@param tokens Token[] Parsed tokens
+---@param chunk StatementChunk Parsed statement chunk
+---@param clause string Clause name from StatementParser
+---@return string ctx_type Context type
+---@return string mode Sub-mode for provider routing
+---@return table extra Extra context info
+function Context._handle_clause_context(bufnr, line_num, col, tokens, chunk, clause)
+  local extra = {}
+  local ctx_type, mode
+
+  if clause == "select" then
+    ctx_type = Context.Type.COLUMN
+    mode = "select"
+
+  elseif clause == "from" then
+    ctx_type = Context.Type.TABLE
+    mode = "from"
+    -- Use token-based detection for reliable qualified name parsing
+    local token_qualified, is_after_dot = detect_qualified_from_tokens(bufnr, line_num, col)
+
+    -- Check if we're in a JOIN context using tokens (look for recent JOIN keyword)
+    local is_join_context = false
+    local prev_tokens = TokenContext.get_tokens_before_cursor(tokens, line_num, col, 5)
+    for _, t in ipairs(prev_tokens) do
+      if t.type == "keyword" and t.text:upper() == "JOIN" then
+        is_join_context = true
+        break
+      end
+    end
+    if is_join_context then
+      mode = "join"
+    end
+
+    if is_after_dot and token_qualified then
+      if token_qualified.database then
+        extra.database = token_qualified.database
+        extra.schema = token_qualified.schema
+        extra.filter_database = token_qualified.database
+        extra.filter_schema = token_qualified.schema
+        extra.omit_schema = true
+        mode = is_join_context and "join_cross_db_qualified" or "from_cross_db_qualified"
+      elseif token_qualified.schema then
+        extra.potential_database = token_qualified.schema
+        extra.schema = token_qualified.schema
+        extra.filter_schema = token_qualified.schema
+        extra.omit_schema = true
+        mode = is_join_context and "join_qualified" or "from_qualified"
+      end
+    end
+
+  elseif clause == "join" then
+    ctx_type = Context.Type.TABLE
+    mode = "join"
+    local token_qualified, is_after_dot = detect_qualified_from_tokens(bufnr, line_num, col)
+
+    if is_after_dot and token_qualified then
+      if token_qualified.database then
+        extra.database = token_qualified.database
+        extra.schema = token_qualified.schema
+        extra.filter_database = token_qualified.database
+        extra.filter_schema = token_qualified.schema
+        extra.omit_schema = true
+        mode = "join_cross_db_qualified"
+      elseif token_qualified.schema then
+        extra.potential_database = token_qualified.schema
+        extra.schema = token_qualified.schema
+        extra.filter_schema = token_qualified.schema
+        extra.omit_schema = true
+        mode = "join_qualified"
+      end
+    end
+
+  elseif clause == "on" then
+    ctx_type = Context.Type.COLUMN
+    mode = "on"
+    local left_side_on = TokenContext.extract_left_side_column(tokens, line_num, col)
+    if left_side_on then
+      extra.left_side = left_side_on
+    end
+    local is_after_dot_on, _ = TokenContext.is_dot_triggered(tokens, line_num, col)
+    if is_after_dot_on then
+      local ref = TokenContext.get_reference_before_dot(tokens, line_num, col)
+      if ref then
+        extra.table_ref = ref
+        mode = "qualified"
+      end
+    end
+
+  elseif clause == "where" then
+    ctx_type = Context.Type.COLUMN
+    mode = "where"
+    local left_side_where = TokenContext.extract_left_side_column(tokens, line_num, col)
+    if left_side_where then
+      extra.left_side = left_side_where
+    end
+
+  elseif clause == "group_by" then
+    ctx_type = Context.Type.COLUMN
+    mode = "group_by"
+
+  elseif clause == "having" then
+    ctx_type = Context.Type.COLUMN
+    mode = "having"
+
+  elseif clause == "order_by" then
+    ctx_type = Context.Type.COLUMN
+    mode = "order_by"
+
+  elseif clause == "set" then
+    ctx_type = Context.Type.COLUMN
+    mode = "set"
+
+  elseif clause == "into" then
+    ctx_type = Context.Type.TABLE
+    mode = "into"
+    -- Use token-based qualified name detection for cross-database support
+    local is_after_dot, qualified = TokenContext.is_dot_triggered(tokens, line_num, col)
+    if is_after_dot and qualified then
+      if qualified.database then
+        extra.database = qualified.database
+        extra.schema = qualified.schema
+        extra.filter_database = qualified.database
+        extra.filter_schema = qualified.schema
+        extra.omit_schema = true
+        mode = "into_cross_db_qualified"
+      elseif qualified.schema then
+        extra.schema = qualified.schema
+        extra.filter_schema = qualified.schema
+        extra.omit_schema = true
+        mode = "into_qualified"
+      end
+    end
+
+  elseif clause == "insert_columns" then
+    ctx_type = Context.Type.COLUMN
+    mode = "insert_columns"
+
+  elseif clause == "values" then
+    ctx_type = Context.Type.COLUMN
+    mode = "values"
+
+  else
+    -- Unknown clause - return nil to fall through to token-based detection
+    return nil, nil, nil
+  end
+
+  -- Check for qualified column reference (alias.column, table.column)
+  -- Don't override TABLE context clauses
+  local is_after_dot_qual, _ = TokenContext.is_dot_triggered(tokens, line_num, col)
+  if is_after_dot_qual and
+     clause ~= "from" and clause ~= "join" and clause ~= "into" and
+     clause ~= "update" and clause ~= "delete" and clause ~= "merge" then
+    local ref = TokenContext.get_reference_before_dot(tokens, line_num, col)
+    if ref then
+      extra.table_ref = ref
+      extra.filter_table = ref
+      extra.omit_table = true
+      ctx_type = Context.Type.COLUMN
+      mode = "qualified"
+    end
+  end
+
+  return ctx_type, mode, extra
+end
+
+---Handle clause continuation (cursor past clause end but still in same context)
+---Uses TOKEN-BASED detection for multi-line SQL support
+---@param line_num number 1-indexed line
+---@param col number 1-indexed column
+---@param tokens Token[] Parsed tokens
+---@param chunk StatementChunk Parsed statement chunk
+---@return string? ctx_type Context type or nil if no continuation match
+---@return string? mode Sub-mode for provider routing
+---@return table? extra Extra context info
+function Context._handle_clause_continuation(line_num, col, tokens, chunk)
+  local extra = {}
+  local from_pos = chunk.clause_positions and chunk.clause_positions["from"]
+  local join_pos = nil
+  local where_pos = chunk.clause_positions and chunk.clause_positions["where"]
+  local group_by_pos = chunk.clause_positions and chunk.clause_positions["group_by"]
+  local having_pos = chunk.clause_positions and chunk.clause_positions["having"]
+  local order_by_pos = chunk.clause_positions and chunk.clause_positions["order_by"]
+
+  if chunk.clause_positions then
+    -- Find most recent join clause
+    for k, v in pairs(chunk.clause_positions) do
+      if k:match("^join_%d+$") or k == "join" then
+        if not join_pos or v.end_line > join_pos.end_line or
+           (v.end_line == join_pos.end_line and v.end_col > join_pos.end_col) then
+          join_pos = v
+        end
+      end
+    end
+  end
+
+  -- Helper to check if cursor is past a clause start
+  local function cursor_past_clause_start(clause_pos)
+    if not clause_pos then return false end
+    return line_num > clause_pos.start_line or
+           (line_num == clause_pos.start_line and col > clause_pos.start_col)
+  end
+
+  -- Don't consider FROM/JOIN context if cursor is past WHERE/GROUP BY/HAVING/ORDER BY
+  local past_where = cursor_past_clause_start(where_pos)
+  local past_group_by = cursor_past_clause_start(group_by_pos)
+  local past_having = cursor_past_clause_start(having_pos)
+  local past_order_by = cursor_past_clause_start(order_by_pos)
+  local in_later_clause = past_where or past_group_by or past_having or past_order_by
+
+  -- Check if cursor is on the same line as FROM/JOIN clause end or immediately after
+  local in_from_context = from_pos and not in_later_clause and
+    (line_num == from_pos.end_line or
+     (line_num == from_pos.end_line + 1 and col <= 50))
+  local in_join_context = join_pos and not in_later_clause and
+    (line_num == join_pos.end_line or
+     (line_num == join_pos.end_line + 1 and col <= 50))
+
+  if in_from_context or in_join_context then
+    -- We're continuing a FROM or JOIN clause - use token-based qualified name detection
+    local is_after_dot, qualified = TokenContext.is_dot_triggered(tokens, line_num, col)
+
+    if is_after_dot and qualified then
+      if qualified.database then
+        extra.database = qualified.database
+        extra.schema = qualified.schema
+        extra.filter_database = qualified.database
+        extra.filter_schema = qualified.schema
+        extra.omit_schema = true
+        return Context.Type.TABLE, in_join_context and "join_cross_db_qualified" or "from_cross_db_qualified", extra
+      elseif qualified.schema then
+        extra.potential_database = qualified.schema
+        extra.schema = qualified.schema
+        extra.filter_schema = qualified.schema
+        extra.omit_schema = true
+        return Context.Type.TABLE, in_join_context and "join_qualified" or "from_qualified", extra
+      end
+    end
+    return Context.Type.TABLE, in_join_context and "join" or "from", extra
+  end
+
+  -- No continuation context found
+  return nil, nil, nil
+end
+
 ---Main context detection (simple version without full checks)
 ---@param bufnr number Buffer number
 ---@param line_num number 1-indexed line number
@@ -725,460 +1075,26 @@ function Context.detect(bufnr, line_num, col)
   -- Extract prefix and trigger using token-based detection
   local prefix, trigger = TokenContext.extract_prefix_and_trigger(tokens, line_num, col)
 
-  -- NOTE: We now use token-based qualified name detection via detect_qualified_from_tokens()
-  -- which properly handles cursor position relative to the trigger character (dot)
-  -- The old before_cursor_with_trigger approach is no longer needed for FROM/JOIN clauses
-
-  -- Detect type using clause positions first, fallback to line-based detection
+  -- Detect type using clause positions first, fallback to unified token-based detection
   local ctx_type, mode, extra
   local chunk = cache_ctx and cache_ctx.chunk
-  -- Pre-compute upper case version of before_cursor for pattern matching
-  -- Must be declared before any goto statements to avoid scope issues
-  local upper = before_cursor:upper()
 
-  -- Special case: INSERT column list detection (incomplete parens case)
-  -- Must check BEFORE clause-based routing because incomplete INSERT INTO table (
-  -- returns "into" clause but we need "insert_columns" context
-  local insert_columns_match = before_cursor:match("[Ii][Nn][Ss][Ee][Rr][Tt]%s+[Ii][Nn][Tt][Oo]%s+([%w_%[%]%.]+)%s*%(")
-  if insert_columns_match then
-    extra = {}
-    local table_name = insert_columns_match:gsub("^%[", ""):gsub("%]$", "")
-    if table_name:match("%.") then
-      local parts = {}
-      for part in table_name:gmatch("[^%.]+") do
-        -- Note: Use parentheses to discard the second return value from gsub (count)
-        -- otherwise table.insert interprets it as a position argument
-        table.insert(parts, (part:gsub("^%[", ""):gsub("%]$", "")))
-      end
-      if #parts >= 2 then
-        extra.schema = parts[#parts - 1]
-        extra.table = parts[#parts]
-      else
-        extra.table = parts[1]
-      end
-    else
-      extra.table = table_name
-    end
-    extra.insert_table = extra.table
-    extra.insert_schema = extra.schema
-    ctx_type = Context.Type.COLUMN
-    mode = "insert_columns"
-    -- Skip clause-based routing, jump to final context building
-    goto build_context
+  -- Try unified token-based detection for special cases first
+  -- These have highest priority and override clause-based routing
+  ctx_type, mode, extra = Context._detect_special_cases(tokens, line_num, col)
+
+  if not ctx_type and chunk then
+    -- Use clause-based detection if chunk is available
+    ctx_type, mode, extra = Context._detect_from_clause(bufnr, line_num, col, tokens, chunk, cache_ctx)
   end
 
-  -- Special case: ON clause detection
-  -- Must check BEFORE clause-based routing because ON is not tracked separately
-  -- by StatementParser - it's considered part of FROM clause
-  -- Patterns: "... ON █" or "... ON alias.█" or "... ON col1 = █"
-  if upper:match("%s+ON%s+$") or
-     upper:match("%s+ON%s+[%w_%.]+$") or
-     upper:match("%s+ON%s+[%w_%.]+%s*[=<>!]+%s*$") or
-     upper:match("%s+ON%s+[%w_%.]+%s*[=<>!]+%s*[%w_%.]*$") or
-     upper:match("%s+ON%s+[%w_%.]+%s+AND%s+$") or
-     upper:match("%s+ON%s+[%w_%.]+%s*[=<>!]+%s*[%w_%.]+%s+AND%s+$") or
-     upper:match("%s+ON%s+[%w_%.]+%s+AND%s+[%w_%.]*$") or
-     upper:match("%s+ON%s+[%w_%.]+%s*[=<>!]+%s*[%w_%.]+%s+AND%s+[%w_%.]*$") then
-    extra = {}
-    -- Use token-based left-side column extraction
-    local left_side = TokenContext.extract_left_side_column(tokens, line_num, col)
-    if left_side then
-      extra.left_side = left_side
-    end
-    ctx_type = Context.Type.COLUMN
-    mode = "on"
-    -- Check for qualified column reference in ON clause (e.g., d.█) using token-based detection
-    local is_after_dot, _ = TokenContext.is_dot_triggered(tokens, line_num, col)
-    if is_after_dot then
-      local ref = TokenContext.get_reference_before_dot(tokens, line_num, col)
-      if ref then
-        extra.table_ref = ref
-        mode = "qualified"
-      end
-    end
-    goto build_context
+  if not ctx_type then
+    -- Final fallback: unified token-based detection
+    ctx_type, mode, extra = TokenContext.detect_context(tokens, line_num, col)
   end
 
-  -- OUTPUT INTO table detection (MUST be BEFORE OUTPUT column detection)
-  -- Pattern: "OUTPUT ... INTO █" - needs TABLE completion
-  do
-    local upper_for_output = before_cursor:upper()
-    if upper_for_output:match("OUTPUT[^;]*INTO%s+$") or upper_for_output:match("OUTPUT[^;]*INTO%s+[%w_#@]*$") then
-      extra = {}
-      extra.is_output_into = true
-      ctx_type = Context.Type.TABLE
-      mode = "from"
-      goto build_context
-    end
-  end
-
-  -- EXEC/EXECUTE detection (MUST be BEFORE clause-based routing)
-  -- Patterns: "EXEC █" or "INSERT INTO table EXEC █" - needs PROCEDURE completion
-  do
-    local upper_for_exec = before_cursor:upper()
-    if upper_for_exec:match("EXEC%s+$") or upper_for_exec:match("EXECUTE%s+$") or
-       upper_for_exec:match("EXEC%s+[%w_%.]*$") or upper_for_exec:match("EXECUTE%s+[%w_%.]*$") then
-      extra = {}
-      ctx_type = Context.Type.PROCEDURE
-      mode = "exec"
-      goto build_context
-    end
-  end
-
-  -- OUTPUT clause detection (MUST be BEFORE clause-based routing since OUTPUT isn't tracked in clause_positions)
-  -- Pattern: "OUTPUT inserted.█" or "OUTPUT deleted.█"
-  -- Use do...end block to avoid goto scope issues with local variables
-  do
-    local upper_for_output = before_cursor:upper()
-    local output_inserted_ctx = upper_for_output:match("OUTPUT[^;]*INSERTED%.$")
-    local output_deleted_ctx = upper_for_output:match("OUTPUT[^;]*DELETED%.$")
-    if output_inserted_ctx or output_deleted_ctx then
-      extra = {}
-      extra.is_output_clause = true
-      extra.output_pseudo_table = output_inserted_ctx and "inserted" or "deleted"
-      extra.table_ref = extra.output_pseudo_table
-      ctx_type = Context.Type.COLUMN
-      mode = "output"
-      goto build_context
-    end
-  end
-
-  if chunk then
-    local StatementParser = require('ssns.completion.statement_parser')
-
-    -- Check if we're inside a subquery with its own clause positions
-    local clause_source = chunk
-    if cache_ctx and cache_ctx.subquery and cache_ctx.subquery.clause_positions then
-      -- Create a pseudo-chunk with subquery's clause positions for clause detection
-      clause_source = {
-        clause_positions = cache_ctx.subquery.clause_positions
-      }
-    end
-
-    local clause = StatementParser.get_clause_at_position(clause_source, line_num, col)
-    Debug.log(string.format("[statement_context] get_clause_at_position returned: %s", tostring(clause)))
-
-    if clause then
-      -- Use clause position to determine context
-      extra = {}
-      if clause == "select" then
-        ctx_type = Context.Type.COLUMN
-        mode = "select"
-      elseif clause == "from" then
-        ctx_type = Context.Type.TABLE
-        mode = "from"
-        -- Use token-based detection for reliable qualified name parsing
-        -- This properly handles the cursor position relative to the dot
-        local token_qualified, is_after_dot = detect_qualified_from_tokens(bufnr, line_num, col)
-
-        -- Check if we're in a JOIN context (for proper mode naming)
-        local is_join_context = before_cursor:upper():match("JOIN%s*$") ~= nil or
-                                before_cursor:upper():match("JOIN%s+[%w_%[%]%.]+$") ~= nil
-        if is_join_context then
-          mode = "join"
-        end
-
-        if is_after_dot and token_qualified then
-          Debug.log(string.format("[statement_context] Token-based qualified: has_trailing_dot=%s, parts=%s, schema=%s, database=%s",
-            tostring(token_qualified.has_trailing_dot),
-            table.concat(token_qualified.parts, "."),
-            tostring(token_qualified.schema),
-            tostring(token_qualified.database)))
-
-          if token_qualified.database then
-            -- db.schema.| pattern (cross-database qualified)
-            extra.database = token_qualified.database
-            extra.schema = token_qualified.schema
-            extra.filter_database = token_qualified.database
-            extra.filter_schema = token_qualified.schema
-            extra.omit_schema = true
-            mode = is_join_context and "join_cross_db_qualified" or "from_cross_db_qualified"
-          elseif token_qualified.schema then
-            -- schema.| pattern (schema qualified)
-            -- Could also be a database name - pass potential_database for provider to validate
-            extra.potential_database = token_qualified.schema
-            extra.schema = token_qualified.schema
-            extra.filter_schema = token_qualified.schema
-            extra.omit_schema = true
-            mode = is_join_context and "join_qualified" or "from_qualified"
-            Debug.log(string.format("[statement_context] Set filter_schema=%s, mode=%s", extra.filter_schema, mode))
-          end
-        end
-      elseif clause == "join" then
-        ctx_type = Context.Type.TABLE
-        mode = "join"
-        -- Use token-based detection for reliable qualified name parsing
-        local token_qualified, is_after_dot = detect_qualified_from_tokens(bufnr, line_num, col)
-
-        if is_after_dot and token_qualified then
-          Debug.log(string.format("[statement_context] JOIN Token-based qualified: has_trailing_dot=%s, parts=%s, schema=%s, database=%s",
-            tostring(token_qualified.has_trailing_dot),
-            table.concat(token_qualified.parts, "."),
-            tostring(token_qualified.schema),
-            tostring(token_qualified.database)))
-
-          if token_qualified.database then
-            extra.database = token_qualified.database
-            extra.schema = token_qualified.schema
-            extra.filter_database = token_qualified.database
-            extra.filter_schema = token_qualified.schema
-            extra.omit_schema = true
-            mode = "join_cross_db_qualified"
-          elseif token_qualified.schema then
-            -- Could also be a database name - pass potential_database for provider to validate
-            extra.potential_database = token_qualified.schema
-            extra.schema = token_qualified.schema
-            extra.filter_schema = token_qualified.schema
-            extra.omit_schema = true
-            mode = "join_qualified"
-          end
-        end
-      elseif clause == "on" then
-        ctx_type = Context.Type.COLUMN
-        mode = "on"
-        -- Use token-based left-side column extraction
-        local left_side_on = TokenContext.extract_left_side_column(tokens, line_num, col)
-        if left_side_on then
-          extra.left_side = left_side_on
-        end
-        -- Check for qualified column reference in ON clause (e.g., d.█) using token-based detection
-        local is_after_dot_on, _ = TokenContext.is_dot_triggered(tokens, line_num, col)
-        if is_after_dot_on then
-          local ref = TokenContext.get_reference_before_dot(tokens, line_num, col)
-          if ref then
-            extra.table_ref = ref
-            mode = "qualified"
-          end
-        end
-      elseif clause == "where" then
-        ctx_type = Context.Type.COLUMN
-        mode = "where"
-        -- Use token-based left-side column extraction
-        local left_side_where = TokenContext.extract_left_side_column(tokens, line_num, col)
-        if left_side_where then
-          extra.left_side = left_side_where
-        end
-      elseif clause == "group_by" then
-        ctx_type = Context.Type.COLUMN
-        mode = "group_by"
-      elseif clause == "having" then
-        ctx_type = Context.Type.COLUMN
-        mode = "having"
-      elseif clause == "order_by" then
-        ctx_type = Context.Type.COLUMN
-        mode = "order_by"
-      elseif clause == "set" then
-        ctx_type = Context.Type.COLUMN
-        mode = "set"
-      elseif clause == "into" then
-        ctx_type = Context.Type.TABLE
-        mode = "into"
-        -- Parse qualified name for cross-database support: INSERT INTO TEST.dbo.█
-        local qualified_text = nil
-        -- Try after INSERT INTO keyword
-        local after_into = before_cursor:match("[Ii][Nn][Ss][Ee][Rr][Tt]%s+[Ii][Nn][Tt][Oo]%s+([%w_%[%]%.]+)$")
-        qualified_text = after_into
-        -- If no INSERT INTO on this line, check if we have a qualified pattern (multi-line case)
-        if not qualified_text then
-          qualified_text = before_cursor:match("^%s*([%w_%[%]]+%.[%w_%[%]%.]*)$")
-        end
-        if qualified_text and qualified_text:match("%.") then
-          local qualified = Context._parse_qualified_name(qualified_text)
-          if qualified.database then
-            extra.database = qualified.database
-            extra.schema = qualified.schema
-            extra.filter_database = qualified.database
-            extra.filter_schema = qualified.schema
-            extra.omit_schema = true
-            mode = "into_cross_db_qualified"
-          elseif qualified.schema then
-            extra.schema = qualified.schema
-            extra.filter_schema = qualified.schema
-            extra.omit_schema = true
-            mode = "into_qualified"
-          end
-        end
-      elseif clause == "insert_columns" then
-        ctx_type = Context.Type.COLUMN
-        mode = "insert_columns"
-      elseif clause == "values" then
-        ctx_type = Context.Type.COLUMN
-        mode = "values"
-      end
-
-      -- Check for qualified column reference (alias.column, table.column) using token-based detection
-      -- BUT: Don't override TABLE context clauses - those are qualified table references
-      -- TABLE context clauses: from, join, into, update, delete, merge
-      local is_after_dot_qual, _ = TokenContext.is_dot_triggered(tokens, line_num, col)
-      if is_after_dot_qual and
-         clause ~= "from" and clause ~= "join" and clause ~= "into" and
-         clause ~= "update" and clause ~= "delete" and clause ~= "merge" then
-        local ref = TokenContext.get_reference_before_dot(tokens, line_num, col)
-        if ref then
-          extra.table_ref = ref
-          extra.filter_table = ref
-          extra.omit_table = true
-          ctx_type = Context.Type.COLUMN
-          mode = "qualified"
-        end
-      end
-    else
-      -- Clause detection returned nil - check if we're just past a FROM or JOIN clause
-      -- This handles cases like "SELECT\n*\nFROM\ndbo.█" where the cursor is at col 5
-      -- but FROM clause ends at col 4 (the position of "." in "dbo.")
-      extra = {}
-      local from_pos = chunk.clause_positions and chunk.clause_positions["from"]
-      local join_pos = nil
-      local where_pos = chunk.clause_positions and chunk.clause_positions["where"]
-      local group_by_pos = chunk.clause_positions and chunk.clause_positions["group_by"]
-      local having_pos = chunk.clause_positions and chunk.clause_positions["having"]
-      local order_by_pos = chunk.clause_positions and chunk.clause_positions["order_by"]
-
-      if chunk.clause_positions then
-        -- Find most recent join clause
-        for k, v in pairs(chunk.clause_positions) do
-          if k:match("^join_%d+$") or k == "join" then
-            if not join_pos or v.end_line > join_pos.end_line or
-               (v.end_line == join_pos.end_line and v.end_col > join_pos.end_col) then
-              join_pos = v
-            end
-          end
-        end
-      end
-
-      -- Helper to check if cursor is past a clause start
-      local function cursor_past_clause_start(clause_pos)
-        if not clause_pos then return false end
-        return line_num > clause_pos.start_line or
-               (line_num == clause_pos.start_line and col > clause_pos.start_col)
-      end
-
-      -- Don't consider FROM/JOIN context if cursor is past WHERE/GROUP BY/HAVING/ORDER BY
-      local past_where = cursor_past_clause_start(where_pos)
-      local past_group_by = cursor_past_clause_start(group_by_pos)
-      local past_having = cursor_past_clause_start(having_pos)
-      local past_order_by = cursor_past_clause_start(order_by_pos)
-      local in_later_clause = past_where or past_group_by or past_having or past_order_by
-
-      -- Check if cursor is on the same line as FROM clause end or immediately after
-      local in_from_context = from_pos and not in_later_clause and
-        (line_num == from_pos.end_line or
-         (line_num == from_pos.end_line + 1 and col <= 50)) -- Allow continuation on next line
-      local in_join_context = join_pos and not in_later_clause and
-        (line_num == join_pos.end_line or
-         (line_num == join_pos.end_line + 1 and col <= 50))
-
-      if in_from_context or in_join_context then
-        -- We're continuing a FROM or JOIN clause - check for qualified name
-        local qualified_text = nil
-        -- Try multiple patterns to find qualified name
-        if in_join_context then
-          -- Try after JOIN keyword (single-line case: "... JOIN TEST.dbo.")
-          qualified_text = before_cursor:match("[Jj][Oo][Ii][Nn]%s+([%w_%[%]%.]+)$")
-        end
-        if not qualified_text and in_from_context then
-          -- Try after FROM keyword (single-line case: "... FROM TEST.dbo.")
-          qualified_text = before_cursor:match("[Ff][Rr][Oo][Mm]%s+([%w_%[%]%.]+)$")
-          -- Also try after comma for second table (single-line case: "FROM Table1, TEST.dbo.")
-          if not qualified_text then
-            qualified_text = before_cursor:match(",%s*([%w_%[%]%.]+)$")
-          end
-        end
-        -- Fallback: Try multi-line case where line starts with qualified name
-        if not qualified_text then
-          qualified_text = before_cursor:match("^%s*([%w_%[%]]+%.[%w_%[%]%.]*)$")
-        end
-        if qualified_text and qualified_text:match("%.") then
-          local qualified = Context._parse_qualified_name(qualified_text)
-          if qualified.database then
-            extra.database = qualified.database
-            extra.schema = qualified.schema
-            extra.filter_database = qualified.database
-            extra.filter_schema = qualified.schema
-            extra.omit_schema = true
-            ctx_type = Context.Type.TABLE
-            mode = in_join_context and "join_cross_db_qualified" or "from_cross_db_qualified"
-          elseif qualified.schema then
-            extra.potential_database = qualified.schema
-            extra.schema = qualified.schema
-            extra.filter_schema = qualified.schema
-            extra.omit_schema = true
-            ctx_type = Context.Type.TABLE
-            mode = in_join_context and "join_qualified" or "from_qualified"
-          else
-            ctx_type = Context.Type.TABLE
-            mode = in_join_context and "join" or "from"
-          end
-        else
-          ctx_type = Context.Type.TABLE
-          mode = in_join_context and "join" or "from"
-        end
-      else
-        -- Fallback: Try token-based detection first
-        -- Check special cases (VALUES, INSERT columns, MERGE INSERT, ON clause, OUTPUT INTO) first
-        ctx_type, mode, extra = TokenContext.detect_values_context_from_tokens(tokens, line_num, col)
-        if not ctx_type then
-          ctx_type, mode, extra = TokenContext.detect_insert_columns_from_tokens(tokens, line_num, col)
-        end
-        if not ctx_type then
-          ctx_type, mode, extra = TokenContext.detect_merge_insert_from_tokens(tokens, line_num, col)
-        end
-        if not ctx_type then
-          ctx_type, mode, extra = TokenContext.detect_on_clause_from_tokens(tokens, line_num, col)
-        end
-        if not ctx_type then
-          ctx_type, mode, extra = TokenContext.detect_output_into_from_tokens(tokens, line_num, col)
-        end
-        -- Then try general context detection (TABLE -> COLUMN -> OTHER)
-        if not ctx_type then
-          ctx_type, mode, extra = TokenContext.detect_table_context_from_tokens(tokens, line_num, col)
-        end
-        if not ctx_type then
-          ctx_type, mode, extra = TokenContext.detect_column_context_from_tokens(tokens, line_num, col)
-        end
-        if not ctx_type then
-          ctx_type, mode, extra = TokenContext.detect_other_context_from_tokens(tokens, line_num, col)
-        end
-        if not ctx_type then
-          -- Final fallback to regex-based detection for any edge cases not yet converted
-          ctx_type, mode, extra = Context._detect_type_from_line(before_cursor, chunk)
-        end
-      end
-    end
-  else
-    -- No chunk: Try token-based detection first
-    -- Check special cases (VALUES, INSERT columns, MERGE INSERT, ON clause, OUTPUT INTO) first
-    ctx_type, mode, extra = TokenContext.detect_values_context_from_tokens(tokens, line_num, col)
-    if not ctx_type then
-      ctx_type, mode, extra = TokenContext.detect_insert_columns_from_tokens(tokens, line_num, col)
-    end
-    if not ctx_type then
-      ctx_type, mode, extra = TokenContext.detect_merge_insert_from_tokens(tokens, line_num, col)
-    end
-    if not ctx_type then
-      ctx_type, mode, extra = TokenContext.detect_on_clause_from_tokens(tokens, line_num, col)
-    end
-    if not ctx_type then
-      ctx_type, mode, extra = TokenContext.detect_output_into_from_tokens(tokens, line_num, col)
-    end
-    -- Then try general context detection (TABLE -> COLUMN -> OTHER)
-    if not ctx_type then
-      ctx_type, mode, extra = TokenContext.detect_table_context_from_tokens(tokens, line_num, col)
-    end
-    if not ctx_type then
-      ctx_type, mode, extra = TokenContext.detect_column_context_from_tokens(tokens, line_num, col)
-    end
-    if not ctx_type then
-      ctx_type, mode, extra = TokenContext.detect_other_context_from_tokens(tokens, line_num, col)
-    end
-    if not ctx_type then
-      -- Final fallback to regex-based detection for any edge cases not yet converted
-      ctx_type, mode, extra = Context._detect_type_from_line(before_cursor, chunk)
-    end
-  end
-
-  -- Label for goto from INSERT column list detection
-  ::build_context::
+  -- Ensure extra is initialized
+  extra = extra or {}
 
   -- Build tables_in_scope array from cache_ctx.tables
   -- Format: {alias = "e", table = "dbo.EMPLOYEES", scope = "main"}
