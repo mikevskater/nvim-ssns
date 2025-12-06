@@ -200,17 +200,26 @@ function Context._detect_unparsed_subquery(tokens, line, col)
   local found_from = false
   local found_select_after_from = false
 
-  for _, t in ipairs(prev_tokens) do
+  for i, t in ipairs(prev_tokens) do
     if t.type == "paren_close" then
       paren_depth = paren_depth + 1
     elseif t.type == "paren_open" then
       paren_depth = paren_depth - 1
       -- If paren_depth goes to 0 or negative AND we've seen SELECT...FROM, we're in a subquery
+      -- BUT skip if this ( is preceded by an identifier (function call) or AS keyword (CTE definition)
+      -- Note: The token BEFORE ( in actual query order is the NEXT token in our backwards walk
       -- paren_depth <= 0 handles both cases:
       --   - Cursor AT closing `)`: `)` included, paren_depth starts at 1, goes to 0 at `(`
       --   - Cursor BEFORE `)`: `)` not included, paren_depth starts at 0, goes to -1 at `(`
       if paren_depth <= 0 and found_select_after_from then
-        return true
+        -- Check what precedes this ( - look at NEXT token in walk (= token BEFORE ( in query)
+        local next_token = prev_tokens[i + 1]
+        local is_function_or_cte = next_token and
+          (next_token.type == "identifier" or
+           (next_token.type == "keyword" and next_token.text:upper() == "AS"))
+        if not is_function_or_cte then
+          return true
+        end
       end
     elseif t.type == "keyword" then
       local kw = t.text:upper()
@@ -219,19 +228,12 @@ function Context._detect_unparsed_subquery(tokens, line, col)
         found_from = true
       elseif kw == "SELECT" and found_from then
         -- Found SELECT after FROM (in reverse = SELECT before FROM in actual query)
-        -- Only mark as subquery SELECT if we're inside parentheses (paren_depth < 0)
-        -- If paren_depth >= 0, this is the main statement's SELECT - stop searching
-        if paren_depth < 0 then
-          found_select_after_from = true
-        else
-          -- Main statement SELECT - not in a subquery
-          break
-        end
+        found_select_after_from = true
       elseif (kw == "INSERT" or kw == "UPDATE" or kw == "DELETE" or kw == "MERGE") and paren_depth >= 0 then
         -- Hit a statement starter outside our subquery context - stop searching
         break
-      elseif kw == "WITH" or kw == "AS" then
-        -- Hit CTE boundary - don't cross into CTE definitions
+      elseif kw == "WITH" then
+        -- Hit WITH keyword - don't cross into CTE definitions
         break
       end
     end
