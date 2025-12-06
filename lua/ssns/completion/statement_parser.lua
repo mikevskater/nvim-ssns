@@ -735,12 +735,14 @@ function StatementParser.get_clause_at_position(chunk, line, col)
     return nil
   end
 
-  -- Quick bounds check
-  if line < chunk.start_line or line > chunk.end_line then
-    return nil
-  end
-  if line == chunk.start_line and col < chunk.start_col then
-    return nil
+  -- Quick bounds check (skip if start_line/end_line not available, e.g., for subquery clause_positions)
+  if chunk.start_line and chunk.end_line then
+    if line < chunk.start_line or line > chunk.end_line then
+      return nil
+    end
+    if line == chunk.start_line and col < chunk.start_col then
+      return nil
+    end
   end
 
   -- Find the last clause that started before (or at) the cursor position
