@@ -786,9 +786,10 @@ function Context.detect(bufnr, line_num, col)
     end
     ctx_type = Context.Type.COLUMN
     mode = "on"
-    -- Check for qualified column reference in ON clause (e.g., d.█)
-    if before_cursor:match("%.%s*$") or before_cursor:match("%.[%w_]*$") then
-      local ref = Context._get_reference_before_dot(before_cursor)
+    -- Check for qualified column reference in ON clause (e.g., d.█) using token-based detection
+    local is_after_dot, _ = TokenContext.is_dot_triggered(tokens, line_num, col)
+    if is_after_dot then
+      local ref = TokenContext.get_reference_before_dot(tokens, line_num, col)
       if ref then
         extra.table_ref = ref
         mode = "qualified"
@@ -938,9 +939,10 @@ function Context.detect(bufnr, line_num, col)
         if left_side then
           extra.left_side = left_side
         end
-        -- Check for qualified column reference in ON clause (e.g., d.█)
-        if before_cursor:match("%.%s*$") or before_cursor:match("%.[%w_]*$") then
-          local ref = Context._get_reference_before_dot(before_cursor)
+        -- Check for qualified column reference in ON clause (e.g., d.█) using token-based detection
+        local is_after_dot_on, _ = TokenContext.is_dot_triggered(tokens, line_num, col)
+        if is_after_dot_on then
+          local ref = TokenContext.get_reference_before_dot(tokens, line_num, col)
           if ref then
             extra.table_ref = ref
             mode = "qualified"
@@ -1001,13 +1003,14 @@ function Context.detect(bufnr, line_num, col)
         mode = "values"
       end
 
-      -- Check for qualified column reference (alias.column, table.column)
+      -- Check for qualified column reference (alias.column, table.column) using token-based detection
       -- BUT: Don't override TABLE context clauses - those are qualified table references
       -- TABLE context clauses: from, join, into, update, delete, merge
-      if (before_cursor:match("%.%s*$") or before_cursor:match("%.[%w_]*$")) and
+      local is_after_dot_qual, _ = TokenContext.is_dot_triggered(tokens, line_num, col)
+      if is_after_dot_qual and
          clause ~= "from" and clause ~= "join" and clause ~= "into" and
          clause ~= "update" and clause ~= "delete" and clause ~= "merge" then
-        local ref = Context._get_reference_before_dot(before_cursor)
+        local ref = TokenContext.get_reference_before_dot(tokens, line_num, col)
         if ref then
           extra.table_ref = ref
           extra.filter_table = ref

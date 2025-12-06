@@ -364,6 +364,170 @@ function TokenContext.is_in_string_or_comment(tokens, line, col)
       or token.type == "line_comment"
 end
 
+---Extract the left-side column from a comparison expression
+---Parses patterns like "t1.col = " or "column >= " from before cursor
+---Used for type-aware column completion on the right side
+---@param tokens Token[] Parsed tokens
+---@param line number 1-indexed line
+---@param col number 1-indexed column
+---@return table|nil left_side {qualified: string, table_ref: string|nil, column_name: string, schema: string|nil}
+function TokenContext.extract_left_side_column(tokens, line, col)
+  local prev_tokens = TokenContext.get_tokens_before_cursor(tokens, line, col, 15)
+  if #prev_tokens == 0 then
+    return nil
+  end
+
+  local i = 1
+
+  -- Skip any partial identifier at cursor position
+  if prev_tokens[i] and (prev_tokens[i].type == "identifier" or prev_tokens[i].type == "bracket_id") then
+    -- Check if this is a partial token at cursor
+    local token = prev_tokens[i]
+    if token.line == line and token.col < col and token.col + #token.text >= col then
+      i = i + 1
+    end
+  end
+
+  -- Look for operator token
+  local found_operator = false
+  while i <= #prev_tokens do
+    local token = prev_tokens[i]
+    if token.type == "operator" then
+      found_operator = true
+      i = i + 1
+      break
+    end
+    i = i + 1
+    -- Don't look too far back
+    if i > 5 then
+      return nil
+    end
+  end
+
+  if not found_operator then
+    return nil
+  end
+
+  -- Now collect the qualified name before the operator
+  local parts = {}
+  while i <= #prev_tokens do
+    local token = prev_tokens[i]
+    if token.type == "identifier" or token.type == "bracket_id" then
+      local name = token.text
+      if token.type == "bracket_id" then
+        name = name:sub(2, -2)  -- Remove [ and ]
+      end
+      table.insert(parts, 1, name)  -- Insert at beginning (reverse order)
+      i = i + 1
+
+      -- Check for preceding dot
+      if i <= #prev_tokens and prev_tokens[i].type == "dot" then
+        i = i + 1
+        -- Continue collecting
+      else
+        break
+      end
+    elseif token.type == "keyword" then
+      -- Stop at keyword (AND, OR, WHERE, etc.)
+      break
+    else
+      break
+    end
+  end
+
+  if #parts == 0 then
+    return nil
+  end
+
+  -- Build result
+  local qualified = table.concat(parts, ".")
+  if #parts == 1 then
+    -- Unqualified column: "column = "
+    return {
+      qualified = qualified,
+      table_ref = nil,
+      column_name = parts[1],
+    }
+  elseif #parts == 2 then
+    -- Qualified: "alias.column = " or "table.column = "
+    return {
+      qualified = qualified,
+      table_ref = parts[1],
+      column_name = parts[2],
+    }
+  elseif #parts >= 3 then
+    -- Schema qualified: "schema.table.column = "
+    return {
+      qualified = qualified,
+      table_ref = parts[#parts - 1],  -- table
+      column_name = parts[#parts],     -- column
+      schema = parts[#parts - 2],      -- schema
+    }
+  end
+
+  return nil
+end
+
+---Get the table/alias reference before a dot for qualified column completion
+---Handles patterns like: "e." -> "e", "dbo.Employees." -> "dbo.Employees", "e.First" -> "e"
+---@param tokens Token[] Parsed tokens
+---@param line number 1-indexed line
+---@param col number 1-indexed column
+---@return string? reference The table/alias reference, or nil
+function TokenContext.get_reference_before_dot(tokens, line, col)
+  local prev_tokens = TokenContext.get_tokens_before_cursor(tokens, line, col, 10)
+  if #prev_tokens == 0 then
+    return nil
+  end
+
+  local i = 1
+
+  -- If current token is an identifier (partial column name), skip it
+  local token_at = TokenContext.get_token_at_position(tokens, line, col)
+  if token_at and (token_at.type == "identifier" or token_at.type == "bracket_id") then
+    -- Check if cursor is within this token (partial typing)
+    if token_at.line == line and token_at.col < col then
+      -- Skip this partial identifier - it's the column being typed
+      i = 2  -- Start from second token in prev_tokens (since first is the partial)
+    end
+  end
+
+  -- Now look for dot followed by identifier(s)
+  if i <= #prev_tokens and prev_tokens[i].type == "dot" then
+    -- We're after a dot - collect the qualified name before it
+    i = i + 1
+    local parts = {}
+
+    while i <= #prev_tokens do
+      local token = prev_tokens[i]
+      if token.type == "identifier" or token.type == "bracket_id" then
+        local name = token.text
+        if token.type == "bracket_id" then
+          name = name:sub(2, -2)  -- Remove [ and ]
+        end
+        table.insert(parts, 1, name)  -- Insert at beginning (reverse order)
+        i = i + 1
+
+        -- Check for preceding dot
+        if i <= #prev_tokens and prev_tokens[i].type == "dot" then
+          i = i + 1
+          -- Continue collecting
+        else
+          break
+        end
+      else
+        break
+      end
+    end
+
+    if #parts > 0 then
+      return table.concat(parts, ".")
+    end
+  end
+
+  return nil
+end
+
 ---Extract prefix and trigger character using token analysis
 ---Replaces regex-based Context._extract_prefix_and_trigger()
 ---@param tokens Token[] Parsed tokens
