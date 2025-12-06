@@ -219,9 +219,19 @@ function Context._detect_unparsed_subquery(tokens, line, col)
         found_from = true
       elseif kw == "SELECT" and found_from then
         -- Found SELECT after FROM (in reverse = SELECT before FROM in actual query)
-        found_select_after_from = true
+        -- Only mark as subquery SELECT if we're inside parentheses (paren_depth < 0)
+        -- If paren_depth >= 0, this is the main statement's SELECT - stop searching
+        if paren_depth < 0 then
+          found_select_after_from = true
+        else
+          -- Main statement SELECT - not in a subquery
+          break
+        end
       elseif (kw == "INSERT" or kw == "UPDATE" or kw == "DELETE" or kw == "MERGE") and paren_depth >= 0 then
         -- Hit a statement starter outside our subquery context - stop searching
+        break
+      elseif kw == "WITH" or kw == "AS" then
+        -- Hit CTE boundary - don't cross into CTE definitions
         break
       end
     end

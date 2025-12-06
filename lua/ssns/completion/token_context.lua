@@ -42,16 +42,20 @@ function TokenContext.get_token_at_position(tokens, line, col)
       best_index = i
     elseif token.line == line then
       -- Token is on cursor line
-      if token.col <= col then
-        -- Token starts at or before cursor
+      if token.col < col then
+        -- Token starts before cursor
         if token_end_col >= col then
-          -- Cursor is within token
+          -- Cursor is within token (e.g., typing in middle of identifier)
           return token, i
         else
-          -- Token is before cursor, remember it as candidate
+          -- Token ends before cursor, remember it as candidate
           best_token = token
           best_index = i
         end
+      elseif token.col == col then
+        -- Token starts exactly at cursor - cursor is BEFORE this token
+        -- Don't include it, we've found the boundary
+        break
       else
         -- Token starts after cursor, we've gone past
         break
