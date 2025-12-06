@@ -280,19 +280,20 @@ function Context._handle_clause_context(bufnr, line_num, col, tokens, chunk, cla
       mode = "join"
     end
 
-    if is_after_dot and token_qualified then
+    -- Use qualified info when cursor is after a dot OR typing partial identifier after dot
+    if token_qualified and (token_qualified.database or token_qualified.schema) then
       if token_qualified.database then
         extra.database = token_qualified.database
         extra.schema = token_qualified.schema
         extra.filter_database = token_qualified.database
         extra.filter_schema = token_qualified.schema
-        extra.omit_schema = true
+        extra.omit_schema = is_after_dot  -- Only omit schema if cursor is directly after dot
         mode = is_join_context and "join_cross_db_qualified" or "from_cross_db_qualified"
       elseif token_qualified.schema then
         extra.potential_database = token_qualified.schema
         extra.schema = token_qualified.schema
         extra.filter_schema = token_qualified.schema
-        extra.omit_schema = true
+        extra.omit_schema = is_after_dot  -- Only omit schema if cursor is directly after dot
         mode = is_join_context and "join_qualified" or "from_qualified"
       end
     end
@@ -302,19 +303,20 @@ function Context._handle_clause_context(bufnr, line_num, col, tokens, chunk, cla
     mode = "join"
     local token_qualified, is_after_dot = detect_qualified_from_tokens(bufnr, line_num, col)
 
-    if is_after_dot and token_qualified then
+    -- Use qualified info when cursor is after a dot OR typing partial identifier after dot
+    if token_qualified and (token_qualified.database or token_qualified.schema) then
       if token_qualified.database then
         extra.database = token_qualified.database
         extra.schema = token_qualified.schema
         extra.filter_database = token_qualified.database
         extra.filter_schema = token_qualified.schema
-        extra.omit_schema = true
+        extra.omit_schema = is_after_dot  -- Only omit schema if cursor is directly after dot
         mode = "join_cross_db_qualified"
       elseif token_qualified.schema then
         extra.potential_database = token_qualified.schema
         extra.schema = token_qualified.schema
         extra.filter_schema = token_qualified.schema
-        extra.omit_schema = true
+        extra.omit_schema = is_after_dot  -- Only omit schema if cursor is directly after dot
         mode = "join_qualified"
       end
     end

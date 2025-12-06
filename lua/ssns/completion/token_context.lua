@@ -288,14 +288,15 @@ function TokenContext.parse_qualified_name_from_tokens(tokens)
 end
 
 ---Determine if cursor is after a dot (trigger completion)
+---Also handles cases where user is typing a partial identifier after a dot (e.g., "TEST.dbo.R█")
 ---@param tokens Token[] All tokens
 ---@param line number Cursor line
 ---@param col number Cursor column
----@return boolean is_after_dot
----@return QualifiedName? qualified Parsed qualified name if after dot
+---@return boolean is_after_dot True if cursor is directly after a dot
+---@return QualifiedName? qualified Parsed qualified name if in qualified context
 function TokenContext.is_dot_triggered(tokens, line, col)
   -- Get tokens before cursor
-  local prev_tokens = TokenContext.get_tokens_before_cursor(tokens, line, col, 5)
+  local prev_tokens = TokenContext.get_tokens_before_cursor(tokens, line, col, 7)
   if #prev_tokens == 0 then
     return false, nil
   end
@@ -305,6 +306,18 @@ function TokenContext.is_dot_triggered(tokens, line, col)
   if first_token.type == "dot" then
     local qualified = TokenContext.parse_qualified_name_from_tokens(prev_tokens)
     return true, qualified
+  end
+
+  -- Check if user is typing a partial identifier after a dot (e.g., "TEST.dbo.R█")
+  -- Pattern: identifier followed by dot
+  if (first_token.type == "identifier" or first_token.type == "bracket_id") and
+     #prev_tokens >= 2 and prev_tokens[2].type == "dot" then
+    -- Parse qualified name from tokens (skipping the partial identifier being typed)
+    local qualified = TokenContext.parse_qualified_name_from_tokens(prev_tokens)
+    -- Note: The partial identifier is included in parts, but we return is_after_dot=false
+    -- to indicate the user is typing (not just triggered by dot)
+    -- However, caller can still use the qualified info for filtering
+    return false, qualified
   end
 
   return false, nil
