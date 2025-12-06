@@ -936,11 +936,12 @@ function Context.detect(bufnr, line_num, col)
           extra.left_side = left_side
         end
         -- Check for qualified column reference in ON clause (e.g., d.█)
-        -- Use token-based detection for accuracy
-        local token_qualified, is_after_dot = detect_qualified_from_tokens(bufnr, line_num, col)
-        if is_after_dot and token_qualified and token_qualified.alias then
-          extra.table_ref = token_qualified.alias
-          mode = "qualified"
+        if before_cursor:match("%.%s*$") or before_cursor:match("%.[%w_]*$") then
+          local ref = Context._get_reference_before_dot(before_cursor)
+          if ref then
+            extra.table_ref = ref
+            mode = "qualified"
+          end
         end
       elseif clause == "where" then
         ctx_type = Context.Type.COLUMN
@@ -964,26 +965,27 @@ function Context.detect(bufnr, line_num, col)
       elseif clause == "into" then
         ctx_type = Context.Type.TABLE
         mode = "into"
-        -- Use token-based detection for cross-database support: INSERT INTO TEST.dbo.█
-        local token_qualified, is_after_dot = detect_qualified_from_tokens(bufnr, line_num, col)
-
-        if is_after_dot and token_qualified then
-          Debug.log(string.format("[statement_context] INTO Token-based qualified: has_trailing_dot=%s, parts=%s, schema=%s, database=%s",
-            tostring(token_qualified.has_trailing_dot),
-            table.concat(token_qualified.parts, "."),
-            tostring(token_qualified.schema),
-            tostring(token_qualified.database)))
-
-          if token_qualified.database then
-            extra.database = token_qualified.database
-            extra.schema = token_qualified.schema
-            extra.filter_database = token_qualified.database
-            extra.filter_schema = token_qualified.schema
+        -- Parse qualified name for cross-database support: INSERT INTO TEST.dbo.█
+        local qualified_text = nil
+        -- Try after INSERT INTO keyword
+        local after_into = before_cursor:match("[Ii][Nn][Ss][Ee][Rr][Tt]%s+[Ii][Nn][Tt][Oo]%s+([%w_%[%]%.]+)$")
+        qualified_text = after_into
+        -- If no INSERT INTO on this line, check if we have a qualified pattern (multi-line case)
+        if not qualified_text then
+          qualified_text = before_cursor:match("^%s*([%w_%[%]]+%.[%w_%[%]%.]*)$")
+        end
+        if qualified_text and qualified_text:match("%.") then
+          local qualified = Context._parse_qualified_name(qualified_text)
+          if qualified.database then
+            extra.database = qualified.database
+            extra.schema = qualified.schema
+            extra.filter_database = qualified.database
+            extra.filter_schema = qualified.schema
             extra.omit_schema = true
             mode = "into_cross_db_qualified"
-          elseif token_qualified.schema then
-            extra.schema = token_qualified.schema
-            extra.filter_schema = token_qualified.schema
+          elseif qualified.schema then
+            extra.schema = qualified.schema
+            extra.filter_schema = qualified.schema
             extra.omit_schema = true
             mode = "into_qualified"
           end
@@ -997,18 +999,15 @@ function Context.detect(bufnr, line_num, col)
       end
 
       -- Check for qualified column reference (alias.column, table.column)
-      -- Use token-based detection for accuracy
       -- BUT: Don't override TABLE context clauses - those are qualified table references
       -- TABLE context clauses: from, join, into, update, delete, merge
-      if clause ~= "from" and clause ~= "join" and clause ~= "into" and
+      if (before_cursor:match("%.%s*$") or before_cursor:match("%.[%w_]*$")) and
+         clause ~= "from" and clause ~= "join" and clause ~= "into" and
          clause ~= "update" and clause ~= "delete" and clause ~= "merge" then
-        local token_qualified, is_after_dot = detect_qualified_from_tokens(bufnr, line_num, col)
-        if is_after_dot and token_qualified and token_qualified.alias then
-          Debug.log(string.format("[statement_context] Column qualified: alias=%s, has_trailing_dot=%s",
-            tostring(token_qualified.alias),
-            tostring(token_qualified.has_trailing_dot)))
-          extra.table_ref = token_qualified.alias
-          extra.filter_table = token_qualified.alias
+        local ref = Context._get_reference_before_dot(before_cursor)
+        if ref then
+          extra.table_ref = ref
+          extra.filter_table = ref
           extra.omit_table = true
           ctx_type = Context.Type.COLUMN
           mode = "qualified"
