@@ -1115,13 +1115,19 @@ function Context.detect(bufnr, line_num, col)
         end
       else
         -- Fallback: Try token-based detection first
-        -- Check special cases (VALUES, INSERT columns, MERGE INSERT, subquery SELECT) first
+        -- Check special cases (VALUES, INSERT columns, MERGE INSERT, ON clause, OUTPUT INTO) first
         ctx_type, mode, extra = TokenContext.detect_values_context_from_tokens(tokens, line_num, col)
         if not ctx_type then
           ctx_type, mode, extra = TokenContext.detect_insert_columns_from_tokens(tokens, line_num, col)
         end
         if not ctx_type then
           ctx_type, mode, extra = TokenContext.detect_merge_insert_from_tokens(tokens, line_num, col)
+        end
+        if not ctx_type then
+          ctx_type, mode, extra = TokenContext.detect_on_clause_from_tokens(tokens, line_num, col)
+        end
+        if not ctx_type then
+          ctx_type, mode, extra = TokenContext.detect_output_into_from_tokens(tokens, line_num, col)
         end
         -- Then try general context detection (TABLE -> COLUMN -> OTHER)
         if not ctx_type then
@@ -1141,13 +1147,19 @@ function Context.detect(bufnr, line_num, col)
     end
   else
     -- No chunk: Try token-based detection first
-    -- Check special cases (VALUES, INSERT columns, MERGE INSERT, subquery SELECT) first
+    -- Check special cases (VALUES, INSERT columns, MERGE INSERT, ON clause, OUTPUT INTO) first
     ctx_type, mode, extra = TokenContext.detect_values_context_from_tokens(tokens, line_num, col)
     if not ctx_type then
       ctx_type, mode, extra = TokenContext.detect_insert_columns_from_tokens(tokens, line_num, col)
     end
     if not ctx_type then
       ctx_type, mode, extra = TokenContext.detect_merge_insert_from_tokens(tokens, line_num, col)
+    end
+    if not ctx_type then
+      ctx_type, mode, extra = TokenContext.detect_on_clause_from_tokens(tokens, line_num, col)
+    end
+    if not ctx_type then
+      ctx_type, mode, extra = TokenContext.detect_output_into_from_tokens(tokens, line_num, col)
     end
     -- Then try general context detection (TABLE -> COLUMN -> OTHER)
     if not ctx_type then

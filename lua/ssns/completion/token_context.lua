@@ -1258,6 +1258,123 @@ function TokenContext.detect_merge_insert_from_tokens(tokens, line, col)
   return nil, nil, {}
 end
 
+---Detect ON clause context from tokens (for JOIN conditions)
+---Handles patterns like: ON alias.col = |, ON col = other AND |
+---More precise than general COLUMN detection for ON-specific features
+---@param tokens Token[] Parsed tokens
+---@param line number 1-indexed line
+---@param col number 1-indexed column
+---@return string? ctx_type Context type ("column" or nil if not in ON clause)
+---@return string? mode Sub-mode ("on" or "qualified")
+---@return table extra Extra context info (table_ref, left_side)
+function TokenContext.detect_on_clause_from_tokens(tokens, line, col)
+  if not tokens or #tokens == 0 then
+    return nil, nil, {}
+  end
+
+  local extra = {}
+
+  -- Find cursor position
+  local _, cursor_idx = TokenContext.get_token_at_position(tokens, line, col)
+  if not cursor_idx then
+    cursor_idx = #tokens
+  end
+
+  -- Look backwards for ON keyword that's part of a JOIN
+  local on_idx = nil
+  local join_verified = false
+
+  for i = cursor_idx, 1, -1 do
+    local t = tokens[i]
+    if t.type == "keyword" then
+      local kw = t.text:upper()
+      if kw == "ON" and not on_idx then
+        on_idx = i
+      elseif kw == "JOIN" and on_idx then
+        -- Verified: ON is part of a JOIN clause
+        join_verified = true
+        break
+      elseif (kw == "FROM" or kw == "SELECT" or kw == "WHERE" or kw == "GROUP" or
+              kw == "ORDER" or kw == "HAVING" or kw == "INSERT" or kw == "UPDATE" or
+              kw == "DELETE" or kw == "MERGE") and on_idx then
+        -- Passed the expected JOIN position - not a JOIN ON clause
+        break
+      end
+    end
+  end
+
+  if not on_idx or not join_verified then
+    return nil, nil, {}
+  end
+
+  -- We're in a JOIN ON clause! Check for qualified column reference
+  local is_after_dot, _ = TokenContext.is_dot_triggered(tokens, line, col)
+  if is_after_dot then
+    local ref = TokenContext.get_reference_before_dot(tokens, line, col)
+    if ref then
+      extra.table_ref = ref
+      return "column", "qualified", extra
+    end
+  end
+
+  -- Check for left-side column (type-aware completion)
+  local left_side = TokenContext.extract_left_side_column(tokens, line, col)
+  if left_side then
+    extra.left_side = left_side
+  end
+
+  return "column", "on", extra
+end
+
+---Detect OUTPUT INTO context from tokens
+---Handles pattern: OUTPUT ... INTO |table - needs TABLE completion (not COLUMN)
+---@param tokens Token[] Parsed tokens
+---@param line number 1-indexed line
+---@param col number 1-indexed column
+---@return string? ctx_type Context type ("table" or nil if not OUTPUT INTO)
+---@return string? mode Sub-mode ("from" for table completion)
+---@return table extra Extra context info (is_output_into flag)
+function TokenContext.detect_output_into_from_tokens(tokens, line, col)
+  if not tokens or #tokens == 0 then
+    return nil, nil, {}
+  end
+
+  local extra = {}
+
+  -- Find cursor position
+  local _, cursor_idx = TokenContext.get_token_at_position(tokens, line, col)
+  if not cursor_idx then
+    cursor_idx = #tokens
+  end
+
+  -- Look backwards for INTO followed by OUTPUT
+  local found_into = false
+  local found_output = false
+
+  for i = cursor_idx, 1, -1 do
+    local t = tokens[i]
+    if t.type == "keyword" then
+      local kw = t.text:upper()
+      if kw == "INTO" and not found_into then
+        found_into = true
+      elseif kw == "OUTPUT" and found_into then
+        found_output = true
+        break
+      elseif kw == "INSERT" or kw == "SELECT" or kw == "UPDATE" or kw == "DELETE" or kw == "MERGE" then
+        -- Hit a statement keyword without finding OUTPUT - not OUTPUT INTO
+        break
+      end
+    end
+  end
+
+  if found_output and found_into then
+    extra.is_output_into = true
+    return "table", "from", extra
+  end
+
+  return nil, nil, {}
+end
+
 ---Detect if cursor is inside a subquery SELECT clause
 ---Handles patterns like: WHERE col IN (SELECT |column FROM table)
 ---@param tokens Token[] Parsed tokens
