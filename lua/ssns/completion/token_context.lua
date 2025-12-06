@@ -580,6 +580,373 @@ function TokenContext.extract_prefix_and_trigger(tokens, line, col)
   return prefix, trigger
 end
 
+---Detect TABLE context from tokens
+---Replaces regex patterns for FROM, JOIN, UPDATE, DELETE, INSERT INTO, TRUNCATE, ALTER, MERGE, USING
+---@param tokens Token[] Parsed tokens
+---@param line number 1-indexed line
+---@param col number 1-indexed column
+---@return string? ctx_type Context type ("table" or nil if not table context)
+---@return string? mode Sub-mode for provider routing (from, join, update, delete, insert, etc.)
+---@return table extra Extra context info (filter_schema, filter_database, etc.)
+function TokenContext.detect_table_context_from_tokens(tokens, line, col)
+  local prev_tokens = TokenContext.get_tokens_before_cursor(tokens, line, col, 10)
+  if #prev_tokens == 0 then
+    return nil, nil, {}
+  end
+
+  local extra = {}
+
+  -- Find the most recent keyword in the token stream
+  local keyword_token = nil
+  local keyword_idx = nil
+  local second_keyword_token = nil
+  local second_keyword_idx = nil
+
+  for i, t in ipairs(prev_tokens) do
+    if t.type == "keyword" then
+      if not keyword_token then
+        keyword_token = t
+        keyword_idx = i
+      elseif not second_keyword_token then
+        second_keyword_token = t
+        second_keyword_idx = i
+        break
+      end
+    end
+  end
+
+  if not keyword_token then
+    return nil, nil, extra
+  end
+
+  local kw = keyword_token.text:upper()
+  local second_kw = second_keyword_token and second_keyword_token.text:upper() or nil
+
+  -- Check for qualified name after keyword using token-based detection
+  local is_after_dot, qualified = TokenContext.is_dot_triggered(tokens, line, col)
+
+  -- Helper to set qualified name extra fields
+  local function set_qualified_extra(qual)
+    if qual.database then
+      extra.database = qual.database
+      extra.schema = qual.schema
+      extra.filter_database = qual.database
+      extra.filter_schema = qual.schema
+      extra.omit_schema = true
+    elseif qual.schema then
+      extra.potential_database = qual.schema
+      extra.schema = qual.schema
+      extra.filter_schema = qual.schema
+      extra.omit_schema = true
+    end
+  end
+
+  -- FROM detection
+  if kw == "FROM" then
+    if is_after_dot and qualified then
+      set_qualified_extra(qualified)
+      if qualified.database then
+        return "table", "from_cross_db_qualified", extra
+      elseif qualified.schema then
+        return "table", "from_qualified", extra
+      end
+    end
+    return "table", "from", extra
+  end
+
+  -- JOIN detection (including modifiers)
+  -- Patterns: JOIN, INNER JOIN, LEFT JOIN, LEFT OUTER JOIN, RIGHT JOIN, etc.
+  if kw == "JOIN" then
+    if is_after_dot and qualified then
+      set_qualified_extra(qualified)
+      if qualified.database then
+        return "table", "join_cross_db_qualified", extra
+      elseif qualified.schema then
+        return "table", "join_qualified", extra
+      end
+    end
+    return "table", "join", extra
+  end
+
+  -- Check for JOIN modifiers (INNER, LEFT, RIGHT, FULL, CROSS, OUTER followed by JOIN)
+  if (kw == "INNER" or kw == "LEFT" or kw == "RIGHT" or kw == "FULL" or kw == "CROSS" or kw == "OUTER") then
+    -- Look for JOIN as the next keyword
+    if second_kw == "JOIN" then
+      return "table", "join", extra
+    end
+    -- Could also be "LEFT OUTER JOIN" or "RIGHT OUTER JOIN" or "FULL OUTER JOIN"
+    -- In that case, kw is OUTER and we need to check if there's JOIN before it
+    -- But if kw is one of LEFT/RIGHT/FULL and we didn't find JOIN, check next tokens
+    -- Actually, with "LEFT OUTER JOIN", the token order would be JOIN, OUTER, LEFT
+    -- So if kw is LEFT and second_kw is OUTER, we need to check if there's a JOIN
+    for i = keyword_idx + 1, #prev_tokens do
+      local t = prev_tokens[i]
+      if t.type == "keyword" and t.text:upper() == "JOIN" then
+        return "table", "join", extra
+      elseif t.type == "keyword" then
+        break -- Stop at any other keyword
+      end
+    end
+  end
+
+  -- UPDATE detection
+  if kw == "UPDATE" then
+    if is_after_dot and qualified then
+      set_qualified_extra(qualified)
+    end
+    return "table", "update", extra
+  end
+
+  -- DELETE detection
+  -- Patterns: DELETE FROM, DELETE (without FROM)
+  if kw == "DELETE" then
+    return "table", "delete", extra
+  end
+  if kw == "FROM" and second_kw == "DELETE" then
+    return "table", "delete", extra
+  end
+
+  -- TRUNCATE TABLE detection
+  if kw == "TABLE" and second_kw == "TRUNCATE" then
+    return "table", "truncate", extra
+  end
+
+  -- ALTER TABLE detection
+  if kw == "TABLE" and second_kw == "ALTER" then
+    return "table", "alter", extra
+  end
+
+  -- INSERT INTO detection
+  if kw == "INTO" and second_kw == "INSERT" then
+    if is_after_dot and qualified then
+      set_qualified_extra(qualified)
+    end
+    return "table", "insert", extra
+  end
+
+  -- MERGE INTO detection
+  if kw == "INTO" and second_kw == "MERGE" then
+    if is_after_dot and qualified then
+      set_qualified_extra(qualified)
+    end
+    return "table", "merge", extra
+  end
+
+  -- MERGE USING detection
+  if kw == "USING" then
+    if is_after_dot and qualified then
+      set_qualified_extra(qualified)
+      if qualified.database then
+        return "table", "merge_cross_db_qualified", extra
+      elseif qualified.schema then
+        return "table", "merge_qualified", extra
+      end
+    end
+    return "table", "merge", extra
+  end
+
+  return nil, nil, extra
+end
+
+---Detect COLUMN context from tokens
+---Replaces regex patterns for SELECT, WHERE, ON, SET, OUTPUT, ORDER BY, GROUP BY, HAVING
+---@param tokens Token[] Parsed tokens
+---@param line number 1-indexed line
+---@param col number 1-indexed column
+---@return string? ctx_type Context type ("column" or nil if not column context)
+---@return string? mode Sub-mode for provider routing (select, where, on, set, etc.)
+---@return table extra Extra context info (table_ref, left_side, etc.)
+function TokenContext.detect_column_context_from_tokens(tokens, line, col)
+  local prev_tokens = TokenContext.get_tokens_before_cursor(tokens, line, col, 15)
+  if #prev_tokens == 0 then
+    return nil, nil, {}
+  end
+
+  local extra = {}
+
+  -- First check for qualified column reference (alias.column pattern)
+  local is_after_dot, qualified = TokenContext.is_dot_triggered(tokens, line, col)
+  if is_after_dot and qualified then
+    -- Check if this is a table qualifier (for column completion)
+    -- vs a schema qualifier (for table completion) - handled by TABLE detection
+    local ref = TokenContext.get_reference_before_dot(tokens, line, col)
+    if ref then
+      extra.table_ref = ref
+      extra.filter_table = ref
+      extra.omit_table = true
+      return "column", "qualified", extra
+    end
+  end
+
+  -- Find the most recent keywords in the token stream
+  local keyword_token = nil
+  local keyword_idx = nil
+  local second_keyword_token = nil
+
+  for i, t in ipairs(prev_tokens) do
+    if t.type == "keyword" then
+      if not keyword_token then
+        keyword_token = t
+        keyword_idx = i
+      elseif not second_keyword_token then
+        second_keyword_token = t
+        break
+      end
+    end
+  end
+
+  if not keyword_token then
+    return nil, nil, extra
+  end
+
+  local kw = keyword_token.text:upper()
+  local second_kw = second_keyword_token and second_keyword_token.text:upper() or nil
+
+  -- SELECT detection (check that there's no FROM after SELECT)
+  if kw == "SELECT" then
+    -- Check if there's a FROM keyword between SELECT and cursor
+    for i = keyword_idx - 1, 1, -1 do
+      local t = prev_tokens[i]
+      if t.type == "keyword" and t.text:upper() == "FROM" then
+        -- There's a FROM, so we're not in SELECT clause
+        break
+      end
+    end
+    return "column", "select", extra
+  end
+
+  -- Subquery SELECT detection: (SELECT ...
+  -- Look for lparen before SELECT
+  if kw == "SELECT" then
+    -- Check for opening paren indicating subquery
+    for i = keyword_idx + 1, #prev_tokens do
+      local t = prev_tokens[i]
+      if t.type == "lparen" then
+        -- This is a subquery SELECT
+        return "column", "select", extra
+      elseif t.type == "keyword" then
+        break
+      end
+    end
+  end
+
+  -- WHERE detection
+  if kw == "WHERE" then
+    -- Check for left-side of comparison (type-aware completion)
+    local left_side = TokenContext.extract_left_side_column(tokens, line, col)
+    if left_side then
+      extra.left_side = left_side
+    end
+    return "column", "where", extra
+  end
+
+  -- AND/OR detection (could be in WHERE clause)
+  if kw == "AND" or kw == "OR" then
+    return "column", "where", extra
+  end
+
+  -- ON detection (JOIN condition)
+  if kw == "ON" then
+    local left_side = TokenContext.extract_left_side_column(tokens, line, col)
+    if left_side then
+      extra.left_side = left_side
+    end
+    return "column", "on", extra
+  end
+
+  -- SET detection (UPDATE SET clause)
+  if kw == "SET" then
+    return "column", "set", extra
+  end
+
+  -- ORDER BY detection
+  if kw == "BY" and second_kw == "ORDER" then
+    return "column", "order_by", extra
+  end
+
+  -- GROUP BY detection
+  if kw == "BY" and second_kw == "GROUP" then
+    return "column", "group_by", extra
+  end
+
+  -- HAVING detection
+  if kw == "HAVING" then
+    return "column", "having", extra
+  end
+
+  -- OUTPUT detection
+  if kw == "OUTPUT" then
+    extra.is_output_clause = true
+    return "column", "output", extra
+  end
+
+  -- Check for OUTPUT inserted./deleted. pattern
+  if kw == "INSERTED" or kw == "DELETED" then
+    -- Check if previous keyword is OUTPUT (or if there's OUTPUT before)
+    for i = keyword_idx + 1, #prev_tokens do
+      local t = prev_tokens[i]
+      if t.type == "keyword" and t.text:upper() == "OUTPUT" then
+        extra.is_output_clause = true
+        extra.output_pseudo_table = kw:lower()
+        extra.table_ref = kw:lower()
+        return "column", "output", extra
+      end
+    end
+  end
+
+  return nil, nil, extra
+end
+
+---Detect PROCEDURE/DATABASE/SCHEMA context from tokens
+---Replaces regex patterns for EXEC/EXECUTE and USE
+---@param tokens Token[] Parsed tokens
+---@param line number 1-indexed line
+---@param col number 1-indexed column
+---@return string? ctx_type Context type ("procedure", "database", "schema", or nil)
+---@return string? mode Sub-mode for provider routing
+---@return table extra Extra context info
+function TokenContext.detect_other_context_from_tokens(tokens, line, col)
+  local prev_tokens = TokenContext.get_tokens_before_cursor(tokens, line, col, 5)
+  if #prev_tokens == 0 then
+    return nil, nil, {}
+  end
+
+  local extra = {}
+
+  -- Find the most recent keyword
+  local keyword_token = nil
+  for _, t in ipairs(prev_tokens) do
+    if t.type == "keyword" then
+      keyword_token = t
+      break
+    end
+  end
+
+  if not keyword_token then
+    return nil, nil, extra
+  end
+
+  local kw = keyword_token.text:upper()
+
+  -- EXEC/EXECUTE detection (procedure context)
+  if kw == "EXEC" or kw == "EXECUTE" then
+    return "procedure", "exec", extra
+  end
+
+  -- USE detection (database context)
+  if kw == "USE" then
+    -- Check if there's a qualified name (db.schema)
+    local is_after_dot, qualified = TokenContext.is_dot_triggered(tokens, line, col)
+    if is_after_dot and qualified and qualified.database then
+      extra.database = qualified.database
+      return "schema", "cross_db", extra
+    end
+    return "database", "use", extra
+  end
+
+  return nil, nil, extra
+end
+
 ---Debug: Print tokens around cursor
 ---@param tokens Token[] Tokens
 ---@param line number Cursor line

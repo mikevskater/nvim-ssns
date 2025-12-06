@@ -1114,13 +1114,33 @@ function Context.detect(bufnr, line_num, col)
           mode = in_join_context and "join" or "from"
         end
       else
-        -- Fallback to line-based detection
-        ctx_type, mode, extra = Context._detect_type_from_line(before_cursor, chunk)
+        -- Fallback: Try token-based detection first (TABLE -> COLUMN -> OTHER)
+        ctx_type, mode, extra = TokenContext.detect_table_context_from_tokens(tokens, line_num, col)
+        if not ctx_type then
+          ctx_type, mode, extra = TokenContext.detect_column_context_from_tokens(tokens, line_num, col)
+        end
+        if not ctx_type then
+          ctx_type, mode, extra = TokenContext.detect_other_context_from_tokens(tokens, line_num, col)
+        end
+        if not ctx_type then
+          -- Final fallback to regex-based detection for special cases (VALUES, INSERT columns, etc.)
+          ctx_type, mode, extra = Context._detect_type_from_line(before_cursor, chunk)
+        end
       end
     end
   else
-    -- No chunk, use line-based detection
-    ctx_type, mode, extra = Context._detect_type_from_line(before_cursor, chunk)
+    -- No chunk: Try token-based detection first (TABLE -> COLUMN -> OTHER)
+    ctx_type, mode, extra = TokenContext.detect_table_context_from_tokens(tokens, line_num, col)
+    if not ctx_type then
+      ctx_type, mode, extra = TokenContext.detect_column_context_from_tokens(tokens, line_num, col)
+    end
+    if not ctx_type then
+      ctx_type, mode, extra = TokenContext.detect_other_context_from_tokens(tokens, line_num, col)
+    end
+    if not ctx_type then
+      -- Final fallback to regex-based detection for special cases (VALUES, INSERT columns, etc.)
+      ctx_type, mode, extra = Context._detect_type_from_line(before_cursor, chunk)
+    end
   end
 
   -- Label for goto from INSERT column list detection
