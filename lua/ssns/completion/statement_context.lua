@@ -81,14 +81,17 @@ function Context._detect_special_cases(tokens, line, col)
     local found_output = false
 
     for _, t in ipairs(prev_tokens) do
-      if t.type == "keyword" then
-        local kw = t.text:upper()
-        if (kw == "INSERTED" or kw == "DELETED") and not found_inserted_or_deleted then
-          found_inserted_or_deleted = kw:lower()
-        elseif kw == "OUTPUT" and found_inserted_or_deleted then
+      local upper_text = t.text:upper()
+      -- INSERTED/DELETED may be tokenized as identifiers or keywords
+      if (t.type == "keyword" or t.type == "identifier") and
+         (upper_text == "INSERTED" or upper_text == "DELETED") and not found_inserted_or_deleted then
+        found_inserted_or_deleted = upper_text:lower()
+      elseif t.type == "keyword" then
+        if upper_text == "OUTPUT" and found_inserted_or_deleted then
           found_output = true
           break
-        elseif kw == "INSERT" or kw == "UPDATE" or kw == "DELETE" or kw == "MERGE" or kw == "SELECT" then
+        elseif upper_text == "INSERT" or upper_text == "UPDATE" or upper_text == "DELETE" or
+               upper_text == "MERGE" or upper_text == "SELECT" then
           break
         end
       end
