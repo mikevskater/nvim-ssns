@@ -61,7 +61,8 @@ end
 ---@return TableReference?
 function TableReferenceParser.parse_legacy(state, known_ctes)
   return parse_table_ref_internal(state, function(name)
-    return known_ctes and known_ctes[name] == true or false
+    -- CTE names are stored lowercase, so check with lowercase key
+    return known_ctes and known_ctes[name:lower()] == true or false
   end)
 end
 
