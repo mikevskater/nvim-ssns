@@ -1052,6 +1052,17 @@ function TokenContext.detect_values_context_from_tokens(tokens, line, col)
       -- Cursor is before this token
       if in_current_row then
         extra.value_position = value_position
+        -- Check for qualified column reference (e.g., source.█ in VALUES)
+        local is_after_dot, _ = TokenContext.is_dot_triggered(tokens, line, col)
+        if is_after_dot then
+          local ref = TokenContext.get_reference_before_dot(tokens, line, col)
+          if ref then
+            extra.table_ref = ref
+            extra.filter_table = ref
+            extra.omit_table = true
+            return "column", "qualified", extra
+          end
+        end
         return "column", "values", extra
       end
       break
@@ -1078,6 +1089,17 @@ function TokenContext.detect_values_context_from_tokens(tokens, line, col)
   -- If we're still inside VALUES parens at cursor position
   if found_values_paren and in_current_row then
     extra.value_position = value_position
+    -- Check for qualified column reference (e.g., source.█ in VALUES)
+    local is_after_dot, _ = TokenContext.is_dot_triggered(tokens, line, col)
+    if is_after_dot then
+      local ref = TokenContext.get_reference_before_dot(tokens, line, col)
+      if ref then
+        extra.table_ref = ref
+        extra.filter_table = ref
+        extra.omit_table = true
+        return "column", "qualified", extra
+      end
+    end
     return "column", "values", extra
   end
 

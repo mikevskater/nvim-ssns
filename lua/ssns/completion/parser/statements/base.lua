@@ -47,6 +47,19 @@ function BaseStatement.finalize_chunk(chunk, scope)
   -- Copy subqueries from scope
   chunk.subqueries = scope.subqueries
 
+  -- Build alias mapping from subqueries (e.g., MERGE USING (SELECT...) AS source)
+  for _, subquery in ipairs(chunk.subqueries) do
+    if subquery.alias then
+      -- Mark the subquery as a table reference for alias resolution
+      chunk.aliases[subquery.alias:lower()] = {
+        name = subquery.alias,
+        alias = subquery.alias,
+        is_subquery = true,
+        columns = subquery.columns,
+      }
+    end
+  end
+
   -- Resolve column parent tables using aliases
   local Helpers = require('ssns.completion.parser.utils.helpers')
   Helpers.resolve_column_parents(chunk.columns, chunk.aliases, chunk.tables)

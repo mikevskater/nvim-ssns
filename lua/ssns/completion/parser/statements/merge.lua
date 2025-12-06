@@ -45,7 +45,7 @@ function MergeStatement.parse(state, scope, temp_tables)
   end
 
   -- Skip rest of MERGE (ON condition, WHEN clauses with UPDATE/DELETE/INSERT)
-  MergeStatement._skip_merge_body(state)
+  MergeStatement._skip_merge_body(state, chunk)
 
   -- Finalize: build aliases, resolve column parents, copy subqueries
   BaseStatement.finalize_chunk(chunk, scope)
@@ -98,11 +98,13 @@ function MergeStatement._parse_using(state, chunk, scope, known_ctes)
   end
 end
 
----Skip the rest of MERGE body (ON, WHEN clauses)
+---Skip the rest of MERGE body (ON, WHEN clauses) and track end position
 ---MERGE body contains UPDATE/DELETE/INSERT which are NOT new statements
 ---@param state ParserState
-function MergeStatement._skip_merge_body(state)
+---@param chunk StatementChunk Chunk to update end position
+function MergeStatement._skip_merge_body(state, chunk)
   local merge_depth = 0
+  local last_token = nil
 
   while state:current() do
     local tok = state:current()
@@ -118,6 +120,8 @@ function MergeStatement._skip_merge_body(state)
 
     if merge_depth == 0 then
       if tok.type == "semicolon" or upper == "GO" then
+        -- Include the semicolon in the range
+        last_token = tok
         break
       end
       -- Break on new statements (NOT UPDATE/DELETE/INSERT - they're part of WHEN)
@@ -129,7 +133,13 @@ function MergeStatement._skip_merge_body(state)
       end
     end
 
+    last_token = tok
     state:advance()
+  end
+
+  -- Update chunk end position to last token in MERGE body
+  if last_token then
+    BaseStatement.update_end_position(chunk, last_token)
   end
 end
 

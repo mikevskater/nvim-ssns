@@ -167,16 +167,11 @@ function Context._detect_from_clause(bufnr, line_num, col, tokens, chunk, cache_
   if clause == "where" or clause == "having" then
     -- Look for SELECT keyword inside parentheses before cursor
     local in_unparsed_subquery, subquery_tables = Context._detect_unparsed_subquery(tokens, line_num, col)
-    print(string.format("[SUBQ DEBUG] clause=%s, in_subquery=%s, tables=%s", tostring(clause), tostring(in_unparsed_subquery), subquery_tables and #subquery_tables or "nil"))
     if in_unparsed_subquery then
       Debug.log("[statement_context] Detected unparsed subquery, falling through to token-based detection")
       -- Store subquery tables in cache_ctx for later use
       if subquery_tables and cache_ctx then
         cache_ctx._subquery_tables = subquery_tables
-        print(string.format("[SUBQ DEBUG] Stored %d subquery tables", #subquery_tables))
-        for _, t in ipairs(subquery_tables) do
-          print(string.format("[SUBQ DEBUG]   - %s (alias: %s)", t.table, t.alias))
-        end
       end
       return nil, nil, nil  -- Fall through to token-based detection
     end

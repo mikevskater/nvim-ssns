@@ -107,7 +107,48 @@ expand_subquery_columns = function(subquery, connection, depth)
         -- Unqualified star (SELECT *) - expand from all sources
         local added_any = false
         for source_name, source in pairs(source_columns) do
-          if not source._is_db_table then
+          if source._is_db_table then
+            -- Expand from database table using Resolver
+            local tbl_ref = source._table_ref
+            if connection and connection.database then
+              local Resolver = require('ssns.completion.metadata.resolver')
+              local table_name = tbl_ref.name
+              if tbl_ref.schema then
+                table_name = tbl_ref.schema .. "." .. table_name
+              end
+              local success, table_obj = pcall(function()
+                return Resolver.resolve_table(table_name, connection, {})
+              end)
+              if success and table_obj then
+                local col_success, table_cols = pcall(function()
+                  return Resolver.get_columns(table_obj, connection)
+                end)
+                if col_success and table_cols and #table_cols > 0 then
+                  for _, tc in ipairs(table_cols) do
+                    table.insert(expanded, {
+                      name = tc.name or tc.column_name,
+                      source_table = source_name,
+                      parent_table = tbl_ref.name,
+                      parent_schema = tbl_ref.schema,
+                      data_type = tc.data_type,
+                      is_star = false,
+                    })
+                    added_any = true
+                  end
+                end
+              end
+            else
+              -- No connection - keep star but set parent_table for later expansion
+              table.insert(expanded, {
+                name = "*",
+                source_table = source_name,
+                parent_table = tbl_ref.name,
+                parent_schema = tbl_ref.schema,
+                is_star = true,
+              })
+              added_any = true
+            end
+          else
             -- Expand from nested subquery columns
             for _, src_col in ipairs(source) do
               if not src_col.is_star or src_col.name ~= "*" then
