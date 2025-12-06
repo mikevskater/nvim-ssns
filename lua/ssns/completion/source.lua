@@ -18,6 +18,9 @@ local stats = {
 -- Debug logger for diagnostics
 local Debug = require('ssns.debug')
 
+-- Token context utilities for identifier extraction
+local TokenContext = require('ssns.completion.token_context')
+
 -- Usage tracker for recording completion selections
 local UsageTracker = require('ssns.completion.usage_tracker')
 
@@ -26,6 +29,7 @@ local UsageTracker = require('ssns.completion.usage_tracker')
 -- ============================================================================
 
 ---Extract the last identifier from text (handles qualified names and brackets)
+---Uses TokenContext helpers instead of regex patterns
 ---@param text string Text to extract identifier from
 ---@return string? identifier The extracted identifier or nil
 local function extract_last_identifier(text)
@@ -36,17 +40,16 @@ local function extract_last_identifier(text)
   -- - Mixed: "dbo.[Employee Name]"
 
   -- Try bracketed identifier first: [...]
-  local bracketed = text:match("%[([^%]]+)%]%s*$")
+  local bracketed = TokenContext.extract_trailing_bracketed(text)
   if bracketed then
     return bracketed
   end
 
   -- Try qualified path: word.word.word or word
-  local qualified = text:match("([%w_%.]+)%s*$")
+  local qualified = TokenContext.extract_trailing_identifier(text)
   if qualified then
     -- Return just the last part after final dot
-    local parts = vim.split(qualified, "%.", { plain = true })
-    return parts[#parts]
+    return TokenContext.get_last_name_part(qualified)
   end
 
   return nil
