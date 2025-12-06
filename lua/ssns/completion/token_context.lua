@@ -1317,10 +1317,17 @@ function TokenContext.detect_on_clause_from_tokens(tokens, line, col)
           -- Cursor is NOT in the ON clause
           saw_terminating_keyword = true
         end
-      elseif (kw == "FROM" or kw == "SELECT" or kw == "INSERT" or kw == "UPDATE" or
-              kw == "DELETE" or kw == "MERGE") and on_idx then
-        -- Passed the expected JOIN position - not a JOIN ON clause
-        break
+      elseif kw == "FROM" or kw == "SELECT" or kw == "INSERT" or kw == "UPDATE" or
+             kw == "DELETE" or kw == "MERGE" then
+        if on_idx then
+          -- Passed the expected JOIN position - not a JOIN ON clause
+          break
+        else
+          -- We've reached a statement boundary without finding ON
+          -- This means we're NOT in an ON clause context
+          -- (Could be in outer SELECT after a CTE, or in a different statement)
+          return nil, nil, {}
+        end
       end
     end
   end
