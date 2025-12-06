@@ -1431,6 +1431,134 @@ function TokenContext.is_in_subquery_select(tokens, line, col)
   return found_select_in_subquery, {}
 end
 
+---Unified context detection from tokens
+---Handles all detection in priority order, replacing multiple separate calls
+---Priority: OUTPUT patterns > EXEC > INSERT columns > VALUES > MERGE INSERT > ON clause >
+---         TABLE contexts > qualified column > COLUMN contexts > DATABASE/SCHEMA > KEYWORD fallback
+---@param tokens Token[] Parsed tokens
+---@param line number 1-indexed line
+---@param col number 1-indexed column
+---@return string ctx_type Context type
+---@return string mode Sub-mode for provider routing
+---@return table extra Extra context info
+function TokenContext.detect_context(tokens, line, col)
+  if not tokens or #tokens == 0 then
+    return "keyword", "start", {}
+  end
+
+  local ctx_type, mode, extra
+
+  -- 1. OUTPUT inserted./deleted. detection (highest priority for OUTPUT qualified columns)
+  local prev_tokens = TokenContext.get_tokens_before_cursor(tokens, line, col, 15)
+  local is_after_dot, _ = TokenContext.is_dot_triggered(tokens, line, col)
+
+  if is_after_dot then
+    -- Check for OUTPUT inserted. or OUTPUT deleted. pattern
+    local found_inserted_or_deleted = nil
+    local found_output = false
+
+    for i, t in ipairs(prev_tokens) do
+      if t.type == "keyword" then
+        local kw = t.text:upper()
+        if (kw == "INSERTED" or kw == "DELETED") and not found_inserted_or_deleted then
+          found_inserted_or_deleted = kw:lower()
+        elseif kw == "OUTPUT" and found_inserted_or_deleted then
+          found_output = true
+          break
+        elseif kw == "INSERT" or kw == "UPDATE" or kw == "DELETE" or kw == "MERGE" or kw == "SELECT" then
+          break
+        end
+      elseif t.type == "dot" and found_inserted_or_deleted and i <= 2 then
+        -- The dot we're after is right after INSERTED/DELETED
+        -- Continue checking for OUTPUT
+      end
+    end
+
+    if found_output and found_inserted_or_deleted then
+      extra = {
+        is_output_clause = true,
+        output_pseudo_table = found_inserted_or_deleted,
+        table_ref = found_inserted_or_deleted,
+      }
+      return "column", "output", extra
+    end
+  end
+
+  -- 2. OUTPUT INTO detection (needs TABLE completion)
+  ctx_type, mode, extra = TokenContext.detect_output_into_from_tokens(tokens, line, col)
+  if ctx_type then
+    return ctx_type, mode, extra
+  end
+
+  -- 3. EXEC/EXECUTE detection (procedure context)
+  ctx_type, mode, extra = TokenContext.detect_other_context_from_tokens(tokens, line, col)
+  if ctx_type == "procedure" then
+    return ctx_type, mode, extra
+  end
+
+  -- 4. INSERT column list detection
+  ctx_type, mode, extra = TokenContext.detect_insert_columns_from_tokens(tokens, line, col)
+  if ctx_type then
+    return ctx_type, mode, extra
+  end
+
+  -- 5. VALUES clause detection
+  ctx_type, mode, extra = TokenContext.detect_values_context_from_tokens(tokens, line, col)
+  if ctx_type then
+    return ctx_type, mode, extra
+  end
+
+  -- 6. MERGE INSERT column list detection
+  ctx_type, mode, extra = TokenContext.detect_merge_insert_from_tokens(tokens, line, col)
+  if ctx_type then
+    return ctx_type, mode, extra
+  end
+
+  -- 7. ON clause detection (JOIN conditions)
+  ctx_type, mode, extra = TokenContext.detect_on_clause_from_tokens(tokens, line, col)
+  if ctx_type then
+    return ctx_type, mode, extra
+  end
+
+  -- 8. TABLE context detection (FROM, JOIN, UPDATE, DELETE, INSERT INTO, etc.)
+  ctx_type, mode, extra = TokenContext.detect_table_context_from_tokens(tokens, line, col)
+  if ctx_type then
+    return ctx_type, mode, extra
+  end
+
+  -- 9. COLUMN context detection (SELECT, WHERE, SET, ORDER BY, GROUP BY, HAVING)
+  ctx_type, mode, extra = TokenContext.detect_column_context_from_tokens(tokens, line, col)
+  if ctx_type then
+    return ctx_type, mode, extra
+  end
+
+  -- 10. DATABASE/SCHEMA context detection (USE)
+  ctx_type, mode, extra = TokenContext.detect_other_context_from_tokens(tokens, line, col)
+  if ctx_type then
+    return ctx_type, mode, extra
+  end
+
+  -- 11. Check if line is empty or at statement start -> KEYWORD context
+  local token_at = TokenContext.get_token_at_position(tokens, line, col)
+  if not token_at then
+    return "keyword", "start", {}
+  end
+
+  -- Check for semicolon or GO (statement end)
+  if #prev_tokens > 0 then
+    local last_token = prev_tokens[1]
+    if last_token.type == "semicolon" then
+      return "keyword", "start", {}
+    end
+    if last_token.type == "keyword" and last_token.text:upper() == "GO" then
+      return "keyword", "start", {}
+    end
+  end
+
+  -- Default: KEYWORD fallback
+  return "keyword", "general", {}
+end
+
 ---Debug: Print tokens around cursor
 ---@param tokens Token[] Tokens
 ---@param line number Cursor line
