@@ -1283,19 +1283,41 @@ function TokenContext.detect_on_clause_from_tokens(tokens, line, col)
   -- Look backwards for ON keyword that's part of a JOIN
   local on_idx = nil
   local join_verified = false
+  -- Track if we've seen a clause-terminating keyword before finding ON
+  -- If we see WHERE/GROUP/ORDER/HAVING/JOIN before ON, cursor is past the ON clause
+  local saw_terminating_keyword = false
 
   for i = cursor_idx, 1, -1 do
     local t = tokens[i]
     if t.type == "keyword" then
       local kw = t.text:upper()
       if kw == "ON" and not on_idx then
+        if saw_terminating_keyword then
+          -- We saw WHERE/GROUP/ORDER/HAVING/JOIN before finding ON
+          -- This means cursor is past the ON clause
+          return nil, nil, {}
+        end
         on_idx = i
-      elseif kw == "JOIN" and on_idx then
-        -- Verified: ON is part of a JOIN clause
-        join_verified = true
-        break
-      elseif (kw == "FROM" or kw == "SELECT" or kw == "WHERE" or kw == "GROUP" or
-              kw == "ORDER" or kw == "HAVING" or kw == "INSERT" or kw == "UPDATE" or
+      elseif kw == "JOIN" then
+        if on_idx then
+          -- Verified: ON is part of a JOIN clause
+          join_verified = true
+          break
+        else
+          -- We saw a JOIN keyword before finding ON
+          -- This means cursor is at a subsequent JOIN, past the previous ON clause
+          saw_terminating_keyword = true
+        end
+      elseif kw == "WHERE" or kw == "GROUP" or kw == "ORDER" or kw == "HAVING" then
+        if on_idx then
+          -- Passed the expected JOIN position - not a JOIN ON clause
+          break
+        else
+          -- Track that we saw a terminating keyword before ON
+          -- Cursor is NOT in the ON clause
+          saw_terminating_keyword = true
+        end
+      elseif (kw == "FROM" or kw == "SELECT" or kw == "INSERT" or kw == "UPDATE" or
               kw == "DELETE" or kw == "MERGE") and on_idx then
         -- Passed the expected JOIN position - not a JOIN ON clause
         break
