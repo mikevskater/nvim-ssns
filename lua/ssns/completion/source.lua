@@ -384,6 +384,19 @@ function Source:get_completions(ctx, callback)
   -- Create callback wrapper to apply limits and track performance
   local wrapped_callback = function(items)
     Debug.log(string.format("[COMPLETION] Provider returned %d items", items and #items or 0))
+    -- Log first 5 item details for debugging
+    if items and #items > 0 then
+      local sample_count = math.min(5, #items)
+      for i = 1, sample_count do
+        local item = items[i]
+        local item_type = item.data and item.data.type or "unknown"
+        Debug.log(string.format("[COMPLETION]   Item %d: label=%s, detail=%s, type=%s",
+          i, item.label or "nil", item.detail or "nil", item_type))
+      end
+      if #items > 5 then
+        Debug.log(string.format("[COMPLETION]   ... and %d more items", #items - 5))
+      end
+    end
 
     -- Calculate elapsed time
     local end_time = vim.loop.hrtime()

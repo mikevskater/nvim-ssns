@@ -62,6 +62,7 @@ function TablesProvider._get_completions_impl(ctx)
   local Cache = require('ssns.cache')
   local Utils = require('ssns.completion.utils')
   local Config = require('ssns.config').get()
+  local Debug = require('ssns.debug')
 
   -- Get connection information from context
   local connection_info = ctx.connection
@@ -99,6 +100,11 @@ function TablesProvider._get_completions_impl(ctx)
   local filter_schema = sql_context.filter_schema -- Only show objects from this schema
   local filter_database = sql_context.filter_database -- Cross-database completion
 
+  -- Debug logging for filter_schema troubleshooting
+  local mode = sql_context.mode or "unknown"
+  Debug.log(string.format("[TablesProvider] sql_context: mode=%s, filter_schema=%s, filter_database=%s, omit_schema=%s",
+    mode, tostring(filter_schema), tostring(filter_database), tostring(omit_schema)))
+
   -- Resolve target database (for cross-db completion like TEST.dbo.█)
   local target_db = database
   if filter_database and server then
@@ -114,7 +120,6 @@ function TablesProvider._get_completions_impl(ctx)
   end
 
   -- Determine what types to include based on context mode
-  local mode = sql_context.mode or "unknown"
   local include_tables = true
   local include_views = true
   local include_synonyms = true
@@ -142,24 +147,31 @@ function TablesProvider._get_completions_impl(ctx)
   -- In basic FROM/JOIN context (no qualification), also include databases and schemas
   -- This allows users to type "SELECT * FROM <db>." or "SELECT * FROM <schema>."
   local is_basic_from_join = (mode == "from" or mode == "join") and not filter_schema and not filter_database
+  Debug.log(string.format("[TablesProvider] is_basic_from_join=%s (mode=%s, filter_schema=%s, filter_database=%s)",
+    tostring(is_basic_from_join), mode, tostring(filter_schema), tostring(filter_database)))
 
   if is_basic_from_join then
     -- Include other databases from the server (for cross-db queries)
     local databases = TablesProvider._collect_databases(server)
+    Debug.log(string.format("[TablesProvider] Adding %d databases (is_basic_from_join=true)", #databases))
     for _, item in ipairs(databases) do
       table.insert(items, item)
     end
 
     -- Include schemas from the current database (for qualified queries)
     local schemas = TablesProvider._collect_schemas(target_db)
+    Debug.log(string.format("[TablesProvider] Adding %d schemas (is_basic_from_join=true)", #schemas))
     for _, item in ipairs(schemas) do
       table.insert(items, item)
     end
+  else
+    Debug.log("[TablesProvider] NOT adding databases/schemas (is_basic_from_join=false)")
   end
 
   -- Collect tables (if enabled)
   if include_tables then
     local tables = TablesProvider._collect_tables(target_db, show_schema_prefix, omit_schema, filter_schema)
+    Debug.log(string.format("[TablesProvider] Collected %d tables (filter_schema=%s)", #tables, tostring(filter_schema)))
     for _, item in ipairs(tables) do
       table.insert(items, item)
     end
@@ -168,6 +180,7 @@ function TablesProvider._get_completions_impl(ctx)
   -- Collect views (if enabled and supported)
   if include_views and adapter.features and adapter.features.views then
     local views = TablesProvider._collect_views(target_db, show_schema_prefix, omit_schema, filter_schema)
+    Debug.log(string.format("[TablesProvider] Collected %d views (filter_schema=%s)", #views, tostring(filter_schema)))
     for _, item in ipairs(views) do
       table.insert(items, item)
     end
@@ -176,6 +189,7 @@ function TablesProvider._get_completions_impl(ctx)
   -- Collect synonyms (if enabled and supported)
   if include_synonyms and adapter.features and adapter.features.synonyms then
     local synonyms = TablesProvider._collect_synonyms(target_db, show_schema_prefix, omit_schema, filter_schema)
+    Debug.log(string.format("[TablesProvider] Collected %d synonyms (filter_schema=%s)", #synonyms, tostring(filter_schema)))
     for _, item in ipairs(synonyms) do
       table.insert(items, item)
     end
@@ -184,6 +198,7 @@ function TablesProvider._get_completions_impl(ctx)
   -- Collect functions (if enabled and supported)
   if include_functions and adapter.features and adapter.features.functions then
     local functions = TablesProvider._collect_functions(target_db, show_schema_prefix, omit_schema, filter_schema)
+    Debug.log(string.format("[TablesProvider] Collected %d functions (filter_schema=%s)", #functions, tostring(filter_schema)))
     for _, item in ipairs(functions) do
       table.insert(items, item)
     end
