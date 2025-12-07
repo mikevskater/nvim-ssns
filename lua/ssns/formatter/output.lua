@@ -145,13 +145,35 @@ local function needs_space_before(prev, curr, config)
   end
 
   -- Space around operators (if configured)
-  if (prev.type == "operator" or curr.type == "operator") and config.operator_spacing then
-    return true
+  -- Exception: PostgreSQL :: cast operator has no spaces
+  if prev.type == "operator" or curr.type == "operator" then
+    -- No space around :: cast operator
+    if (prev.type == "operator" and prev.text == "::") or
+       (curr.type == "operator" and curr.text == "::") then
+      return false
+    end
+    if config.operator_spacing then
+      return true
+    end
   end
 
   -- No space between @ and identifier for variables
   if prev.type == "at" then
     return false
+  end
+
+  -- Space before @ for variables (DECLARE @id, SET @var, etc.)
+  if curr.type == "at" then
+    if prev.type == "keyword" or prev.type == "identifier" then
+      return true
+    end
+  end
+
+  -- Space before temp_table (#temp, ##global)
+  if curr.type == "temp_table" then
+    if prev.type == "keyword" or prev.type == "identifier" then
+      return true
+    end
   end
 
   -- Space between keywords/identifiers
