@@ -8,6 +8,7 @@
 
 ---@class BufferStatementCache
 ---@field chunks StatementChunk[] All statement chunks in order
+---@field tokens Token[] Full token array from parsing (for token caching)
 ---@field temp_tables table<string, TempTableInfo> Temp tables created in buffer
 ---@field go_boundaries number[] Line numbers of GO statements
 ---@field last_update number Timestamp of last update (os.clock())
@@ -417,9 +418,9 @@ function StatementCache._update_cache(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local text = table.concat(lines, '\n')
 
-  -- Parse the buffer
+  -- Parse the buffer (now returns tokens as third value)
   local StatementParser = require('ssns.completion.statement_parser')
-  local chunks, temp_tables = StatementParser.parse(text)
+  local chunks, temp_tables, tokens = StatementParser.parse(text)
 
   -- Extract GO boundaries (line numbers where GO batch index changes)
   local go_boundaries = {}
@@ -432,9 +433,10 @@ function StatementCache._update_cache(bufnr)
     end
   end
 
-  -- Store cache
+  -- Store cache (now includes tokens for token caching optimization)
   _cache[bufnr] = {
     chunks = chunks,
+    tokens = tokens,
     temp_tables = temp_tables,
     go_boundaries = go_boundaries,
     last_update = os.clock(),
@@ -727,6 +729,41 @@ end
 ---@return ColumnInfo[] Expanded columns with stars replaced by actual columns
 function StatementCache.expand_star_columns(columns, connection, known_ctes, cte_tables)
   return expand_star_columns(columns, connection, known_ctes, cte_tables)
+end
+
+---Get cached tokens for a buffer
+---Returns the full token array from the last parse, avoiding re-tokenization
+---@param bufnr number Buffer number
+---@return Token[]? tokens Cached tokens or nil if not cached
+function StatementCache.get_tokens(bufnr)
+  local cache = StatementCache.get_or_build_cache(bufnr)
+  return cache and cache.tokens or nil
+end
+
+---Get tokens for a specific chunk
+---Returns only the tokens within the chunk's token range
+---@param bufnr number Buffer number
+---@param chunk StatementChunk The chunk to get tokens for
+---@return Token[] tokens Tokens for this chunk (empty if not available)
+function StatementCache.get_chunk_tokens(bufnr, chunk)
+  local cache = StatementCache.get_or_build_cache(bufnr)
+  if not cache or not cache.tokens then
+    return {}
+  end
+
+  -- Use token indices if available
+  if chunk.token_start_idx and chunk.token_end_idx then
+    local result = {}
+    for i = chunk.token_start_idx, chunk.token_end_idx do
+      if cache.tokens[i] then
+        table.insert(result, cache.tokens[i])
+      end
+    end
+    return result
+  end
+
+  -- Fallback: return all tokens (caller should filter by position)
+  return cache.tokens
 end
 
 return StatementCache

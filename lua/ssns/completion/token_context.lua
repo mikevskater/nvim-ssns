@@ -356,10 +356,18 @@ function TokenContext.tokenize(text)
   return Tokenizer.tokenize(text)
 end
 
----Get tokens from a buffer
+---Get tokens from a buffer (uses cache when available)
 ---@param bufnr number Buffer number
 ---@return Token[] tokens
 function TokenContext.get_buffer_tokens(bufnr)
+  -- Try cached tokens first (avoids re-tokenization)
+  local StatementCache = require('ssns.completion.statement_cache')
+  local cached = StatementCache.get_tokens(bufnr)
+  if cached then
+    return cached
+  end
+
+  -- Fallback: tokenize directly (for non-SQL buffers or edge cases)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local text = table.concat(lines, "\n")
   return Tokenizer.tokenize(text)
