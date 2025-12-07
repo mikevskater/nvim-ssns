@@ -10,6 +10,7 @@
 ---@field lualine LualineConfig Lualine statusline integration
 ---@field completion CompletionConfig IntelliSense completion configuration
 ---@field semantic_highlighting SemanticHighlightingConfig Semantic highlighting configuration
+---@field formatter FormatterConfig SQL formatter configuration
 
 ---@class UiConfig
 ---@field position string Window position: "left", "right", "float"
@@ -197,6 +198,48 @@
 ---@field highlight_databases boolean Highlight database names (default: true)
 ---@field highlight_parameters boolean Highlight @parameters and @@system_variables (default: true)
 ---@field highlight_unresolved boolean Highlight unresolved identifiers (default: true)
+
+---@class FormatterConfig
+---@field enabled boolean Enable/disable formatter (default: true)
+---@field indent_size number Spaces per indent level (default: 4)
+---@field indent_style string "space" or "tab" (default: "space")
+---@field keyword_case string "upper"|"lower"|"preserve" (default: "upper")
+---@field max_line_length number Soft limit for line wrapping (default: 120, 0=disable)
+---@field newline_before_clause boolean Start major clauses on new line (default: true)
+---@field align_aliases boolean Align AS keywords in SELECT (default: false)
+---@field align_columns boolean Align columns vertically (default: false)
+---@field comma_position string "leading"|"trailing" (default: "trailing")
+---@field join_on_same_line boolean Keep ON clause with JOIN (default: false)
+---@field subquery_indent number Extra indent for subqueries (default: 1)
+---@field case_indent number Indent for CASE/WHEN blocks (default: 1)
+---@field and_or_position string "leading"|"trailing" for WHERE conditions (default: "leading")
+---@field parenthesis_spacing boolean Add space inside parentheses (default: false)
+---@field operator_spacing boolean Add space around operators (default: true)
+---@field preserve_comments boolean Keep comments in place (default: true)
+---@field format_on_save boolean Auto-format on buffer save (default: false)
+---@field rules FormatterRulesConfig Per-clause rule overrides
+
+---@class FormatterRulesConfig
+---@field select? FormatterSelectRules SELECT-specific rules
+---@field from? FormatterFromRules FROM/JOIN-specific rules
+---@field where? FormatterWhereRules WHERE-specific rules
+---@field insert? FormatterInsertRules INSERT-specific rules
+---@field update? FormatterUpdateRules UPDATE-specific rules
+
+---@class FormatterSelectRules
+---@field one_column_per_line? boolean Put each column on its own line
+
+---@class FormatterFromRules
+---@field one_table_per_line? boolean Put each table on its own line
+
+---@class FormatterWhereRules
+---@field one_condition_per_line? boolean Put each condition on its own line
+
+---@class FormatterInsertRules
+---@field columns_inline? boolean Keep column list inline
+
+---@class FormatterUpdateRules
+---@field set_inline? boolean Keep SET clause inline
 
 ---Default configuration
 ---@type SsnsConfig
@@ -573,6 +616,33 @@ local default_config = {
     highlight_parameters = true, -- Highlight @parameters and @@system_variables
     highlight_unresolved = true, -- Highlight unresolved identifiers in gray
   },
+
+  -- SQL formatter configuration
+  formatter = {
+    enabled = true,              -- Enable/disable formatter
+    indent_size = 4,             -- Spaces per indent level
+    indent_style = "space",      -- "space" or "tab"
+    keyword_case = "upper",      -- "upper"|"lower"|"preserve"
+    max_line_length = 120,       -- Soft limit for line wrapping (0 = disable)
+    newline_before_clause = true, -- Start major clauses on new line
+    align_aliases = false,       -- Align AS keywords in SELECT
+    align_columns = false,       -- Align columns vertically
+    comma_position = "trailing", -- "leading"|"trailing"
+    join_on_same_line = false,   -- Keep ON clause with JOIN
+    subquery_indent = 1,         -- Extra indent for subqueries
+    case_indent = 1,             -- Indent for CASE/WHEN blocks
+    and_or_position = "leading", -- "leading"|"trailing" for WHERE conditions
+    parenthesis_spacing = false, -- Add space inside parentheses
+    operator_spacing = true,     -- Add space around operators
+    preserve_comments = true,    -- Keep comments in place
+    format_on_save = false,      -- Auto-format on buffer save
+    rules = {
+      -- Per-clause rule overrides (optional)
+      -- select = { one_column_per_line = true },
+      -- from = { one_table_per_line = true },
+      -- where = { one_condition_per_line = true },
+    },
+  },
 }
 
 ---@class Config
@@ -681,6 +751,12 @@ end
 ---@return SemanticHighlightingConfig
 function Config.get_semantic_highlighting()
   return Config.current.semantic_highlighting
+end
+
+---Get formatter configuration
+---@return FormatterConfig
+function Config.get_formatter()
+  return Config.current.formatter
 end
 
 ---Validate configuration
@@ -794,6 +870,73 @@ function Config.validate(config)
     end
     if config.completion.usage_max_items and (type(config.completion.usage_max_items) ~= "number" or config.completion.usage_max_items < 0) then
       return false, "completion.usage_max_items must be a non-negative number"
+    end
+  end
+
+  -- Validate formatter configuration
+  if config.formatter then
+    if config.formatter.enabled ~= nil and type(config.formatter.enabled) ~= "boolean" then
+      return false, "formatter.enabled must be a boolean"
+    end
+    if config.formatter.indent_size and (type(config.formatter.indent_size) ~= "number" or config.formatter.indent_size < 1 or config.formatter.indent_size > 16) then
+      return false, "formatter.indent_size must be a number between 1 and 16"
+    end
+    if config.formatter.indent_style then
+      local valid_styles = { space = true, tab = true }
+      if not valid_styles[config.formatter.indent_style] then
+        return false, "formatter.indent_style must be 'space' or 'tab'"
+      end
+    end
+    if config.formatter.keyword_case then
+      local valid_cases = { upper = true, lower = true, preserve = true }
+      if not valid_cases[config.formatter.keyword_case] then
+        return false, "formatter.keyword_case must be 'upper', 'lower', or 'preserve'"
+      end
+    end
+    if config.formatter.max_line_length and (type(config.formatter.max_line_length) ~= "number" or config.formatter.max_line_length < 0) then
+      return false, "formatter.max_line_length must be a non-negative number"
+    end
+    if config.formatter.newline_before_clause ~= nil and type(config.formatter.newline_before_clause) ~= "boolean" then
+      return false, "formatter.newline_before_clause must be a boolean"
+    end
+    if config.formatter.align_aliases ~= nil and type(config.formatter.align_aliases) ~= "boolean" then
+      return false, "formatter.align_aliases must be a boolean"
+    end
+    if config.formatter.align_columns ~= nil and type(config.formatter.align_columns) ~= "boolean" then
+      return false, "formatter.align_columns must be a boolean"
+    end
+    if config.formatter.comma_position then
+      local valid_positions = { leading = true, trailing = true }
+      if not valid_positions[config.formatter.comma_position] then
+        return false, "formatter.comma_position must be 'leading' or 'trailing'"
+      end
+    end
+    if config.formatter.join_on_same_line ~= nil and type(config.formatter.join_on_same_line) ~= "boolean" then
+      return false, "formatter.join_on_same_line must be a boolean"
+    end
+    if config.formatter.subquery_indent and (type(config.formatter.subquery_indent) ~= "number" or config.formatter.subquery_indent < 0) then
+      return false, "formatter.subquery_indent must be a non-negative number"
+    end
+    if config.formatter.case_indent and (type(config.formatter.case_indent) ~= "number" or config.formatter.case_indent < 0) then
+      return false, "formatter.case_indent must be a non-negative number"
+    end
+    if config.formatter.and_or_position then
+      local valid_positions = { leading = true, trailing = true }
+      if not valid_positions[config.formatter.and_or_position] then
+        return false, "formatter.and_or_position must be 'leading' or 'trailing'"
+      end
+    end
+    if config.formatter.parenthesis_spacing ~= nil and type(config.formatter.parenthesis_spacing) ~= "boolean" then
+      return false, "formatter.parenthesis_spacing must be a boolean"
+    end
+    if config.formatter.operator_spacing ~= nil and type(config.formatter.operator_spacing) ~= "boolean" then
+      return false, "formatter.operator_spacing must be a boolean"
+    end
+    if config.formatter.preserve_comments ~= nil and type(config.formatter.preserve_comments) ~= "boolean" then
+      return false, "formatter.preserve_comments must be a boolean"
+    end
+    if config.formatter.format_on_save ~= nil and type(config.formatter.format_on_save) ~= "boolean" then
+      return false, "formatter.format_on_save must be a boolean"
     end
   end
 
