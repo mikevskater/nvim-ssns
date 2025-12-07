@@ -39,6 +39,7 @@ local ThemeManager = {}
 ---@field keyword_modifier table Modifier keyword color (ASC, DESC, etc.)
 ---@field keyword_misc table Misc keyword color
 ---@field keyword_global_variable table Global variable keyword color (@@ROWCOUNT, @@VERSION, etc.)
+---@field keyword_system_procedure table System procedure keyword color (sp_*, xp_*)
 ---@field operator table Operator color
 ---@field string table String literal color
 ---@field number table Number literal color
@@ -366,6 +367,7 @@ function ThemeManager.apply_colors(colors)
   vim.api.nvim_set_hl(0, "SsnsKeywordModifier", colors.keyword_modifier or { fg = "#9CDCFE" })
   vim.api.nvim_set_hl(0, "SsnsKeywordMisc", colors.keyword_misc or { fg = "#808080" })
   vim.api.nvim_set_hl(0, "SsnsKeywordGlobalVariable", colors.keyword_global_variable or { fg = "#FF6B6B" })
+  vim.api.nvim_set_hl(0, "SsnsKeywordSystemProcedure", colors.keyword_system_procedure or { fg = "#D7BA7D" })
 
   -- Other semantic highlights
   vim.api.nvim_set_hl(0, "SsnsOperator", colors.operator or { fg = "#D4D4D4" })

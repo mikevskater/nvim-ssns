@@ -3,7 +3,7 @@
 ---@field text string The token text
 ---@field line number 1-indexed line number
 ---@field col number 1-indexed column number
----@field keyword_category string? Keyword category: "statement", "clause", "function", "datatype", "operator", "constraint", "modifier", "misc", "global_variable"
+---@field keyword_category string? Keyword category: "statement", "clause", "function", "datatype", "operator", "constraint", "modifier", "misc", "global_variable", "system_procedure"
 
 local TOKEN_TYPE = {
   KEYWORD = "keyword",         -- SELECT, FROM, WHERE, JOIN, etc.
@@ -21,6 +21,7 @@ local TOKEN_TYPE = {
   GO = "go",                   -- GO batch separator
   AT = "at",                   -- @ for variables/parameters (@UserId)
   GLOBAL_VARIABLE = "global_variable", -- @@ for system variables (@@ROWCOUNT, @@VERSION)
+  SYSTEM_PROCEDURE = "system_procedure", -- sp_*, xp_* system stored procedures
   HASH = "hash",               -- # for temp tables (#temp, ##global)
   COMMENT = "comment",         -- Block comments /* ... */
   LINE_COMMENT = "line_comment", -- Line comments -- ...
@@ -279,6 +280,106 @@ local GLOBAL_VARIABLE_KEYWORDS = {
   REPLICATION = true,
 }
 
+-- Category 10: System Stored Procedures (sp_*, xp_*)
+-- Common SQL Server system stored procedures for metadata, help, and administration
+local SYSTEM_PROCEDURE_KEYWORDS = {
+  -- Help and metadata procedures
+  sp_help = true, sp_helptext = true, sp_helpdb = true, sp_helpindex = true,
+  sp_helpconstraint = true, sp_helptrigger = true, sp_helpfile = true,
+  sp_helpfilegroup = true, sp_helplanguage = true, sp_helpserver = true,
+  sp_helpsort = true, sp_helpstats = true, sp_helpextendedproc = true,
+  sp_helprole = true, sp_helprolemember = true, sp_helpsrvrole = true,
+  sp_helpsrvrolemember = true, sp_helpuser = true, sp_helpremotelogin = true,
+  sp_helplinkedsrvlogin = true, sp_helpntgroup = true, sp_helplogins = true,
+  sp_helpsubscriberinfo = true, sp_helppublication = true, sp_helparticle = true,
+  -- Catalog procedures
+  sp_columns = true, sp_tables = true, sp_stored_procedures = true,
+  sp_databases = true, sp_fkeys = true, sp_pkeys = true, sp_server_info = true,
+  sp_special_columns = true, sp_sproc_columns = true, sp_statistics = true,
+  sp_table_privileges = true, sp_column_privileges = true, sp_datatype_info = true,
+  -- User and security procedures
+  sp_addlogin = true, sp_droplogin = true, sp_password = true, sp_defaultdb = true,
+  sp_defaultlanguage = true, sp_adduser = true, sp_dropuser = true, sp_grantdbaccess = true,
+  sp_revokedbaccess = true, sp_addrolemember = true, sp_droprolemember = true,
+  sp_addrole = true, sp_droprole = true, sp_addsrvrolemember = true, sp_dropsrvrolemember = true,
+  sp_grantlogin = true, sp_revokelogin = true, sp_denylogin = true, sp_change_users_login = true,
+  sp_validatelogins = true, sp_helprotect = true, sp_addlinkedsrvlogin = true,
+  sp_droplinkedsrvlogin = true, sp_addremotelogin = true, sp_dropremotelogin = true,
+  -- Database procedures
+  sp_dboption = true, sp_renamedb = true, sp_detach_db = true, sp_attach_db = true,
+  sp_attach_single_file_db = true, sp_certify_removable = true, sp_create_removable = true,
+  sp_dbcmptlevel = true, sp_helpdevice = true, sp_addumpdevice = true, sp_dropdevice = true,
+  sp_dbfixedrolepermission = true,
+  -- Object procedures
+  sp_rename = true, sp_renameobject = true, sp_depends = true, sp_spaceused = true,
+  sp_executesql = true, sp_refreshview = true, sp_recompile = true, sp_autostats = true,
+  sp_createstats = true, sp_updatestats = true, sp_unbindefault = true, sp_bindefault = true,
+  sp_unbindrule = true, sp_bindrule = true, sp_addtype = true, sp_droptype = true,
+  sp_addmessage = true, sp_altermessage = true, sp_dropmessage = true,
+  -- Linked server procedures
+  sp_addlinkedserver = true, sp_droplinkedserver = true, sp_linkedservers = true,
+  sp_serveroption = true, sp_setnetname = true, sp_addserver = true, sp_dropserver = true,
+  sp_helpsubscription = true, sp_testlinkedserver = true,
+  -- Replication procedures
+  sp_addpublication = true, sp_droppublication = true, sp_addarticle = true, sp_droparticle = true,
+  sp_addsubscription = true, sp_dropsubscription = true, sp_addsubscriber = true,
+  sp_dropsubscriber = true, sp_addpullsubscription = true, sp_droppullsubscription = true,
+  sp_changemergepublication = true, sp_changemergearticle = true, sp_changemergesubscription = true,
+  sp_addmergepublication = true, sp_dropmergepublication = true, sp_addmergearticle = true,
+  sp_dropmergearticle = true, sp_addmergesubscription = true, sp_dropmergesubscription = true,
+  sp_replcmds = true, sp_replcounters = true, sp_repldone = true, sp_replflush = true,
+  sp_repltrans = true, sp_publication_validation = true, sp_article_validation = true,
+  -- Job and agent procedures
+  sp_add_job = true, sp_delete_job = true, sp_update_job = true, sp_start_job = true,
+  sp_stop_job = true, sp_add_jobstep = true, sp_delete_jobstep = true, sp_update_jobstep = true,
+  sp_add_jobschedule = true, sp_delete_jobschedule = true, sp_update_jobschedule = true,
+  sp_add_schedule = true, sp_delete_schedule = true, sp_attach_schedule = true,
+  sp_detach_schedule = true, sp_add_jobserver = true, sp_delete_jobserver = true,
+  sp_add_operator = true, sp_delete_operator = true, sp_update_operator = true,
+  sp_add_alert = true, sp_delete_alert = true, sp_update_alert = true,
+  sp_add_notification = true, sp_delete_notification = true, sp_update_notification = true,
+  sp_add_category = true, sp_delete_category = true, sp_update_category = true,
+  sp_help_job = true, sp_help_jobstep = true, sp_help_jobschedule = true,
+  sp_help_operator = true, sp_help_alert = true, sp_help_notification = true,
+  sp_help_category = true, sp_help_jobhistory = true, sp_purge_jobhistory = true,
+  -- Maintenance procedures
+  sp_cycle_errorlog = true, sp_readerrorlog = true, sp_who = true, sp_who2 = true,
+  sp_lock = true, sp_monitor = true, sp_configure = true, sp_procoption = true,
+  sp_trace_create = true, sp_trace_setevent = true, sp_trace_setfilter = true,
+  sp_trace_setstatus = true, sp_trace_generateevent = true,
+  -- XML procedures
+  sp_xml_preparedocument = true, sp_xml_removedocument = true,
+  -- Full-text search procedures
+  sp_fulltext_database = true, sp_fulltext_catalog = true, sp_fulltext_table = true,
+  sp_fulltext_column = true, sp_fulltext_service = true, sp_help_fulltext_catalogs = true,
+  sp_help_fulltext_tables = true, sp_help_fulltext_columns = true,
+  sp_help_fulltext_catalogs_cursor = true, sp_help_fulltext_tables_cursor = true,
+  sp_help_fulltext_columns_cursor = true,
+  -- Cursor procedures
+  sp_cursor = true, sp_cursor_list = true, sp_cursoropen = true, sp_cursorfetch = true,
+  sp_cursorclose = true, sp_cursoroption = true, sp_cursorprepare = true,
+  sp_cursorexecute = true, sp_cursorunprepare = true, sp_cursorprepexec = true,
+  sp_describe_cursor = true, sp_describe_cursor_columns = true, sp_describe_cursor_tables = true,
+  -- OLE Automation procedures
+  sp_OACreate = true, sp_OADestroy = true, sp_OAGetErrorInfo = true, sp_OAGetProperty = true,
+  sp_OAMethod = true, sp_OASetProperty = true, sp_OAStop = true,
+  -- Extended stored procedures (xp_*)
+  xp_cmdshell = true, xp_msver = true, xp_sprintf = true, xp_sscanf = true,
+  xp_loginconfig = true, xp_logininfo = true, xp_grantlogin = true, xp_revokelogin = true,
+  xp_logevent = true, xp_instance_regread = true, xp_instance_regwrite = true,
+  xp_regread = true, xp_regwrite = true, xp_regdelete = true, xp_regenumkeys = true,
+  xp_regenumvalues = true, xp_regaddmultistring = true, xp_regremovemultistring = true,
+  xp_fileexist = true, xp_fixeddrives = true, xp_subdirs = true, xp_dirtree = true,
+  xp_create_subdir = true, xp_delete_file = true, xp_getfiledetails = true,
+  xp_availablemedia = true, xp_enumdsn = true, xp_enumerrorlogs = true,
+  xp_getnetname = true, xp_readerrorlog = true, xp_servicecontrol = true,
+  xp_sqlagent_enum_jobs = true, xp_sqlagent_is_starting = true, xp_sqlagent_notify = true,
+  xp_sendmail = true, xp_startmail = true, xp_stopmail = true, xp_deletemail = true,
+  xp_findnextmsg = true, xp_readmail = true,
+  -- DBCC commands (treated as system procedures)
+  DBCC = true,
+}
+
 -- Build lookup: keyword -> category
 local KEYWORD_TO_CATEGORY = {}
 local category_tables = {
@@ -413,12 +514,19 @@ function Tokenizer.tokenize(text)
       elseif current_token:match("^%d+%.?%d*$") or current_token:match("^%d*%.%d+$") then
         -- Simple number detection (integer or decimal)
         token_type = TOKEN_TYPE.NUMBER
+      elseif SYSTEM_PROCEDURE_KEYWORDS[current_token] or SYSTEM_PROCEDURE_KEYWORDS[current_token:lower()] then
+        -- System stored procedure (sp_*, xp_*, DBCC)
+        token_type = TOKEN_TYPE.SYSTEM_PROCEDURE
+        keyword_category = "system_procedure"
       else
         token_type = TOKEN_TYPE.IDENTIFIER
       end
     elseif token_type == TOKEN_TYPE.GLOBAL_VARIABLE then
       -- Set keyword_category for global variables (@@ROWCOUNT, @@VERSION, etc.)
       keyword_category = "global_variable"
+    elseif token_type == TOKEN_TYPE.SYSTEM_PROCEDURE then
+      -- Set keyword_category for system procedures (sp_*, xp_*)
+      keyword_category = "system_procedure"
     end
 
     table.insert(tokens, {
