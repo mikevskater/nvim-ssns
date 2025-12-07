@@ -3,7 +3,7 @@
 ---@field text string The token text
 ---@field line number 1-indexed line number
 ---@field col number 1-indexed column number
----@field keyword_category string? Keyword category: "statement", "clause", "function", "datatype", "operator", "constraint", "modifier", "misc"
+---@field keyword_category string? Keyword category: "statement", "clause", "function", "datatype", "operator", "constraint", "modifier", "misc", "global_variable"
 
 local TOKEN_TYPE = {
   KEYWORD = "keyword",         -- SELECT, FROM, WHERE, JOIN, etc.
@@ -19,7 +19,8 @@ local TOKEN_TYPE = {
   SEMICOLON = "semicolon",     -- ; (emitted but ignored by parser)
   STAR = "star",               -- * (wildcard or multiply)
   GO = "go",                   -- GO batch separator
-  AT = "at",                   -- @ for variables/parameters (@UserId, @@ROWCOUNT)
+  AT = "at",                   -- @ for variables/parameters (@UserId)
+  GLOBAL_VARIABLE = "global_variable", -- @@ for system variables (@@ROWCOUNT, @@VERSION)
   HASH = "hash",               -- # for temp tables (#temp, ##global)
   COMMENT = "comment",         -- Block comments /* ... */
   LINE_COMMENT = "line_comment", -- Line comments -- ...
@@ -253,6 +254,31 @@ local MISC_KEYWORDS = {
   VIEWS = true, WHENEVER = true, WITHOUT = true, WRITE = true, ZONE = true, CONNECT = true, CONSTRAINTS = true,
 }
 
+-- Category 9: Global Variables (@@SERVERNAME, @@VERSION, @@ROWCOUNT, etc.)
+-- These are SQL Server system functions/variables that start with @@
+local GLOBAL_VARIABLE_KEYWORDS = {
+  -- Server configuration
+  SERVERNAME = true, SERVICENAME = true, VERSION = true, LANGUAGE = true, LANGID = true,
+  MAX_CONNECTIONS = true, MAX_PRECISION = true, MICROSOFTVERSION = true,
+  -- Error and row handling
+  ROWCOUNT = true, ERROR = true, TRANCOUNT = true,
+  -- Identity
+  IDENTITY = true,
+  -- Cursor
+  FETCH_STATUS = true, CURSOR_ROWS = true,
+  -- Date/Time configuration
+  DATEFIRST = true, DBTS = true,
+  -- Server statistics
+  CONNECTIONS = true, CPU_BUSY = true, IDLE = true, IO_BUSY = true,
+  PACKET_ERRORS = true, PACK_RECEIVED = true, PACK_SENT = true,
+  TOTAL_ERRORS = true, TOTAL_READ = true, TOTAL_WRITE = true, TIMETICKS = true,
+  -- Session
+  NESTLEVEL = true, OPTIONS = true, PROCID = true, SPID = true, TEXTSIZE = true,
+  LOCK_TIMEOUT = true, DEF_SORTORDER_ID = true,
+  -- Replication
+  REPLICATION = true,
+}
+
 -- Build lookup: keyword -> category
 local KEYWORD_TO_CATEGORY = {}
 local category_tables = {
@@ -390,6 +416,9 @@ function Tokenizer.tokenize(text)
       else
         token_type = TOKEN_TYPE.IDENTIFIER
       end
+    elseif token_type == TOKEN_TYPE.GLOBAL_VARIABLE then
+      -- Set keyword_category for global variables (@@ROWCOUNT, @@VERSION, etc.)
+      keyword_category = "global_variable"
     end
 
     table.insert(tokens, {
@@ -518,13 +547,45 @@ function Tokenizer.tokenize(text)
         col = col + 1
         i = i + 1
 
-      -- Check for @ (variables/parameters)
-      -- @ is only valid at start of identifier for variables (@var, @@system_var)
+      -- Check for @ (variables/parameters) and @@ (global variables)
+      -- @ is only valid at start of identifier for variables (@var)
+      -- @@ is for system/global variables (@@ROWCOUNT, @@VERSION)
       -- If @ appears mid-identifier, it must be bracketed [col@name]
       elseif char == '@' then
-        emit_single_char_token(char, TOKEN_TYPE.AT)
-        col = col + 1
-        i = i + 1
+        -- Check for @@ (global variable)
+        if next_char == '@' then
+          emit_token() -- Emit any accumulated token first
+          start_token()
+          -- Consume both @@ and the following identifier
+          local global_var = "@@"
+          local j = i + 2
+          -- Collect the identifier part
+          while j <= #text do
+            local c = text:sub(j, j)
+            if is_alnum(c) then
+              global_var = global_var .. c
+              j = j + 1
+            else
+              break
+            end
+          end
+          -- Check if the identifier part (without @@) is a known global variable
+          local var_name = global_var:sub(3):upper()
+          current_token = global_var
+          if GLOBAL_VARIABLE_KEYWORDS[var_name] then
+            emit_token(TOKEN_TYPE.GLOBAL_VARIABLE)
+          else
+            -- Unknown @@variable, still emit as GLOBAL_VARIABLE for highlighting
+            emit_token(TOKEN_TYPE.GLOBAL_VARIABLE)
+          end
+          col = col + #global_var
+          i = j
+        else
+          -- Single @ for user variables
+          emit_single_char_token(char, TOKEN_TYPE.AT)
+          col = col + 1
+          i = i + 1
+        end
 
       -- Check for # (temp tables)
       -- # is only valid at start of identifier for temp tables (#temp, ##global)
