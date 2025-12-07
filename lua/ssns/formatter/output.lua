@@ -198,20 +198,23 @@ function Output.generate(tokens, config)
     if config.newline_before_clause and token.type == "keyword" then
       local upper = string.upper(token.text)
 
+      -- Get base indent from token (for subquery support)
+      local base_indent = token.indent_level or 0
+
       -- Check if this is a join modifier or JOIN keyword
       if token.is_join_modifier or is_join_modifier(upper) then
         -- This is a join modifier (INNER, LEFT, OUTER, etc.)
         -- Add newline if this is the START of a new join clause
         if not pending_join then
           needs_newline = true
-          current_indent = 0
+          current_indent = base_indent
         end
         pending_join = true
       elseif is_join_keyword(upper) then
         -- This is JOIN - only add newline if no modifier preceded it
         if not pending_join then
           needs_newline = true
-          current_indent = 0
+          current_indent = base_indent
         end
         pending_join = false
       elseif upper == "BY" and token.part_of_compound then
@@ -219,7 +222,7 @@ function Output.generate(tokens, config)
         needs_newline = false
       elseif is_major_clause(token.text) then
         needs_newline = true
-        current_indent = 0
+        current_indent = base_indent
         pending_join = false
       end
     end
@@ -227,6 +230,7 @@ function Output.generate(tokens, config)
     -- Handle ON clause positioning
     if is_on_keyword(token) and not config.join_on_same_line then
       needs_newline = true
+      current_indent = token.indent_level or 0
       extra_indent = 1
     end
 
@@ -234,6 +238,7 @@ function Output.generate(tokens, config)
     if in_where_clause and is_and_or(token) then
       if config.and_or_position == "leading" then
         needs_newline = true
+        current_indent = token.indent_level or 0
         extra_indent = 1
       end
     end
@@ -243,6 +248,7 @@ function Output.generate(tokens, config)
       if config.comma_position == "leading" then
         -- Comma starts new line
         needs_newline = true
+        current_indent = token.indent_level or 0
         extra_indent = 1
       end
       -- For trailing, we handle after adding the token
@@ -280,8 +286,9 @@ function Output.generate(tokens, config)
         table.insert(result, line_text)
       end
       current_line = {}
-      -- Indent continuation
-      local indent = get_indent(config, 1)
+      -- Indent continuation (base indent from subquery + 1 for column list)
+      local base_indent = token.indent_level or 0
+      local indent = get_indent(config, base_indent + 1)
       if indent ~= "" then
         table.insert(current_line, indent)
       end

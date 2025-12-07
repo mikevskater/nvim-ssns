@@ -24,6 +24,7 @@ local function create_state()
     line_length = 0,
     paren_depth = 0,
     in_subquery = false,
+    subquery_stack = {},  -- Stack of {paren_depth, indent_level} for nested subqueries
     clause_stack = {},
     last_token = nil,
     current_clause = nil,
@@ -237,7 +238,7 @@ function Engine.format(sql, config, opts)
         state.current_clause = string.upper(token.text)
       end
 
-      -- Track parenthesis depth
+      -- Track parenthesis depth and subqueries
       if token.type == "paren_open" then
         state.paren_depth = state.paren_depth + 1
         -- Check if this might be a subquery (next significant token is SELECT)
@@ -248,20 +249,34 @@ function Engine.format(sql, config, opts)
         end
         if next_idx <= #tokens and tokens[next_idx].type == "keyword" and
            string.upper(tokens[next_idx].text) == "SELECT" then
+          -- Push current state onto subquery stack before entering subquery
+          table.insert(state.subquery_stack, {
+            paren_depth = state.paren_depth,
+            indent_level = state.indent_level,
+          })
           state.in_subquery = true
           state.indent_level = state.indent_level + config.subquery_indent
+          processed.starts_subquery = true
         end
       elseif token.type == "paren_close" then
-        state.paren_depth = math.max(0, state.paren_depth - 1)
-        if state.in_subquery and state.paren_depth == 0 then
-          state.in_subquery = false
-          state.indent_level = math.max(0, state.indent_level - config.subquery_indent)
+        -- Check if we're closing a subquery
+        if #state.subquery_stack > 0 then
+          local top = state.subquery_stack[#state.subquery_stack]
+          if state.paren_depth == top.paren_depth then
+            -- Pop from subquery stack
+            table.remove(state.subquery_stack)
+            state.indent_level = top.indent_level
+            state.in_subquery = #state.subquery_stack > 0
+            processed.ends_subquery = true
+          end
         end
+        state.paren_depth = math.max(0, state.paren_depth - 1)
       end
 
       processed.indent_level = state.indent_level
       processed.paren_depth = state.paren_depth
       processed.current_clause = state.current_clause
+      processed.in_subquery = state.in_subquery
 
       table.insert(processed_tokens, processed)
       state.last_token = token
