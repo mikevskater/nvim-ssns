@@ -94,6 +94,13 @@ local function needs_space_before(prev, curr, config)
     return config.parenthesis_spacing
   end
 
+  -- Space after closing paren before keyword/identifier (e.g., COUNT(*) AS)
+  if prev.type == "paren_close" then
+    if curr.type == "keyword" or curr.type == "identifier" or curr.type == "bracket_id" then
+      return true
+    end
+  end
+
   -- No space after dot (for qualified names)
   if prev.type == "dot" then
     return false
