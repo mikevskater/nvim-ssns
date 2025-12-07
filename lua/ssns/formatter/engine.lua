@@ -15,6 +15,95 @@ local Engine = {}
 
 local Tokenizer = require('ssns.completion.tokenizer')
 local Output = require('ssns.formatter.output')
+local Stats = require('ssns.formatter.stats')
+
+-- High-resolution timer
+local hrtime = vim.loop.hrtime
+
+---@class TokenCache
+---@field entries table<string, {tokens: Token[], timestamp: number}>
+---@field max_entries number Maximum cache entries
+---@field ttl_ns number Time-to-live in nanoseconds
+local TokenCache = {
+  entries = {},
+  max_entries = 100,
+  ttl_ns = 60 * 1000000000, -- 60 seconds
+}
+
+---Simple hash function for cache key
+---@param sql string
+---@return string
+local function hash_sql(sql)
+  -- Use a combination of length and sampled characters for fast hashing
+  local len = #sql
+  if len <= 64 then
+    return sql
+  end
+  -- Sample characters at regular intervals + length
+  local parts = { tostring(len) }
+  local step = math.floor(len / 8)
+  for i = 1, len, step do
+    table.insert(parts, sql:sub(i, i))
+  end
+  table.insert(parts, sql:sub(-16))
+  return table.concat(parts)
+end
+
+---Get cached tokens or nil
+---@param sql string
+---@return Token[]|nil
+function TokenCache.get(sql)
+  local key = hash_sql(sql)
+  local entry = TokenCache.entries[key]
+  if entry then
+    local now = hrtime()
+    if now - entry.timestamp < TokenCache.ttl_ns then
+      return entry.tokens
+    end
+    -- Expired
+    TokenCache.entries[key] = nil
+  end
+  return nil
+end
+
+---Cache tokens
+---@param sql string
+---@param tokens Token[]
+function TokenCache.set(sql, tokens)
+  local key = hash_sql(sql)
+  TokenCache.entries[key] = {
+    tokens = tokens,
+    timestamp = hrtime(),
+  }
+
+  -- Evict old entries if over limit
+  local count = 0
+  for _ in pairs(TokenCache.entries) do
+    count = count + 1
+  end
+
+  if count > TokenCache.max_entries then
+    -- Remove oldest entries
+    local oldest_key, oldest_time = nil, math.huge
+    for k, v in pairs(TokenCache.entries) do
+      if v.timestamp < oldest_time then
+        oldest_key = k
+        oldest_time = v.timestamp
+      end
+    end
+    if oldest_key then
+      TokenCache.entries[oldest_key] = nil
+    end
+  end
+end
+
+---Clear the token cache
+function TokenCache.clear()
+  TokenCache.entries = {}
+end
+
+-- Export cache for external use
+Engine.cache = TokenCache
 
 ---Create a new formatter state
 ---@return FormatterState
@@ -129,27 +218,58 @@ end
 ---Format SQL text with error recovery
 ---@param sql string The SQL text to format
 ---@param config FormatterConfig The formatter configuration
----@param opts? {dialect?: string} Optional formatting options
+---@param opts? {dialect?: string, skip_stats?: boolean} Optional formatting options
 ---@return string formatted The formatted SQL text
 function Engine.format(sql, config, opts)
   opts = opts or {}
+  local skip_stats = opts.skip_stats
 
   -- Handle empty input
   if not sql or sql == "" then
     return sql
   end
 
-  -- Safe tokenization - return original on failure
-  local tokens, err = safe_tokenize(sql)
-  if not tokens or #tokens == 0 then
-    -- Best effort: return original SQL if tokenization fails
-    return sql
+  local total_start = hrtime()
+  local tokenization_time = 0
+  local processing_time = 0
+  local output_time = 0
+  local cache_hit = false
+  local token_count = 0
+
+  -- Try cache first
+  local tokens = TokenCache.get(sql)
+  if tokens then
+    cache_hit = true
+  else
+    -- Safe tokenization - return original on failure
+    local tokenize_start = hrtime()
+    local err
+    tokens, err = safe_tokenize(sql)
+    tokenization_time = hrtime() - tokenize_start
+
+    if not tokens or #tokens == 0 then
+      -- Best effort: return original SQL if tokenization fails
+      if not skip_stats then
+        Stats.record({
+          total_ns = hrtime() - total_start,
+          input_size = #sql,
+          cache_hit = false,
+        })
+      end
+      return sql
+    end
+
+    -- Cache the tokens
+    TokenCache.set(sql, tokens)
   end
+
+  token_count = #tokens
 
   -- Create formatter state
   local state = create_state()
 
   -- Process tokens with error recovery
+  local process_start = hrtime()
   local ok, processed_or_error = pcall(function()
     local processed_tokens = {}
 
@@ -437,14 +557,41 @@ function Engine.format(sql, config, opts)
 
     return processed_tokens
   end)
+  processing_time = hrtime() - process_start
 
   if not ok then
     -- Error during token processing - return original
+    if not skip_stats then
+      Stats.record({
+        tokenization_ns = tokenization_time,
+        processing_ns = processing_time,
+        total_ns = hrtime() - total_start,
+        input_size = #sql,
+        token_count = token_count,
+        cache_hit = cache_hit,
+      })
+    end
     return sql
   end
 
   -- Generate output with error recovery
+  local output_start = hrtime()
   local output_ok, output_or_error = pcall(Output.generate, processed_or_error, config)
+  output_time = hrtime() - output_start
+
+  -- Record stats
+  if not skip_stats then
+    Stats.record({
+      tokenization_ns = tokenization_time,
+      processing_ns = processing_time,
+      output_ns = output_time,
+      total_ns = hrtime() - total_start,
+      input_size = #sql,
+      token_count = token_count,
+      cache_hit = cache_hit,
+    })
+  end
+
   if not output_ok then
     -- Error during output generation - return original
     return sql
