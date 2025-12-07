@@ -295,8 +295,12 @@ function Output.generate(tokens, config)
       -- Get base indent from token (for subquery support)
       local base_indent = token.indent_level or 0
 
+      -- Skip newlines for keywords inside OVER clause (PARTITION BY, ORDER BY, etc.)
+      if token.in_over_clause then
+        -- Don't add newline for PARTITION, ORDER, BY inside OVER
+        needs_newline = false
       -- Check if this is a join modifier or JOIN keyword
-      if token.is_join_modifier or is_join_modifier(upper) then
+      elseif token.is_join_modifier or is_join_modifier(upper) then
         -- This is a join modifier (INNER, LEFT, OUTER, etc.)
         -- Add newline if this is the START of a new join clause
         if not pending_join then

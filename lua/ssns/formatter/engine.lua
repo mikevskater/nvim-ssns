@@ -258,6 +258,25 @@ function Engine.format(sql, config, opts)
           state.in_cte = false
         end
 
+        -- Handle OVER clause (window function) tracking
+        if upper == "OVER" then
+          state.in_over = true
+          processed.is_over_start = true
+        elseif upper == "PARTITION" and state.in_over then
+          processed.is_over_partition = true
+          processed.in_over_clause = true
+        elseif upper == "ORDER" and state.in_over then
+          -- ORDER BY inside OVER clause
+          processed.is_over_order = true
+          processed.in_over_clause = true
+        elseif upper == "BY" and state.in_over then
+          processed.in_over_clause = true
+        elseif upper == "ROWS" or upper == "RANGE" then
+          if state.in_over then
+            processed.in_over_clause = true
+          end
+        end
+
         -- Handle CASE expression tracking
         if upper == "CASE" then
           -- Push current indent onto case stack and start CASE expression
@@ -321,6 +340,12 @@ function Engine.format(sql, config, opts)
       if token.type == "paren_open" then
         state.paren_depth = state.paren_depth + 1
 
+        -- Check if this starts an OVER clause body
+        if state.in_over and state.over_paren_depth == 0 then
+          state.over_paren_depth = state.paren_depth
+          processed.starts_over_body = true
+        end
+
         -- Check if this is a CTE body start
         if state.cte_body_start then
           -- Push CTE body onto stack (similar to subquery)
@@ -351,6 +376,12 @@ function Engine.format(sql, config, opts)
           end
         end
       elseif token.type == "paren_close" then
+        -- Check if we're closing an OVER clause body
+        if state.in_over and state.paren_depth == state.over_paren_depth then
+          state.in_over = false
+          state.over_paren_depth = 0
+          processed.ends_over_body = true
+        end
         -- Check if we're closing a CTE body
         if #state.cte_stack > 0 then
           local top = state.cte_stack[#state.cte_stack]
