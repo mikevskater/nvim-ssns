@@ -167,6 +167,13 @@ function Ssns.setup(user_config)
         local SemanticHighlighter = require('ssns.highlighting.semantic')
         SemanticHighlighter.setup_buffer(bufnr)
       end
+
+      -- Setup SQL formatter keymaps and format-on-save
+      local formatter_config = Config.get_formatter()
+      if formatter_config.enabled then
+        local FormatterCommands = require('ssns.formatter.commands')
+        FormatterCommands.setup_buffer(bufnr)
+      end
     end,
   })
 end
@@ -513,6 +520,10 @@ function Ssns._register_commands()
     nargs = 0,
     desc = "Add a new server connection",
   })
+
+  -- SQL Formatter Commands
+  local FormatterCommands = require('ssns.formatter.commands')
+  FormatterCommands.register_commands()
 
   -- :SSNSManageConnections - Open connection manager (alias for SSNSAddServer)
   vim.api.nvim_create_user_command("SSNSManageConnections", function()

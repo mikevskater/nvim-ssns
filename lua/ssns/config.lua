@@ -80,6 +80,7 @@
 ---@field filter FilterKeymaps Filter UI keymaps
 ---@field param ParamKeymaps Parameter input keymaps
 ---@field add_server AddServerKeymaps Add server UI keymaps
+---@field formatter FormatterKeymaps SQL formatter keymaps
 
 ---@class CommonKeymaps Common keymaps shared across multiple UIs
 ---@field close string Close window (default: "q")
@@ -154,6 +155,10 @@
 ---@field test string Test connection (default: "T")
 ---@field back string Go back (default: "b")
 ---@field toggle_auto_connect string Toggle auto-connect (default: "a")
+
+---@class FormatterKeymaps SQL formatter keymaps
+---@field format_buffer string Format entire buffer (default: "<Leader>sf")
+---@field format_statement string Format statement under cursor (default: "<Leader>ss")
 
 ---@class TableHelpersConfig
 ---@field sqlserver table<string, string>? SQL Server helper templates
@@ -521,6 +526,12 @@ local default_config = {
       test = "T",            -- Test connection
       back = "b",            -- Go back
       toggle_auto_connect = "a", -- Toggle auto-connect (form view)
+    },
+
+    -- SQL formatter keymaps
+    formatter = {
+      format_buffer = "<Leader>sf",     -- Format entire buffer (also works for visual selection)
+      format_statement = "<Leader>ss",  -- Format statement under cursor
     },
   },
 
