@@ -584,13 +584,23 @@ function Tokenizer.tokenize(text)
         i = i + 1
 
       -- Check for string literal start
+      -- Handle N'unicode string' prefix - include N with the string
       elseif char == "'" then
-        emit_token()
-        start_token()
-        current_token = "'"
-        state = STATE.IN_STRING
-        col = col + 1
-        i = i + 1
+        -- Check if current accumulated token is just 'N' or 'n' (Unicode string prefix)
+        if current_token:upper() == "N" then
+          -- Include the N prefix with the string
+          current_token = current_token .. "'"
+          state = STATE.IN_STRING
+          col = col + 1
+          i = i + 1
+        else
+          emit_token()
+          start_token()
+          current_token = "'"
+          state = STATE.IN_STRING
+          col = col + 1
+          i = i + 1
+        end
 
       -- Check for bracketed identifier start
       elseif char == '[' then
