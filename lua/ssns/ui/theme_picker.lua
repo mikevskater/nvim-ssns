@@ -199,7 +199,7 @@ local function calculate_layout(cols, lines)
       focusable = true,
     },
     footer = {
-      text = " <Enter>=Apply  <Tab>=Switch Panel  <Esc>=Cancel  j/k=Navigate ",
+      text = " <Enter>=Apply  <Tab>=Switch Panel  <Esc>=Cancel  j/k=Navigate  Click=Select ",
       row = start_row + total_height + 2,
       col = start_col,
       width = total_width,
@@ -376,6 +376,12 @@ function ThemePicker._render_themes()
   -- Store line map in state for cursor positioning
   state.theme_line_map = theme_line_map
 
+  -- Build reverse map (line -> theme index) for mouse click support
+  state.line_to_theme = {}
+  for theme_idx, line_num in pairs(theme_line_map) do
+    state.line_to_theme[line_num] = theme_idx
+  end
+
   -- Set content
   vim.api.nvim_buf_set_option(state.themes_buf, 'modifiable', true)
   vim.api.nvim_buf_set_lines(state.themes_buf, 0, -1, false, lines)
@@ -453,6 +459,9 @@ function ThemePicker._setup_keymaps()
 
     -- Switch to preview panel
     { lhs = km.next_field or "<Tab>", rhs = function() ThemePicker._swap_focus() end, desc = "Switch to preview" },
+
+    -- Mouse click support
+    { lhs = "<LeftMouse>", rhs = function() ThemePicker._handle_mouse_click() end, desc = "Select theme with mouse" },
   }
 
   KeymapManager.set_multiple(state.themes_buf, themes_keymaps, true)
@@ -503,6 +512,39 @@ function ThemePicker._setup_autocmds()
       end
     end,
   })
+end
+
+---Handle mouse click on theme list
+function ThemePicker._handle_mouse_click()
+  if not state then return end
+
+  -- Get actual mouse click position (not cursor position)
+  local mouse = vim.fn.getmousepos()
+
+  -- Verify click was in themes window
+  if mouse.winid ~= state.themes_win then
+    return
+  end
+
+  -- mouse.line is 1-based, convert to 0-based for our map
+  local line = mouse.line - 1
+
+  -- Check if this line corresponds to a theme
+  local theme_idx = state.line_to_theme and state.line_to_theme[line]
+  if theme_idx and theme_idx >= 1 and theme_idx <= #state.available_themes then
+    state.selected_idx = theme_idx
+
+    -- Re-render themes list
+    ThemePicker._render_themes()
+
+    -- Preview selected theme
+    local theme = state.available_themes[state.selected_idx]
+    if theme then
+      ThemeManager.preview(theme.name)
+      -- Re-apply semantic highlighting after theme change
+      ThemePicker._apply_preview_highlights()
+    end
+  end
 end
 
 ---Navigate theme list
