@@ -7,3 +7,6 @@ rplugin/node/ssns-db/node_modules/
 rplugin/node/ssns-db/package-lock.json
 *.json
 nul
+
+# User themes (custom themes created by user)
+lua/ssns/ui/themes/user_themes/*.lua

@@ -1,0 +1,8 @@
+-- This directory is for user-created themes
+-- Files in this directory are git-ignored
+--
+-- To create a custom theme:
+-- 1. Copy an existing theme from the parent directory
+-- 2. Rename it (e.g., my_theme.lua)
+-- 3. Modify the colors to your liking
+-- 4. Restart Neovim or use :SSNSTheme to apply
