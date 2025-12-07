@@ -22,8 +22,9 @@ local DdlStatement = {}
 ---@param temp_tables table<string, TempTableInfo> Temp tables collection to update
 ---@return StatementChunk chunk The parsed statement chunk
 function DdlStatement.parse_create(state, scope, temp_tables)
+  state:mark_chunk_start()  -- Mark token position for this chunk
   local start_token = state:current()
-  local chunk = BaseStatement.create_chunk("CREATE", start_token, state.go_batch_index)
+  local chunk = BaseStatement.create_chunk("CREATE", start_token, state.go_batch_index, state)
 
   scope.statement_type = "CREATE"
   state:advance()  -- consume CREATE
@@ -68,8 +69,9 @@ end
 ---@param temp_tables table<string, TempTableInfo> Temp tables collection to update
 ---@return StatementChunk chunk The parsed statement chunk
 function DdlStatement.parse_alter(state, scope, temp_tables)
+  state:mark_chunk_start()  -- Mark token position for this chunk
   local start_token = state:current()
-  local chunk = BaseStatement.create_chunk("ALTER", start_token, state.go_batch_index)
+  local chunk = BaseStatement.create_chunk("ALTER", start_token, state.go_batch_index, state)
 
   scope.statement_type = "ALTER"
   state:advance()  -- consume ALTER
@@ -105,8 +107,9 @@ end
 ---@param temp_tables table<string, TempTableInfo> Temp tables collection to update
 ---@return StatementChunk chunk The parsed statement chunk
 function DdlStatement.parse_drop(state, scope, temp_tables)
+  state:mark_chunk_start()  -- Mark token position for this chunk
   local start_token = state:current()
-  local chunk = BaseStatement.create_chunk("DROP", start_token, state.go_batch_index)
+  local chunk = BaseStatement.create_chunk("DROP", start_token, state.go_batch_index, state)
 
   scope.statement_type = "DROP"
   state:advance()  -- consume DROP
@@ -145,8 +148,9 @@ end
 ---@param temp_tables table<string, TempTableInfo> Temp tables collection to update
 ---@return StatementChunk chunk The parsed statement chunk
 function DdlStatement.parse_declare(state, scope, temp_tables)
+  state:mark_chunk_start()  -- Mark token position for this chunk
   local start_token = state:current()
-  local chunk = BaseStatement.create_chunk("DECLARE", start_token, state.go_batch_index)
+  local chunk = BaseStatement.create_chunk("DECLARE", start_token, state.go_batch_index, state)
 
   scope.statement_type = "DECLARE"
   state:advance()  -- consume DECLARE
@@ -196,8 +200,9 @@ end
 ---@param temp_tables table<string, TempTableInfo> Temp tables collection (unused)
 ---@return StatementChunk chunk The parsed statement chunk
 function DdlStatement.parse_truncate(state, scope, temp_tables)
+  state:mark_chunk_start()  -- Mark token position for this chunk
   local start_token = state:current()
-  local chunk = BaseStatement.create_chunk("TRUNCATE", start_token, state.go_batch_index)
+  local chunk = BaseStatement.create_chunk("TRUNCATE", start_token, state.go_batch_index, state)
 
   scope.statement_type = "TRUNCATE"
   state:advance()  -- consume TRUNCATE

@@ -11,8 +11,9 @@ local BaseStatement = {}
 ---@param statement_type string The type of statement (SELECT, INSERT, UPDATE, etc.)
 ---@param start_token table The token at which the statement begins
 ---@param go_batch_index number Which GO batch this statement belongs to
+---@param state? ParserState Optional parser state for token index tracking
 ---@return StatementChunk
-function BaseStatement.create_chunk(statement_type, start_token, go_batch_index)
+function BaseStatement.create_chunk(statement_type, start_token, go_batch_index, state)
   return {
     statement_type = statement_type,
     tables = {},
@@ -30,13 +31,22 @@ function BaseStatement.create_chunk(statement_type, start_token, go_batch_index)
     end_col = start_token.col,
     go_batch_index = go_batch_index,
     clause_positions = {},
+    -- Token range indices for efficient token retrieval
+    token_start_idx = state and state.chunk_start_pos or nil,
+    token_end_idx = nil,  -- Will be set when chunk is finalized
   }
 end
 
 ---Finalize chunk after parsing (build aliases, resolve columns, copy subqueries)
 ---@param chunk StatementChunk The chunk to finalize
 ---@param scope ScopeContext The scope context with parsed data
-function BaseStatement.finalize_chunk(chunk, scope)
+---@param state? ParserState Optional parser state for token index tracking
+function BaseStatement.finalize_chunk(chunk, scope, state)
+  -- Set token_end_idx if state is provided
+  if state and chunk.token_start_idx then
+    -- pos is after the last token we consumed, so end_idx is pos - 1
+    chunk.token_end_idx = state.pos > 1 and state.pos - 1 or state.pos
+  end
   -- Build alias mapping from tables
   for _, table_ref in ipairs(chunk.tables) do
     if table_ref.alias then

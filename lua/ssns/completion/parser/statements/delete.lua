@@ -21,8 +21,9 @@ local DeleteStatement = {}
 ---@param temp_tables table<string, TempTableInfo> Temp tables collection (unused)
 ---@return StatementChunk chunk The parsed statement chunk
 function DeleteStatement.parse(state, scope, temp_tables)
+  state:mark_chunk_start()  -- Mark token position for this chunk
   local start_token = state:current()
-  local chunk = BaseStatement.create_chunk("DELETE", start_token, state.go_batch_index)
+  local chunk = BaseStatement.create_chunk("DELETE", start_token, state.go_batch_index, state)
 
   scope.statement_type = "DELETE"
   state:advance()  -- consume DELETE

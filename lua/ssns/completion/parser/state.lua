@@ -9,6 +9,7 @@ local Keywords = require('ssns.completion.parser.utils.keywords')
 ---@field tokens table[] Token array
 ---@field pos number Current token position (1-indexed)
 ---@field go_batch_index number Current GO batch (0-indexed)
+---@field chunk_start_pos number Token index where current chunk started (for token range tracking)
 local ParserState = {}
 ParserState.__index = ParserState
 
@@ -20,10 +21,17 @@ function ParserState.new(tokens)
     tokens = tokens,
     pos = 1,
     go_batch_index = 0,  -- 0-indexed: first batch is 0, incremented after GO
+    chunk_start_pos = 1,  -- Token index where current chunk started
   }, ParserState)
   -- Skip any leading comments
   state:skip_comments()
   return state
+end
+
+---Mark the current position as the start of a new chunk
+---Call this before parsing each statement to track token ranges
+function ParserState:mark_chunk_start()
+  self.chunk_start_pos = self.pos
 end
 
 ---Skip over comment tokens at current position

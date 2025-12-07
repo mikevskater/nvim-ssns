@@ -20,8 +20,9 @@ local InsertStatement = {}
 ---@return StatementChunk chunk The parsed statement chunk
 ---@return boolean in_insert Flag indicating we're still parsing INSERT (for INSERT...SELECT)
 function InsertStatement.parse(state, scope, temp_tables)
+  state:mark_chunk_start()  -- Mark token position for this chunk
   local start_token = state:current()
-  local chunk = BaseStatement.create_chunk("INSERT", start_token, state.go_batch_index)
+  local chunk = BaseStatement.create_chunk("INSERT", start_token, state.go_batch_index, state)
   local in_insert = true
 
   scope.statement_type = "INSERT"
@@ -54,7 +55,7 @@ function InsertStatement.parse(state, scope, temp_tables)
   end
 
   -- Finalize: build aliases, resolve column parents, copy subqueries
-  BaseStatement.finalize_chunk(chunk, scope)
+  BaseStatement.finalize_chunk(chunk, scope, state)
 
   return chunk, in_insert
 end

@@ -63,6 +63,8 @@
 ---@field end_col number 1-indexed end column (only relevant on end_line)
 ---@field go_batch_index number Which GO batch this belongs to (1-indexed)
 ---@field clause_positions table<string, ClausePosition>? Positions of each clause (select, from, where, values, insert_columns, etc.)
+---@field token_start_idx number? Index into token array where this chunk starts (for token caching)
+---@field token_end_idx number? Index into token array where this chunk ends (for token caching)
 
 ---@class TempTableInfo
 ---@field name string Temp table name
@@ -400,7 +402,7 @@ local function parse_statement_dispatch(state, scope, temp_tables)
       parse_where_clause(state, chunk, scope)
     end
     -- Finalize chunk
-    BaseStatement.finalize_chunk(chunk, scope)
+    BaseStatement.finalize_chunk(chunk, scope, state)
     -- Update chunk end position from clause positions
     for _, pos in pairs(chunk.clause_positions or {}) do
       if pos.end_line and pos.end_col then
@@ -486,7 +488,7 @@ function parse_statement_remaining(state, chunk, scope, statement_type)
   UpdateStatement.finalize(chunk)
 
   -- Finalize chunk
-  BaseStatement.finalize_chunk(chunk, scope)
+  BaseStatement.finalize_chunk(chunk, scope, state)
 
   -- Update chunk end position from clause positions (same as SELECT does)
   for _, pos in pairs(chunk.clause_positions or {}) do
@@ -579,12 +581,18 @@ end
 ---@param scope ScopeContext
 ---@return StatementChunk
 function parse_exec_statement(state, scope)
+  state:mark_chunk_start()  -- Mark token position for this chunk
   local start_token = state:current()
-  local chunk = BaseStatement.create_chunk("EXEC", start_token, state.go_batch_index)
+  local chunk = BaseStatement.create_chunk("EXEC", start_token, state.go_batch_index, state)
 
   scope.statement_type = "EXEC"
   state:advance()  -- Must advance past EXEC before consume_until_statement_end
   state:consume_until_statement_end()
+
+  -- Set token_end_idx manually since we don't call finalize_chunk
+  if chunk.token_start_idx then
+    chunk.token_end_idx = state.pos > 1 and state.pos - 1 or state.pos
+  end
 
   return chunk
 end
@@ -594,12 +602,18 @@ end
 ---@param scope ScopeContext
 ---@return StatementChunk
 function parse_set_statement(state, scope)
+  state:mark_chunk_start()  -- Mark token position for this chunk
   local start_token = state:current()
-  local chunk = BaseStatement.create_chunk("SET", start_token, state.go_batch_index)
+  local chunk = BaseStatement.create_chunk("SET", start_token, state.go_batch_index, state)
 
   scope.statement_type = "SET"
   state:advance()  -- Must advance past SET before consume_until_statement_end
   state:consume_until_statement_end()
+
+  -- Set token_end_idx manually since we don't call finalize_chunk
+  if chunk.token_start_idx then
+    chunk.token_end_idx = state.pos > 1 and state.pos - 1 or state.pos
+  end
 
   return chunk
 end
@@ -608,6 +622,7 @@ end
 ---@param text string The SQL text to parse
 ---@return StatementChunk[] chunks The parsed chunks
 ---@return table<string, TempTableInfo> temp_tables Temp table info
+---@return Token[] tokens The full token array (for caching)
 function StatementParser.parse(text)
   local Tokenizer = require('ssns.completion.tokenizer')
   local tokens = Tokenizer.tokenize(text)
@@ -668,7 +683,7 @@ function StatementParser.parse(text)
     ::continue::
   end
 
-  return chunks, temp_tables
+  return chunks, temp_tables, tokens
 end
 
 ---Find which chunk contains the given position
