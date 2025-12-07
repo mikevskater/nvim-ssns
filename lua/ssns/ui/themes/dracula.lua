@@ -19,6 +19,7 @@ return {
     database = { fg = "#8BE9FD" },
     schema = { fg = "#BD93F9" },
     table = { fg = "#50FA7B" },
+    temp_table = { fg = "#FFB86C", italic = true },       -- Orange italic (#temp, ##global)
     view = { fg = "#F1FA8C" },
     procedure = { fg = "#FFB86C" },
     ["function"] = { fg = "#8BE9FD" },

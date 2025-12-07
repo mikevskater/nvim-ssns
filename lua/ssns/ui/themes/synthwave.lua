@@ -19,6 +19,7 @@ return {
     database = { fg = "#36F9F6" },
     schema = { fg = "#FF7EDB" },
     table = { fg = "#72F1B8" },
+    temp_table = { fg = "#F97E72", italic = true },       -- Coral italic (#temp, ##global)
     view = { fg = "#FEDE5D" },
     procedure = { fg = "#F97E72" },
     ["function"] = { fg = "#36F9F6" },

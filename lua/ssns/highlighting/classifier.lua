@@ -26,6 +26,7 @@ local TOKEN_TYPES = {
   AT = "at",
   GLOBAL_VARIABLE = "global_variable",
   SYSTEM_PROCEDURE = "system_procedure",
+  TEMP_TABLE = "temp_table",
   HASH = "hash",
   COMMENT = "comment",
   LINE_COMMENT = "line_comment",
@@ -57,7 +58,7 @@ local HIGHLIGHT_MAP = {
   column = "SsnsColumn",
   alias = "SsnsAlias",
   cte = "SsnsTable",      -- CTEs use table color
-  temp_table = "SsnsTable", -- Temp tables use table color
+  temp_table = "SsnsTempTable", -- Temp tables have distinct color
   operator = "SsnsOperator",
   string = "SsnsString",
   number = "SsnsNumber",
@@ -85,6 +86,7 @@ local CREATE_OBJECT_TYPE_KEYWORDS = {
   FUNCTION = "function",
   VIEW = "view",
   TRIGGER = "procedure",  -- Treat triggers like procedures
+  TABLE = "table",        -- For CREATE TABLE column definition context
 }
 
 -- ============================================================================
@@ -440,6 +442,11 @@ function Classifier.classify(tokens, chunks, connection, config)
   local in_create_alter = false  -- True after seeing CREATE or ALTER
   local create_object_type = nil  -- "procedure", "function", etc. after seeing the object type keyword
 
+  -- Track CREATE TABLE column definition context
+  local in_create_table_def = false  -- True when inside CREATE TABLE (...) column definitions
+  local create_table_paren_depth = 0  -- Paren depth within CREATE TABLE definition
+  local expect_column_name = false   -- True when next identifier should be a column name
+
   -- Track previous token for parameter detection (identifier following @)
   local prev_token = nil
 
@@ -529,6 +536,16 @@ function Classifier.classify(tokens, chunks, connection, config)
         end
         prev_token = token
         i = i + 1
+      elseif expect_column_name and in_create_table_def then
+        -- This is a column name in CREATE TABLE definition
+        result = {
+          token = token,
+          semantic_type = "column",
+          highlight_group = HIGHLIGHT_MAP.column,
+        }
+        expect_column_name = false  -- Next identifier is datatype, not column
+        prev_token = token
+        i = i + 1
       else
         -- Identifier - check if part of multi-part identifier
         local parts, consumed = Classifier._gather_multipart(tokens, i)
@@ -549,7 +566,8 @@ function Classifier.classify(tokens, chunks, connection, config)
         -- Reset context after consuming identifier
         last_keyword = nil
         -- Reset CREATE context after consuming the object name
-        if create_object_type then
+        -- But keep TABLE context for column definition detection
+        if create_object_type and create_object_type ~= "table" then
           in_create_alter = false
           create_object_type = nil
         end
@@ -560,20 +578,19 @@ function Classifier.classify(tokens, chunks, connection, config)
         result = nil
       end
 
+    elseif token.type == TOKEN_TYPES.TEMP_TABLE then
+      -- Temp table token (#temp or ##global_temp)
+      -- The entire name including # is now in a single token
+      result = {
+        token = token,
+        semantic_type = "temp_table",
+        highlight_group = HIGHLIGHT_MAP.temp_table,
+      }
+      prev_token = token
+      i = i + 1
+
     elseif token.type == TOKEN_TYPES.HASH then
-      -- Hash token (start of temp table name)
-      -- Look ahead for identifier
-      if i + 1 <= #tokens then
-        local next_token = tokens[i + 1]
-        if next_token.type == TOKEN_TYPES.IDENTIFIER or next_token.type == TOKEN_TYPES.BRACKET_ID then
-          -- Highlight the hash as temp table
-          result = {
-            token = token,
-            semantic_type = "temp_table",
-            highlight_group = HIGHLIGHT_MAP.temp_table,
-          }
-        end
-      end
+      -- Lone hash token (rare case, just skip)
       prev_token = token
       i = i + 1
 
@@ -636,8 +653,48 @@ function Classifier.classify(tokens, chunks, connection, config)
       prev_token = token
       i = i + 1
 
+    elseif token.type == TOKEN_TYPES.PAREN_OPEN then
+      -- Track CREATE TABLE column definition context
+      if create_object_type == "table" then
+        -- Entering CREATE TABLE (...) definition
+        if not in_create_table_def then
+          in_create_table_def = true
+          create_table_paren_depth = 1
+          expect_column_name = true
+        else
+          -- Nested paren within CREATE TABLE (e.g., CHECK constraint)
+          create_table_paren_depth = create_table_paren_depth + 1
+        end
+      end
+      prev_token = token
+      i = i + 1
+
+    elseif token.type == TOKEN_TYPES.PAREN_CLOSE then
+      -- Track CREATE TABLE column definition context
+      if in_create_table_def then
+        create_table_paren_depth = create_table_paren_depth - 1
+        if create_table_paren_depth <= 0 then
+          -- Exiting CREATE TABLE definition
+          in_create_table_def = false
+          create_table_paren_depth = 0
+          expect_column_name = false
+          create_object_type = nil
+          in_create_alter = false
+        end
+      end
+      prev_token = token
+      i = i + 1
+
+    elseif token.type == TOKEN_TYPES.COMMA then
+      -- In CREATE TABLE context, comma separates column definitions
+      if in_create_table_def and create_table_paren_depth == 1 then
+        expect_column_name = true
+      end
+      prev_token = token
+      i = i + 1
+
     else
-      -- Other tokens (DOT, COMMA, PAREN, STAR) - skip
+      -- Other tokens (DOT, STAR) - skip
       prev_token = token
       i = i + 1
     end

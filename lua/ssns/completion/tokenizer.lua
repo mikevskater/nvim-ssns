@@ -22,7 +22,8 @@ local TOKEN_TYPE = {
   AT = "at",                   -- @ for variables/parameters (@UserId)
   GLOBAL_VARIABLE = "global_variable", -- @@ for system variables (@@ROWCOUNT, @@VERSION)
   SYSTEM_PROCEDURE = "system_procedure", -- sp_*, xp_* system stored procedures
-  HASH = "hash",               -- # for temp tables (#temp, ##global)
+  TEMP_TABLE = "temp_table",   -- #temp or ##global temp tables (full name)
+  HASH = "hash",               -- # for other uses (rarely needed now)
   COMMENT = "comment",         -- Block comments /* ... */
   LINE_COMMENT = "line_comment", -- Line comments -- ...
 }
@@ -488,6 +489,7 @@ function Tokenizer.tokenize(text)
   local col = 1
   local comment_depth = 0
   local i = 1
+  local last_token_type = nil  -- Track last emitted token for negative number detection
 
   ---Emit the current accumulated token
   ---@param force_type string|nil Force a specific token type
@@ -511,8 +513,8 @@ function Tokenizer.tokenize(text)
           token_type = TOKEN_TYPE.KEYWORD
           keyword_category = KEYWORD_TO_CATEGORY[upper]
         end
-      elseif current_token:match("^%d+%.?%d*$") or current_token:match("^%d*%.%d+$") then
-        -- Simple number detection (integer or decimal)
+      elseif current_token:match("^%-?%d+%.?%d*$") or current_token:match("^%-?%d*%.%d+$") or current_token:match("^%-?0[xX][0-9a-fA-F]+$") then
+        -- Number detection: integer, decimal, negative, or hex (0x4E)
         token_type = TOKEN_TYPE.NUMBER
       elseif SYSTEM_PROCEDURE_KEYWORDS[current_token] or SYSTEM_PROCEDURE_KEYWORDS[current_token:lower()] then
         -- System stored procedure (sp_*, xp_*, DBCC)
@@ -537,6 +539,7 @@ function Tokenizer.tokenize(text)
       keyword_category = keyword_category,
     })
 
+    last_token_type = token_type
     current_token = ""
   end
 
@@ -623,6 +626,34 @@ function Tokenizer.tokenize(text)
         col = col + 1
         i = i + 1
 
+      -- Check for negative number: - followed by digit(s)
+      -- Only treat as negative number in contexts where subtraction doesn't make sense
+      elseif char == '-' and next_char and (next_char:match("%d") or (next_char == '.' and peek(text, i + 1) and peek(text, i + 1):match("%d"))) then
+        -- Check context: negative number if after operator, comma, open paren, keyword, or at start
+        local is_negative_number_context = (
+          last_token_type == nil or  -- Start of input
+          last_token_type == TOKEN_TYPE.OPERATOR or
+          last_token_type == TOKEN_TYPE.COMMA or
+          last_token_type == TOKEN_TYPE.PAREN_OPEN or
+          last_token_type == TOKEN_TYPE.KEYWORD or
+          last_token_type == TOKEN_TYPE.GO or
+          last_token_type == TOKEN_TYPE.SEMICOLON
+        )
+
+        if is_negative_number_context and current_token == "" then
+          -- Consume as negative number
+          start_token()
+          current_token = "-"
+          col = col + 1
+          i = i + 1
+          -- The digits will be accumulated by the normal character loop
+        else
+          -- Treat as subtraction operator
+          emit_single_char_token(char, TOKEN_TYPE.OPERATOR)
+          col = col + 1
+          i = i + 1
+        end
+
       -- Check for single-character operators
       elseif SINGLE_CHAR_OPERATORS[char] then
         emit_single_char_token(char, TOKEN_TYPE.OPERATOR)
@@ -646,9 +677,29 @@ function Tokenizer.tokenize(text)
         i = i + 1
 
       elseif char == '.' then
-        emit_single_char_token(char, TOKEN_TYPE.DOT)
-        col = col + 1
-        i = i + 1
+        -- Check if this is part of a decimal number:
+        -- 1. Current token is all digits AND next char is a digit (123.45)
+        -- 2. Current token is empty AND next char is a digit (.45)
+        local is_decimal_number = false
+        if next_char and next_char:match("%d") then
+          if current_token == "" or current_token:match("^%d+$") then
+            is_decimal_number = true
+          end
+        end
+
+        if is_decimal_number then
+          -- Include dot in the number token
+          if current_token == "" then
+            start_token()
+          end
+          current_token = current_token .. char
+          col = col + 1
+          i = i + 1
+        else
+          emit_single_char_token(char, TOKEN_TYPE.DOT)
+          col = col + 1
+          i = i + 1
+        end
 
       elseif char == ';' then
         emit_single_char_token(char, TOKEN_TYPE.SEMICOLON)
@@ -696,12 +747,40 @@ function Tokenizer.tokenize(text)
         end
 
       -- Check for # (temp tables)
-      -- # is only valid at start of identifier for temp tables (#temp, ##global)
+      -- Consume the entire temp table name: #temp or ##global_temp
       -- If # appears mid-identifier, it must be bracketed [Test#Table]
       elseif char == '#' then
-        emit_single_char_token(char, TOKEN_TYPE.HASH)
-        col = col + 1
-        i = i + 1
+        emit_token() -- Emit any accumulated token first
+        start_token()
+        -- Consume # or ##
+        local temp_table = "#"
+        local j = i + 1
+        -- Check for ## (global temp table)
+        if j <= #text and text:sub(j, j) == '#' then
+          temp_table = "##"
+          j = j + 1
+        end
+        -- Collect the identifier part
+        while j <= #text do
+          local c = text:sub(j, j)
+          if is_alnum(c) then
+            temp_table = temp_table .. c
+            j = j + 1
+          else
+            break
+          end
+        end
+        -- Only emit as TEMP_TABLE if we have an identifier after #
+        if #temp_table > 1 and (temp_table:sub(2, 2) ~= '#' or #temp_table > 2) then
+          current_token = temp_table
+          emit_token(TOKEN_TYPE.TEMP_TABLE)
+        else
+          -- Just a lone # or ##, emit as HASH
+          current_token = temp_table
+          emit_token(TOKEN_TYPE.HASH)
+        end
+        col = col + #temp_table
+        i = j
 
       else
         -- Accumulate into current token

@@ -19,6 +19,7 @@ return {
     database = { fg = "#66D9EF" },                        -- Cyan
     schema = { fg = "#AE81FF" },                          -- Purple
     table = { fg = "#A6E22E" },                           -- Green
+    temp_table = { fg = "#FD971F", italic = true },       -- Orange italic (#temp, ##global)
     view = { fg = "#E6DB74" },                            -- Yellow
     procedure = { fg = "#FD971F" },                       -- Orange
     ["function"] = { fg = "#66D9EF" },                    -- Cyan

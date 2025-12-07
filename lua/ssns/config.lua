@@ -316,6 +316,7 @@ local default_config = {
       database = { fg = "#9CDCFE" },                       -- Light Blue (databases)
       schema = { fg = "#C586C0" },                         -- Purple (schemas)
       table = { fg = "#4FC1FF" },                          -- Bright Blue (tables)
+      temp_table = { fg = "#CE9178", italic = true },      -- Orange italic (temp tables #temp, ##global)
       view = { fg = "#DCDCAA" },                           -- Yellow (views)
       procedure = { fg = "#CE9178" },                      -- Orange (procedures)
       ["function"] = { fg = "#4EC9B0" },                   -- Cyan (functions)
