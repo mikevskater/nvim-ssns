@@ -1,4 +1,8 @@
 -- Test 4021: Schema-qualified - tables in dbo schema
+-- When completing "SELECT * FROM dbo.█", only objects from dbo schema should appear
+-- This test validates that schema filtering works correctly
+
+local DB = require('ssns.testing.db_constants')
 
 return {
   number = 4021,
@@ -7,32 +11,12 @@ return {
   query = "SELECT * FROM dbo.█",
   expected = {
     items = {
-      excludes = {
-        "Benefits",
-        "usp_GetEmployeesByDepartment",
-        "usp_InsertEmployee",
-        "fn_CalculateYearsOfService",
-        "fn_GetEmployeeFullName",
-      },
-      includes = {
-        "Employees",
-        "Departments",
-        "Projects",
-        "Customers",
-        "Orders",
-        "Products",
-        "Regions",
-        "Countries",
-        "vw_ActiveEmployees",
-        "vw_DepartmentSummary",
-        "vw_ProjectStatus",
-        "syn_ActiveEmployees",
-        "syn_Depts",
-        "syn_Employees",
-        "syn_HRBenefits",
-        "fn_GetEmployeesBySalaryRange",
-        "GetCustomerOrders",
-      },
+      -- Should include ALL queryable objects from dbo schema:
+      -- tables, views, synonyms, and table-valued functions
+      includes = DB.vim_dadbod_test_dbo_from_objects,
+
+      -- Should exclude: databases, schemas, objects from other schemas/databases
+      excludes = DB.get_dbo_excludes_for_vim_dadbod_test(),
     },
     type = "table",
   },
