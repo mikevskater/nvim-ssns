@@ -179,6 +179,58 @@ function Output.generate(tokens, config)
     local needs_newline = false
     local extra_indent = 0
 
+    -- Handle comments specially
+    if token.is_comment then
+      if token.is_inline_comment then
+        -- Inline comment: add space and keep on same line
+        if #current_line > 0 then
+          table.insert(current_line, " ")
+        end
+        table.insert(current_line, text)
+        -- For line comments, we need to finish the line
+        if token.type == "line_comment" then
+          local line_text = table.concat(current_line, "")
+          if line_text:match("%S") then
+            table.insert(result, line_text)
+          end
+          current_line = {}
+        end
+      else
+        -- Standalone comment: put on its own line with proper indentation
+        -- Finish current line first
+        if #current_line > 0 then
+          local line_text = table.concat(current_line, "")
+          if line_text:match("%S") then
+            table.insert(result, line_text)
+          end
+          current_line = {}
+        end
+        -- Add comment with indentation
+        local base_indent = token.indent_level or 0
+        local indent = get_indent(config, base_indent)
+        -- For block comments that span multiple lines, preserve internal formatting
+        if token.type == "comment" and text:find("\n") then
+          -- Multi-line block comment - add each line with proper indent
+          local comment_lines = {}
+          for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+            table.insert(comment_lines, line)
+          end
+          for j, cline in ipairs(comment_lines) do
+            if j == 1 then
+              table.insert(result, indent .. cline)
+            else
+              -- Preserve internal indentation for continuation lines
+              table.insert(result, indent .. cline)
+            end
+          end
+        else
+          table.insert(result, indent .. text)
+        end
+      end
+      prev_token = token
+      goto continue
+    end
+
     -- Track clause context
     if token.type == "keyword" then
       local upper = string.upper(token.text)
@@ -392,6 +444,7 @@ function Output.generate(tokens, config)
     end
 
     prev_token = token
+    ::continue::
   end
 
   -- Don't forget remaining tokens

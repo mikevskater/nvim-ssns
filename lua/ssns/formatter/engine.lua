@@ -238,6 +238,17 @@ function Engine.format(sql, config, opts)
         state.current_clause = string.upper(token.text)
       end
 
+      -- Preserve comments - pass through with metadata
+      if token.type == "comment" or token.type == "line_comment" then
+        processed.is_comment = true
+        -- Check if comment follows code on same line (inline comment)
+        if state.last_token and state.last_token.line == token.line then
+          processed.is_inline_comment = true
+        else
+          processed.is_standalone_comment = true
+        end
+      end
+
       -- Track parenthesis depth and subqueries
       if token.type == "paren_open" then
         state.paren_depth = state.paren_depth + 1
