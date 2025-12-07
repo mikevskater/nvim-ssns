@@ -7,6 +7,7 @@ local ViewTokens = {}
 local UiFloat = require('ssns.ui.float')
 local JsonUtils = require('ssns.utils.json')
 local Tokenizer = require('ssns.completion.tokenizer')
+local StatementCache = require('ssns.completion.statement_cache')
 
 -- Store reference to current floating window for cleanup
 local current_float = nil
@@ -37,8 +38,13 @@ function ViewTokens.view_tokens()
     return
   end
 
-  -- Tokenize the SQL
-  local tokens = Tokenizer.tokenize(text)
+  -- Use cached tokens from StatementCache (avoids redundant tokenization)
+  local cache = StatementCache.get_or_build_cache(bufnr)
+  local tokens = cache and cache.tokens
+  if not tokens or #tokens == 0 then
+    -- Fallback to direct tokenization if cache unavailable
+    tokens = Tokenizer.tokenize(text)
+  end
 
   if not tokens or #tokens == 0 then
     vim.notify("SSNS: No tokens generated", vim.log.levels.WARN)

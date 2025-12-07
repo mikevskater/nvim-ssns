@@ -132,12 +132,17 @@ function SemanticHighlighter.update(bufnr, cache)
     end
   end
 
-  -- Get buffer text and tokenize
+  -- Get buffer lines for bounds checking
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local text = table.concat(lines, '\n')
 
-  local Tokenizer = require('ssns.completion.tokenizer')
-  local tokens = Tokenizer.tokenize(text)
+  -- Use cached tokens from StatementCache (avoids redundant tokenization)
+  local tokens = cache.tokens
+  if not tokens or #tokens == 0 then
+    -- Fallback to direct tokenization if cache doesn't have tokens
+    local Tokenizer = require('ssns.completion.tokenizer')
+    local text = table.concat(lines, '\n')
+    tokens = Tokenizer.tokenize(text)
+  end
 
   -- Clear existing highlights
   vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)

@@ -7,6 +7,7 @@ local StatementChunksViewer = {}
 local UiFloat = require('ssns.ui.float')
 local JsonUtils = require('ssns.utils.json')
 local StatementParser = require('ssns.completion.statement_parser')
+local StatementCache = require('ssns.completion.statement_cache')
 
 -- Store reference to current floating window for cleanup
 local current_float = nil
@@ -37,8 +38,19 @@ function StatementChunksViewer.view_statement_chunks()
     return
   end
 
-  -- Parse the SQL
-  local parse_result = StatementParser.parse(text)
+  -- Use cached parse result from StatementCache (avoids redundant parsing)
+  local cache = StatementCache.get_or_build_cache(bufnr)
+  local parse_result
+  if cache then
+    parse_result = {
+      chunks = cache.chunks,
+      temp_tables = cache.temp_tables,
+      tokens = cache.tokens,
+    }
+  else
+    -- Fallback to direct parsing if cache unavailable
+    parse_result = StatementParser.parse(text)
+  end
 
   if not parse_result then
     vim.notify("SSNS: Failed to parse buffer content", vim.log.levels.ERROR)
