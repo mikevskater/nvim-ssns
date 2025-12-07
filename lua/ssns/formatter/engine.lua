@@ -6,9 +6,11 @@
 ---@field clause_stack string[] Stack of active clauses
 ---@field last_token Token? Previous token processed
 ---@field current_clause string? Current clause being processed
+---@field join_modifier string? Pending join modifier (INNER, LEFT, RIGHT, etc.)
 
 ---@class FormatterEngine
 ---Core formatting engine that processes token streams and applies transformation rules.
+---Uses best-effort error handling - formats what it can, preserves the rest.
 local Engine = {}
 
 local Tokenizer = require('ssns.completion.tokenizer')
@@ -25,25 +27,39 @@ local function create_state()
     clause_stack = {},
     last_token = nil,
     current_clause = nil,
+    join_modifier = nil,
   }
 end
 
 ---Apply keyword casing transformation
----@param token Token
+---@param text string
 ---@param keyword_case string "upper"|"lower"|"preserve"
 ---@return string
-local function apply_keyword_case(token, keyword_case)
-  if token.type ~= "keyword" then
-    return token.text
-  end
-
+local function apply_keyword_case(text, keyword_case)
   if keyword_case == "upper" then
-    return string.upper(token.text)
+    return string.upper(text)
   elseif keyword_case == "lower" then
-    return string.lower(token.text)
+    return string.lower(text)
   else
-    return token.text
+    return text
   end
+end
+
+---Check if a keyword is a join modifier (INNER, LEFT, RIGHT, etc.)
+---@param text string
+---@return boolean
+local function is_join_modifier(text)
+  local upper = string.upper(text)
+  local modifiers = {
+    INNER = true,
+    LEFT = true,
+    RIGHT = true,
+    FULL = true,
+    CROSS = true,
+    OUTER = true,
+    NATURAL = true,
+  }
+  return modifiers[upper] == true
 end
 
 ---Check if a keyword is a major clause that should start on a new line
@@ -56,14 +72,6 @@ local function is_major_clause(text)
     FROM = true,
     WHERE = true,
     JOIN = true,
-    ["INNER JOIN"] = true,
-    ["LEFT JOIN"] = true,
-    ["RIGHT JOIN"] = true,
-    ["FULL JOIN"] = true,
-    ["CROSS JOIN"] = true,
-    ["LEFT OUTER JOIN"] = true,
-    ["RIGHT OUTER JOIN"] = true,
-    ["FULL OUTER JOIN"] = true,
     ["GROUP BY"] = true,
     ["ORDER BY"] = true,
     HAVING = true,
@@ -80,26 +88,8 @@ local function is_major_clause(text)
   return major_clauses[upper] == true
 end
 
----Check if a keyword starts a join
----@param text string
----@return boolean
-local function is_join_keyword(text)
-  local upper = string.upper(text)
-  local join_keywords = {
-    JOIN = true,
-    INNER = true,
-    LEFT = true,
-    RIGHT = true,
-    FULL = true,
-    CROSS = true,
-    OUTER = true,
-    NATURAL = true,
-  }
-  return join_keywords[upper] == true
-end
-
 ---Check if token is AND or OR
----@param token Token
+---@param token table
 ---@return boolean
 local function is_and_or(token)
   if token.type ~= "keyword" then
@@ -109,7 +99,20 @@ local function is_and_or(token)
   return upper == "AND" or upper == "OR"
 end
 
----Format SQL text
+---Safe tokenization with error recovery
+---@param sql string
+---@return Token[]|nil tokens
+---@return string|nil error_message
+local function safe_tokenize(sql)
+  local ok, result = pcall(Tokenizer.tokenize, sql)
+  if ok then
+    return result, nil
+  else
+    return nil, tostring(result)
+  end
+end
+
+---Format SQL text with error recovery
 ---@param sql string The SQL text to format
 ---@param config FormatterConfig The formatter configuration
 ---@param opts? {dialect?: string} Optional formatting options
@@ -117,67 +120,222 @@ end
 function Engine.format(sql, config, opts)
   opts = opts or {}
 
-  -- Tokenize the input
-  local tokens = Tokenizer.tokenize(sql)
+  -- Handle empty input
+  if not sql or sql == "" then
+    return sql
+  end
+
+  -- Safe tokenization - return original on failure
+  local tokens, err = safe_tokenize(sql)
   if not tokens or #tokens == 0 then
+    -- Best effort: return original SQL if tokenization fails
     return sql
   end
 
   -- Create formatter state
   local state = create_state()
 
-  -- Process tokens
-  local processed_tokens = {}
-  for i, token in ipairs(tokens) do
-    local processed = {
-      type = token.type,
-      text = token.text,
-      line = token.line,
-      col = token.col,
-      original = token,
-      keyword_category = token.keyword_category,
-    }
+  -- Process tokens with error recovery
+  local ok, processed_or_error = pcall(function()
+    local processed_tokens = {}
 
-    -- Apply keyword casing
-    if token.type == "keyword" or token.type == "go" then
-      processed.text = apply_keyword_case(token, config.keyword_case)
+    for i, token in ipairs(tokens) do
+      local processed = {
+        type = token.type,
+        text = token.text,
+        line = token.line,
+        col = token.col,
+        original = token,
+        keyword_category = token.keyword_category,
+      }
+
+      -- Handle multi-word keywords (INNER JOIN, LEFT OUTER JOIN, etc.)
+      if token.type == "keyword" then
+        local upper = string.upper(token.text)
+
+        -- Check for join modifiers
+        if is_join_modifier(upper) then
+          -- Look ahead to see if JOIN follows
+          local next_idx = i + 1
+          while next_idx <= #tokens and
+                (tokens[next_idx].type == "comment" or tokens[next_idx].type == "line_comment") do
+            next_idx = next_idx + 1
+          end
+
+          if next_idx <= #tokens and tokens[next_idx].type == "keyword" then
+            local next_upper = string.upper(tokens[next_idx].text)
+            if next_upper == "JOIN" or next_upper == "OUTER" then
+              -- This is a join modifier - mark it but don't skip newline
+              -- The output generator handles keeping INNER/LEFT/etc. together with JOIN
+              processed.is_join_modifier = true
+              state.join_modifier = upper
+            end
+          end
+        end
+
+        -- Handle OUTER keyword (in LEFT OUTER JOIN)
+        -- Just mark it, output generator handles newline logic
+        if upper == "OUTER" then
+          local next_idx = i + 1
+          while next_idx <= #tokens and
+                (tokens[next_idx].type == "comment" or tokens[next_idx].type == "line_comment") do
+            next_idx = next_idx + 1
+          end
+
+          if next_idx <= #tokens and tokens[next_idx].type == "keyword" and
+             string.upper(tokens[next_idx].text) == "JOIN" then
+            processed.is_join_modifier = true
+          end
+        end
+
+        -- Handle JOIN keyword - check if preceded by modifier
+        if upper == "JOIN" and state.join_modifier then
+          processed.combined_keyword = state.join_modifier .. " " .. upper
+          state.join_modifier = nil
+        end
+
+        -- Handle GROUP and ORDER keywords (for GROUP BY, ORDER BY)
+        -- Mark that BY follows, but don't skip newline - ORDER/GROUP should start new line
+        if upper == "GROUP" or upper == "ORDER" then
+          local next_idx = i + 1
+          while next_idx <= #tokens and
+                (tokens[next_idx].type == "comment" or tokens[next_idx].type == "line_comment") do
+            next_idx = next_idx + 1
+          end
+
+          if next_idx <= #tokens and tokens[next_idx].type == "keyword" and
+             string.upper(tokens[next_idx].text) == "BY" then
+            processed.has_by_following = true
+          end
+        end
+
+        -- Handle BY keyword after GROUP/ORDER
+        if upper == "BY" then
+          -- Look back to see if this follows GROUP or ORDER
+          local prev_idx = i - 1
+          while prev_idx >= 1 and
+                (tokens[prev_idx].type == "comment" or tokens[prev_idx].type == "line_comment") do
+            prev_idx = prev_idx - 1
+          end
+
+          if prev_idx >= 1 and tokens[prev_idx].type == "keyword" then
+            local prev_upper = string.upper(tokens[prev_idx].text)
+            if prev_upper == "GROUP" or prev_upper == "ORDER" then
+              processed.part_of_compound = true
+            end
+          end
+        end
+
+        -- Apply keyword casing
+        processed.text = apply_keyword_case(token.text, config.keyword_case)
+      elseif token.type == "go" then
+        processed.text = apply_keyword_case(token.text, config.keyword_case)
+      end
+
+      -- Track clause context
+      if token.type == "keyword" and is_major_clause(token.text) then
+        state.current_clause = string.upper(token.text)
+      end
+
+      -- Track parenthesis depth
+      if token.type == "paren_open" then
+        state.paren_depth = state.paren_depth + 1
+        -- Check if this might be a subquery (next significant token is SELECT)
+        local next_idx = i + 1
+        while next_idx <= #tokens and
+              (tokens[next_idx].type == "comment" or tokens[next_idx].type == "line_comment") do
+          next_idx = next_idx + 1
+        end
+        if next_idx <= #tokens and tokens[next_idx].type == "keyword" and
+           string.upper(tokens[next_idx].text) == "SELECT" then
+          state.in_subquery = true
+          state.indent_level = state.indent_level + config.subquery_indent
+        end
+      elseif token.type == "paren_close" then
+        state.paren_depth = math.max(0, state.paren_depth - 1)
+        if state.in_subquery and state.paren_depth == 0 then
+          state.in_subquery = false
+          state.indent_level = math.max(0, state.indent_level - config.subquery_indent)
+        end
+      end
+
+      processed.indent_level = state.indent_level
+      processed.paren_depth = state.paren_depth
+      processed.current_clause = state.current_clause
+
+      table.insert(processed_tokens, processed)
+      state.last_token = token
     end
 
-    -- Track clause context
-    if token.type == "keyword" and is_major_clause(token.text) then
-      state.current_clause = string.upper(token.text)
-    end
+    return processed_tokens
+  end)
 
-    -- Track parenthesis depth
-    if token.type == "paren_open" then
-      state.paren_depth = state.paren_depth + 1
-      -- Check if this might be a subquery (next significant token is SELECT)
-      local next_idx = i + 1
-      while next_idx <= #tokens and (tokens[next_idx].type == "comment" or tokens[next_idx].type == "line_comment") do
-        next_idx = next_idx + 1
-      end
-      if next_idx <= #tokens and tokens[next_idx].type == "keyword" and string.upper(tokens[next_idx].text) == "SELECT" then
-        state.in_subquery = true
-        state.indent_level = state.indent_level + config.subquery_indent
-      end
-    elseif token.type == "paren_close" then
-      state.paren_depth = math.max(0, state.paren_depth - 1)
-      if state.in_subquery and state.paren_depth == 0 then
-        state.in_subquery = false
-        state.indent_level = math.max(0, state.indent_level - config.subquery_indent)
-      end
-    end
-
-    processed.indent_level = state.indent_level
-    processed.paren_depth = state.paren_depth
-    processed.current_clause = state.current_clause
-
-    table.insert(processed_tokens, processed)
-    state.last_token = token
+  if not ok then
+    -- Error during token processing - return original
+    return sql
   end
 
-  -- Generate output
-  return Output.generate(processed_tokens, config)
+  -- Generate output with error recovery
+  local output_ok, output_or_error = pcall(Output.generate, processed_or_error, config)
+  if not output_ok then
+    -- Error during output generation - return original
+    return sql
+  end
+
+  return output_or_error
+end
+
+---Format with statement-level error recovery
+---Attempts to format each statement independently, preserving failed ones
+---@param sql string The SQL text to format
+---@param config FormatterConfig The formatter configuration
+---@param opts? {dialect?: string} Optional formatting options
+---@return string formatted The formatted SQL text
+function Engine.format_with_recovery(sql, config, opts)
+  opts = opts or {}
+
+  -- Try to split into statements by semicolon or GO
+  local statements = {}
+  local current = {}
+  local in_string = false
+  local string_char = nil
+
+  for i = 1, #sql do
+    local char = sql:sub(i, i)
+
+    -- Track string state
+    if not in_string and (char == "'" or char == '"') then
+      in_string = true
+      string_char = char
+    elseif in_string and char == string_char then
+      in_string = false
+    end
+
+    table.insert(current, char)
+
+    -- Check for statement separator
+    if not in_string and char == ";" then
+      table.insert(statements, table.concat(current))
+      current = {}
+    end
+  end
+
+  -- Don't forget the last statement
+  if #current > 0 then
+    table.insert(statements, table.concat(current))
+  end
+
+  -- Format each statement independently
+  local results = {}
+  for _, stmt in ipairs(statements) do
+    local trimmed = stmt:match("^%s*(.-)%s*$")
+    if trimmed and trimmed ~= "" then
+      local formatted = Engine.format(stmt, config, opts)
+      table.insert(results, formatted)
+    end
+  end
+
+  return table.concat(results, "\n")
 end
 
 return Engine
