@@ -28,17 +28,31 @@ end
 
 ---Load all default rules
 function RuleRegistry.load_defaults()
-  -- Load rule modules
+  -- Load base rule modules
   local indentation = require('ssns.formatter.rules.indentation')
   local spacing = require('ssns.formatter.rules.spacing')
   local keywords = require('ssns.formatter.rules.keywords')
   local alignment = require('ssns.formatter.rules.alignment')
 
-  -- Register rules
+  -- Load clause-specific rule modules
+  local select_rules = require('ssns.formatter.rules.select')
+  local from_rules = require('ssns.formatter.rules.from')
+  local where_rules = require('ssns.formatter.rules.where')
+  local groupby_rules = require('ssns.formatter.rules.groupby')
+  local dml_rules = require('ssns.formatter.rules.dml')
+
+  -- Register base rules
   RuleRegistry.register('indentation', indentation)
   RuleRegistry.register('spacing', spacing)
   RuleRegistry.register('keywords', keywords)
   RuleRegistry.register('alignment', alignment)
+
+  -- Register clause-specific rules
+  RuleRegistry.register('select', select_rules)
+  RuleRegistry.register('from', from_rules)
+  RuleRegistry.register('where', where_rules)
+  RuleRegistry.register('groupby', groupby_rules)
+  RuleRegistry.register('dml', dml_rules)
 end
 
 ---Apply all rules to a token
