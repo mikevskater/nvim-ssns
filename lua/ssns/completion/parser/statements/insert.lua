@@ -9,6 +9,7 @@ local SelectListParser = require('ssns.completion.parser.clauses.select_list')
 local FromClauseParser = require('ssns.completion.parser.clauses.from_clause')
 local TableReferenceParser = require('ssns.completion.parser.utils.table_reference')
 local Helpers = require('ssns.completion.parser.utils.helpers')
+local Keywords = require('ssns.completion.parser.utils.keywords')
 
 local InsertStatement = {}
 
@@ -38,8 +39,8 @@ function InsertStatement.parse(state, scope, temp_tables)
     InsertStatement._parse_column_list(state, chunk)
   end
 
-  -- Continue to find SELECT or VALUES
-  while state:current() and not state:is_keyword("SELECT") and not state:is_keyword("VALUES") do
+  -- Continue to find SELECT, VALUES, or EXEC
+  while state:current() and not state:is_keyword("SELECT") and not state:is_keyword("VALUES") and not state:is_keyword("EXEC") and not state:is_keyword("EXECUTE") do
     state:advance()
   end
 
@@ -47,10 +48,30 @@ function InsertStatement.parse(state, scope, temp_tables)
   if state:is_keyword("VALUES") then
     InsertStatement._parse_values(state, chunk)
     in_insert = false  -- VALUES ends the INSERT context
-  end
-
-  -- Parse INSERT...SELECT if present
-  if state:is_keyword("SELECT") then
+  -- Parse INSERT...EXEC if present
+  elseif state:is_keyword("EXEC") or state:is_keyword("EXECUTE") then
+    -- INSERT INTO ... EXEC sproc - consume the EXEC and everything after it
+    state:advance()  -- consume EXEC/EXECUTE keyword
+    -- Skip proc name and parameters until we hit a statement terminator or new statement
+    while state:current() do
+      local token = state:current()
+      -- Stop at GO batch separator
+      if token.type == "go" or (token.type == "identifier" and token.text:upper() == "GO") then
+        break
+      end
+      -- Stop at semicolon
+      if token.type == "semicolon" then
+        break
+      end
+      -- Stop at new statement starter (but EXEC itself is a statement starter, so skip it)
+      if token.type == "keyword" and Keywords.is_statement_starter(token.text) then
+        break
+      end
+      state:advance()
+    end
+    in_insert = false
+  -- Parse INSERT...SELECT if present (only if we didn't already parse VALUES or EXEC)
+  elseif state:is_keyword("SELECT") then
     InsertStatement._parse_select(state, chunk, scope)
   end
 
