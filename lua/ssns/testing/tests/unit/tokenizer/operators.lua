@@ -473,11 +473,11 @@ return {
     {
         id = 1345,
         type = "tokenizer",
-        name = "Negative number (minus is operator)",
+        name = "Negative number at start of input (emitted as single number)",
         input = "-5",
         expected = {
-            {type = "operator", text = "-", line = 1, col = 1},
-            {type = "number", text = "5", line = 1, col = 2}
+            -- At start of input, -5 is treated as a negative number, not minus + 5
+            {type = "number", text = "-5", line = 1, col = 1}
         }
     },
     {
