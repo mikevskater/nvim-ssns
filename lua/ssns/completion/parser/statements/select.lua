@@ -153,7 +153,7 @@ function SelectStatement._parse_remaining_clauses(state, chunk, scope)
       elseif upper_text == "GROUP" then
         SelectStatement._parse_group_by_clause(state, chunk)
       elseif upper_text == "HAVING" then
-        SelectStatement._parse_having_clause(state, chunk)
+        SelectStatement._parse_having_clause(state, chunk, scope)
       elseif upper_text == "ORDER" then
         SelectStatement._parse_order_by_clause(state, chunk)
       elseif upper_text == "LIMIT" or upper_text == "OFFSET" or upper_text == "FETCH" then
@@ -323,12 +323,16 @@ end
 ---Parse HAVING clause and track its position
 ---@param state ParserState
 ---@param chunk StatementChunk
-function SelectStatement._parse_having_clause(state, chunk)
+---@param scope ScopeContext
+function SelectStatement._parse_having_clause(state, chunk, scope)
   local having_token = state:current()
   state:advance()  -- consume HAVING
 
   local paren_depth = 0
   local last_token = having_token
+
+  -- Build known_ctes for subquery parsing
+  local known_ctes = scope and scope:get_known_ctes_table() or {}
 
   -- Parse until we hit ORDER BY or statement end
   while state:current() do
@@ -338,6 +342,22 @@ function SelectStatement._parse_having_clause(state, chunk)
       paren_depth = paren_depth + 1
       last_token = token
       state:advance()
+      -- Check for subquery: (SELECT ...
+      if state:is_keyword("SELECT") then
+        local subquery = state:parse_subquery(known_ctes)
+        if subquery then
+          -- After parse_subquery, parser is AT the closing ) - consume it
+          if state:is_type("paren_close") then
+            last_token = state:current()
+            state:advance()
+          end
+          paren_depth = paren_depth - 1
+          -- Add to scope so it gets copied to chunk in finalize
+          if scope then
+            scope:add_subquery(subquery)
+          end
+        end
+      end
     elseif token.type == "paren_close" then
       paren_depth = paren_depth - 1
       if paren_depth < 0 then
