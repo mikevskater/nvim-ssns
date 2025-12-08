@@ -19,7 +19,8 @@ local TOKEN_TYPE = {
   SEMICOLON = "semicolon",     -- ; (emitted but ignored by parser)
   STAR = "star",               -- * (wildcard or multiply)
   GO = "go",                   -- GO batch separator
-  AT = "at",                   -- @ for variables/parameters (@UserId)
+  AT = "at",                   -- @ alone (rare, kept for backwards compatibility)
+  VARIABLE = "variable",       -- @var user variables/parameters (@UserId, @variable)
   GLOBAL_VARIABLE = "global_variable", -- @@ for system variables (@@ROWCOUNT, @@VERSION)
   SYSTEM_PROCEDURE = "system_procedure", -- sp_*, xp_* system stored procedures
   TEMP_TABLE = "temp_table",   -- #temp or ##global temp tables (full name)
@@ -724,9 +725,10 @@ function Tokenizer.tokenize(text)
         -- Check if this is part of a decimal number:
         -- 1. Current token is all digits AND next char is a digit (123.45)
         -- 2. Current token is empty AND next char is a digit (.45)
+        -- 3. Current token is negative number (-12) AND next char is a digit (-12.34)
         local is_decimal_number = false
         if next_char and next_char:match("%d") then
-          if current_token == "" or current_token:match("^%d+$") then
+          if current_token == "" or current_token:match("^%-?%d+$") then
             is_decimal_number = true
           end
         end
@@ -751,14 +753,14 @@ function Tokenizer.tokenize(text)
         i = i + 1
 
       -- Check for @ (variables/parameters) and @@ (global variables)
-      -- @ is only valid at start of identifier for variables (@var)
+      -- @ followed by identifier is a user variable (@var, @UserId)
       -- @@ is for system/global variables (@@ROWCOUNT, @@VERSION)
       -- If @ appears mid-identifier, it must be bracketed [col@name]
       elseif char == '@' then
+        emit_token() -- Emit any accumulated token first
+        start_token()
         -- Check for @@ (global variable)
         if next_char == '@' then
-          emit_token() -- Emit any accumulated token first
-          start_token()
           -- Consume both @@ and the following identifier
           local global_var = "@@"
           local j = i + 2
@@ -783,8 +785,26 @@ function Tokenizer.tokenize(text)
           end
           col = col + #global_var
           i = j
+        elseif next_char and is_alnum(next_char) then
+          -- Single @ followed by identifier is a user variable (@var, @UserId)
+          local user_var = "@"
+          local j = i + 1
+          -- Collect the identifier part
+          while j <= #text do
+            local c = text:sub(j, j)
+            if is_alnum(c) then
+              user_var = user_var .. c
+              j = j + 1
+            else
+              break
+            end
+          end
+          current_token = user_var
+          emit_token(TOKEN_TYPE.VARIABLE)
+          col = col + #user_var
+          i = j
         else
-          -- Single @ for user variables
+          -- Lone @ with no identifier following (rare edge case)
           emit_single_char_token(char, TOKEN_TYPE.AT)
           col = col + 1
           i = i + 1
