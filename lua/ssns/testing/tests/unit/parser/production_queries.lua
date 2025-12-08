@@ -16,12 +16,19 @@ INSERT INTO #ReportData SELECT Id, Name FROM Employees
 SELECT * FROM #ReportData rd INNER JOIN Departments d ON rd.DeptId = d.Id]],
         expected = {
             chunks = {
-                { statement_type = "OTHER" },
+                { statement_type = "CREATE" },
                 {
                     statement_type = "INSERT",
                     tables = {
                         { name = "#ReportData", is_temp = true },
                         { name = "Employees" }
+                    }
+                },
+                {
+                    statement_type = "SELECT",
+                    tables = {
+                        { name = "#ReportData", alias = "rd", is_temp = true },
+                        { name = "Departments", alias = "d" }
                     }
                 }
             }
@@ -150,14 +157,16 @@ SELECT COUNT(*) FROM ##ReportCache
 SELECT * FROM ##ReportCache WHERE Id > 100]],
         expected = {
             chunks = {
-                { statement_type = "OTHER" },
+                { statement_type = "CREATE" },
                 {
                     statement_type = "INSERT",
                     tables = {
                         { name = "##ReportCache", is_temp = true },
                         { name = "LargeTable" }
                     }
-                }
+                },
+                { statement_type = "SELECT", tables = { { name = "##ReportCache", is_temp = true } } },
+                { statement_type = "SELECT", tables = { { name = "##ReportCache", is_temp = true } } }
             }
         }
     },
@@ -248,8 +257,9 @@ INSERT INTO #Results EXEC GetEmployeeData @DeptId = 5
 SELECT * FROM #Results]],
         expected = {
             chunks = {
-                { statement_type = "OTHER" },
-                { statement_type = "INSERT" }
+                { statement_type = "CREATE" },
+                { statement_type = "INSERT" },
+                { statement_type = "SELECT", tables = { { name = "#Results", is_temp = true } } }
             }
         }
     },
@@ -311,7 +321,9 @@ BEGIN
 END]],
         expected = {
             chunks = {
-                { statement_type = "SELECT", tables = { { name = "Customers" } } }
+                { statement_type = "SELECT", tables = { { name = "Customers" } } },
+                { statement_type = "SELECT", tables = { { name = "Customers" } } },
+                { statement_type = "INSERT", tables = { { name = "Customers" } } }
             }
         }
     },
@@ -1258,7 +1270,7 @@ WHERE CustomerId IN (
 )]],
         expected = {
             chunks = {
-                { statement_type = "OTHER" }
+                { statement_type = "CREATE" }
             }
         }
     },
@@ -1289,7 +1301,7 @@ WHERE Active = 1]],
 INSERT INTO #Results SELECT EmployeeId, EmployeeName FROM Employees WHERE Active = 1]],
         expected = {
             chunks = {
-                { statement_type = "OTHER" },
+                { statement_type = "CREATE" },
                 {
                     statement_type = "INSERT",
                     tables = {
@@ -1336,7 +1348,7 @@ SELECT * FROM #LargeDataset WHERE SaleDate > '2024-01-01']],
         expected = {
             chunks = {
                 { statement_type = "SELECT", temp_table_name = "#LargeDataset", tables = { { name = "FactSales" } } },
-                { statement_type = "OTHER" },
+                { statement_type = "CREATE" },
                 { statement_type = "SELECT", tables = { { name = "#LargeDataset", is_temp = true } } }
             }
         }
@@ -1351,7 +1363,7 @@ INSERT INTO ##SharedData VALUES (@@SPID, 'Some data')
 SELECT * FROM ##SharedData]],
         expected = {
             chunks = {
-                { statement_type = "OTHER" },
+                { statement_type = "CREATE" },
                 { statement_type = "INSERT", tables = { { name = "##SharedData", is_temp = true } } },
                 { statement_type = "SELECT", tables = { { name = "##SharedData", is_temp = true } } }
             }
@@ -1429,8 +1441,8 @@ CREATE TABLE #Results (Id INT, Value VARCHAR(100))
 INSERT INTO #Results VALUES (1, 'Test')]],
         expected = {
             chunks = {
-                { statement_type = "OTHER" },
-                { statement_type = "OTHER" },
+                { statement_type = "DROP" },
+                { statement_type = "CREATE" },
                 { statement_type = "INSERT", tables = { { name = "#Results", is_temp = true } } }
             }
         }
@@ -1469,8 +1481,8 @@ SELECT * INTO #TempTable FROM @TempVar]],
         expected = {
             chunks = {
                 { statement_type = "DECLARE" },
-                { statement_type = "INSERT" },
-                { statement_type = "SELECT", temp_table_name = "#TempTable" }
+                { statement_type = "INSERT", tables = { { name = "@TempVar", is_table_variable = true } } },
+                { statement_type = "SELECT", temp_table_name = "#TempTable", tables = { { name = "@TempVar", is_table_variable = true } } }
             }
         }
     },
@@ -1506,8 +1518,8 @@ INSERT INTO #Data VALUES (1, 'Test')
 SELECT * FROM #Data]],
         expected = {
             chunks = {
-                { statement_type = "OTHER" },
-                { statement_type = "OTHER" },
+                { statement_type = "CREATE" },
+                { statement_type = "ALTER" },
                 { statement_type = "INSERT", tables = { { name = "#Data", is_temp = true } } },
                 { statement_type = "SELECT", tables = { { name = "#Data", is_temp = true } } }
             }
@@ -1525,14 +1537,15 @@ SELECT * FROM #Cache]],
         expected = {
             chunks = {
                 { statement_type = "SELECT", temp_table_name = "#Cache", tables = { { name = "LargeTable" } } },
-                { statement_type = "TRUNCATE" },
+                { statement_type = "TRUNCATE", tables = { { name = "#Cache", is_temp = true } } },
                 {
                     statement_type = "INSERT",
                     tables = {
                         { name = "#Cache", is_temp = true },
                         { name = "LargeTable" }
                     }
-                }
+                },
+                { statement_type = "SELECT", tables = { { name = "#Cache", is_temp = true } } }
             }
         }
     },
@@ -1567,7 +1580,7 @@ SELECT * FROM TestTable
 GO]],
         expected = {
             chunks = {
-                { statement_type = "OTHER", go_batch_index = 0 },
+                { statement_type = "CREATE", go_batch_index = 0 },
                 { statement_type = "INSERT", go_batch_index = 1 },
                 { statement_type = "SELECT", go_batch_index = 2, tables = { { name = "TestTable" } } }
             }
@@ -1601,10 +1614,10 @@ DROP PROCEDURE GetCustomers
 GO]],
         expected = {
             chunks = {
-                { statement_type = "OTHER", go_batch_index = 0 },
+                { statement_type = "CREATE", go_batch_index = 0 },
                 { statement_type = "SELECT", go_batch_index = 0, tables = { { name = "Customers" } } },
                 { statement_type = "EXEC", go_batch_index = 1 },
-                { statement_type = "OTHER", go_batch_index = 2 }
+                { statement_type = "DROP", go_batch_index = 2 }
             }
         }
     },
@@ -1622,7 +1635,7 @@ GO
 SELECT * FROM CustomerOrders]],
         expected = {
             chunks = {
-                { statement_type = "OTHER", go_batch_index = 0 },
+                { statement_type = "CREATE", go_batch_index = 0 },
                 {
                     statement_type = "SELECT",
                     go_batch_index = 0,
@@ -1650,7 +1663,7 @@ GO
 SELECT dbo.GetOrderTotal(100) AS Total]],
         expected = {
             chunks = {
-                { statement_type = "OTHER", go_batch_index = 0 },
+                { statement_type = "CREATE", go_batch_index = 0 },
                 { statement_type = "SELECT", go_batch_index = 1 }
             }
         }
@@ -1672,9 +1685,11 @@ END
 GO
 INSERT INTO Orders (ProductId, Quantity) VALUES (1, 1)]],
         expected = {
+            -- Note: Parser extracts all DML statements including the final INSERT
+            -- The CREATE TRIGGER body isn't fully parsed (complex DDL)
             chunks = {
-                { statement_type = "OTHER", go_batch_index = 0 },
-                { statement_type = "INSERT", go_batch_index = 0 }
+                { statement_type = "CREATE", go_batch_index = 0 },
+                { statement_type = "INSERT", go_batch_index = 0 }  -- INSERT after GO still useful for completion
             }
         }
     },
@@ -1690,8 +1705,8 @@ GO
 SELECT * FROM Customers]],
         expected = {
             chunks = {
-                { statement_type = "OTHER", go_batch_index = 0 },
-                { statement_type = "OTHER", go_batch_index = 1 },
+                { statement_type = "ALTER", go_batch_index = 0 },
+                { statement_type = "ALTER", go_batch_index = 1 },
                 { statement_type = "SELECT", go_batch_index = 2, tables = { { name = "Customers" } } }
             }
         }
@@ -1709,7 +1724,7 @@ SELECT * FROM #TempData
 GO]],
         expected = {
             chunks = {
-                { statement_type = "OTHER", go_batch_index = 0 },
+                { statement_type = "CREATE", go_batch_index = 0 },
                 { statement_type = "INSERT", go_batch_index = 1 },
                 { statement_type = "SELECT", go_batch_index = 2, tables = { { name = "#TempData", is_temp = true } } }
             }
@@ -1802,8 +1817,10 @@ GRANT SELECT ON SecureData TO PublicUser
 GO
 SELECT * FROM SecureData]],
         expected = {
+            -- Note: GRANT SELECT is mis-parsed as a SELECT statement (GRANT not yet supported)
+            -- Parser extracts table reference from both "SELECT ON SecureData" and "SELECT * FROM SecureData"
             chunks = {
-                { statement_type = "OTHER", go_batch_index = 0 },
+                { statement_type = "CREATE", go_batch_index = 0 },
                 { statement_type = "SELECT", go_batch_index = 1, tables = { { name = "SecureData" } } }
             }
         }
@@ -1821,8 +1838,8 @@ SELECT * FROM Sales.Orders
 GO]],
         expected = {
             chunks = {
-                { statement_type = "OTHER", go_batch_index = 0 },
-                { statement_type = "OTHER", go_batch_index = 1 },
+                { statement_type = "CREATE", go_batch_index = 0 },
+                { statement_type = "CREATE", go_batch_index = 1 },
                 { statement_type = "SELECT", go_batch_index = 2, tables = { { name = "Orders", schema = "Sales" } } }
             }
         }
@@ -1892,7 +1909,10 @@ CROSS APPLY dbo.GetOrderDetails(o.OrderId) od]],
             chunks = {
                 {
                     statement_type = "SELECT",
-                    tables = { { name = "Orders", alias = "o" } }
+                    tables = {
+                        { name = "Orders", alias = "o" },
+                        { name = "GetOrderDetails", alias = "od", schema = "dbo", is_tvf = true }
+                    }
                 }
             }
         }

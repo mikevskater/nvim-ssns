@@ -20,9 +20,9 @@ return {
         name = "Unicode string with N prefix",
         input = "SELECT N'Hello World'",
         expected = {
+            -- N prefix is now included in the string token
             { type = "keyword", text = "SELECT" },
-            { type = "identifier", text = "N" },
-            { type = "string", text = "'Hello World'" }
+            { type = "string", text = "N'Hello World'" }
         }
     },
     {
@@ -95,9 +95,9 @@ return {
         name = "Unicode string with escaped quotes",
         input = "SELECT N'It''s unicode'",
         expected = {
+            -- N prefix is included in the string token
             { type = "keyword", text = "SELECT" },
-            { type = "identifier", text = "N" },
-            { type = "string", text = "'It''s unicode'" }
+            { type = "string", text = "N'It''s unicode'" }
         }
     },
     {
@@ -111,7 +111,7 @@ return {
         }
     },
 
-    -- IDs 1711-1720: Comment Patterns
+    -- IDs 1711-1720: Comment Patterns (comments now emitted as tokens)
     {
         id = 1711,
         type = "tokenizer",
@@ -121,7 +121,8 @@ return {
             { type = "keyword", text = "SELECT" },
             { type = "star", text = "*" },
             { type = "keyword", text = "FROM" },
-            { type = "identifier", text = "Users" }
+            { type = "identifier", text = "Users" },
+            { type = "line_comment", text = "-- Get all users" }
         }
     },
     {
@@ -131,6 +132,7 @@ return {
         input = "SELECT /* comment */ * FROM Users",
         expected = {
             { type = "keyword", text = "SELECT" },
+            { type = "comment", text = "/* comment */" },
             { type = "star", text = "*" },
             { type = "keyword", text = "FROM" },
             { type = "identifier", text = "Users" }
@@ -143,6 +145,7 @@ return {
         input = "SELECT /*\n  Multi-line\n  comment\n*/ * FROM Users",
         expected = {
             { type = "keyword", text = "SELECT" },
+            { type = "comment", text = "/*\n  Multi-line\n  comment\n*/" },
             { type = "star", text = "*" },
             { type = "keyword", text = "FROM" },
             { type = "identifier", text = "Users" }
@@ -157,7 +160,8 @@ return {
             { type = "keyword", text = "SELECT" },
             { type = "star", text = "*" },
             { type = "keyword", text = "FROM" },
-            { type = "identifier", text = "Users" }
+            { type = "identifier", text = "Users" },
+            { type = "line_comment", text = "-- WHERE name = 'John'" }
         }
     },
     {
@@ -170,6 +174,7 @@ return {
             { type = "identifier", text = "id" },
             { type = "comma", text = "," },
             { type = "identifier", text = "name" },
+            { type = "comment", text = "/* , email, phone */" },
             { type = "keyword", text = "FROM" },
             { type = "identifier", text = "Users" }
         }
@@ -182,8 +187,10 @@ return {
         expected = {
             { type = "keyword", text = "SELECT" },
             { type = "star", text = "*" },
+            { type = "line_comment", text = "-- comment 1" },
             { type = "keyword", text = "FROM" },
-            { type = "identifier", text = "Users" }
+            { type = "identifier", text = "Users" },
+            { type = "line_comment", text = "-- comment 2" }
         }
     },
     {
@@ -192,6 +199,7 @@ return {
         name = "Block comment at start",
         input = "/* Header comment */ SELECT * FROM Users",
         expected = {
+            { type = "comment", text = "/* Header comment */" },
             { type = "keyword", text = "SELECT" },
             { type = "star", text = "*" },
             { type = "keyword", text = "FROM" },
@@ -207,7 +215,8 @@ return {
             { type = "keyword", text = "SELECT" },
             { type = "star", text = "*" },
             { type = "keyword", text = "FROM" },
-            { type = "identifier", text = "Users" }
+            { type = "identifier", text = "Users" },
+            { type = "line_comment", text = "-- TODO: Fix this @bug #123" }
         }
     },
     {
@@ -217,8 +226,11 @@ return {
         input = "SELECT /* c1 */ * /* c2 */ FROM /* c3 */ Users",
         expected = {
             { type = "keyword", text = "SELECT" },
+            { type = "comment", text = "/* c1 */" },
             { type = "star", text = "*" },
+            { type = "comment", text = "/* c2 */" },
             { type = "keyword", text = "FROM" },
+            { type = "comment", text = "/* c3 */" },
             { type = "identifier", text = "Users" }
         }
     },
@@ -228,10 +240,12 @@ return {
         name = "Mixed comment styles",
         input = "/* Block */ SELECT * FROM Users -- Line",
         expected = {
+            { type = "comment", text = "/* Block */" },
             { type = "keyword", text = "SELECT" },
             { type = "star", text = "*" },
             { type = "keyword", text = "FROM" },
-            { type = "identifier", text = "Users" }
+            { type = "identifier", text = "Users" },
+            { type = "line_comment", text = "-- Line" }
         }
     },
 
@@ -369,7 +383,7 @@ return {
         }
     },
 
-    -- IDs 1731-1740: Operator and Special Character Patterns
+    -- IDs 1731-1740: Operator and Special Character Patterns (multi-char operators now single tokens)
     {
         id = 1731,
         type = "tokenizer",
@@ -378,18 +392,15 @@ return {
         expected = {
             { type = "keyword", text = "WHERE" },
             { type = "identifier", text = "a" },
-            { type = "operator", text = "<" },
-            { type = "operator", text = "=" },
+            { type = "operator", text = "<=" },
             { type = "number", text = "5" },
             { type = "keyword", text = "AND" },
             { type = "identifier", text = "b" },
-            { type = "operator", text = ">" },
-            { type = "operator", text = "=" },
+            { type = "operator", text = ">=" },
             { type = "number", text = "10" },
             { type = "keyword", text = "AND" },
             { type = "identifier", text = "c" },
-            { type = "operator", text = "<" },
-            { type = "operator", text = ">" },
+            { type = "operator", text = "<>" },
             { type = "number", text = "0" }
         }
     },
@@ -437,8 +448,8 @@ return {
         input = "SET @counter += 1",
         expected = {
             { type = "keyword", text = "SET" },
-            { type = "at", text = "@" },
-            { type = "identifier", text = "counter" },
+            { type = "variable", text = "@counter" },
+            -- Compound assignment operators are separate tokens
             { type = "operator", text = "+" },
             { type = "operator", text = "=" },
             { type = "number", text = "1" }
@@ -489,13 +500,11 @@ return {
         expected = {
             { type = "keyword", text = "WHERE" },
             { type = "identifier", text = "a" },
-            { type = "operator", text = "<" },
-            { type = "operator", text = ">" },
+            { type = "operator", text = "<>" },
             { type = "number", text = "0" },
             { type = "keyword", text = "AND" },
             { type = "identifier", text = "b" },
-            { type = "operator", text = "!" },
-            { type = "operator", text = "=" },
+            { type = "operator", text = "!=" },
             { type = "number", text = "0" }
         }
     },
@@ -505,27 +514,24 @@ return {
         name = "Compound assignment operators",
         input = "SET @a += 1, @b -= 2, @c *= 3, @d /= 4",
         expected = {
+            -- Compound assignment operators are separate tokens
             { type = "keyword", text = "SET" },
-            { type = "at", text = "@" },
-            { type = "identifier", text = "a" },
+            { type = "variable", text = "@a" },
             { type = "operator", text = "+" },
             { type = "operator", text = "=" },
             { type = "number", text = "1" },
             { type = "comma", text = "," },
-            { type = "at", text = "@" },
-            { type = "identifier", text = "b" },
+            { type = "variable", text = "@b" },
             { type = "operator", text = "-" },
             { type = "operator", text = "=" },
             { type = "number", text = "2" },
             { type = "comma", text = "," },
-            { type = "at", text = "@" },
-            { type = "identifier", text = "c" },
+            { type = "variable", text = "@c" },
             { type = "star", text = "*" },
             { type = "operator", text = "=" },
             { type = "number", text = "3" },
             { type = "comma", text = "," },
-            { type = "at", text = "@" },
-            { type = "identifier", text = "d" },
+            { type = "variable", text = "@d" },
             { type = "operator", text = "/" },
             { type = "operator", text = "=" },
             { type = "number", text = "4" }
@@ -549,9 +555,9 @@ return {
         name = "Negative number",
         input = "SELECT -100",
         expected = {
+            -- Negative numbers are now single tokens
             { type = "keyword", text = "SELECT" },
-            { type = "operator", text = "-" },
-            { type = "number", text = "100" }
+            { type = "number", text = "-100" }
         }
     },
 
@@ -563,11 +569,9 @@ return {
         input = "SELECT @UserId FROM #TempUsers",
         expected = {
             { type = "keyword", text = "SELECT" },
-            { type = "at", text = "@" },
-            { type = "identifier", text = "UserId" },
+            { type = "variable", text = "@UserId" },
             { type = "keyword", text = "FROM" },
-            { type = "hash", text = "#" },
-            { type = "identifier", text = "TempUsers" }
+            { type = "temp_table", text = "#TempUsers" }
         }
     },
     {
@@ -618,8 +622,7 @@ return {
         expected = {
             { type = "keyword", text = "WHERE" },
             { type = "identifier", text = "age" },
-            { type = "operator", text = ">" },
-            { type = "operator", text = "=" },
+            { type = "operator", text = ">=" },
             { type = "number", text = "18" },
             { type = "keyword", text = "AND" },
             { type = "identifier", text = "status" },
@@ -640,7 +643,7 @@ return {
             { type = "keyword", text = "SELECT" },
             { type = "identifier", text = "category" },
             { type = "comma", text = "," },
-            { type = "identifier", text = "COUNT" },
+            { type = "keyword", text = "COUNT" },
             { type = "paren_open", text = "(" },
             { type = "star", text = "*" },
             { type = "paren_close", text = ")" },
@@ -650,7 +653,7 @@ return {
             { type = "keyword", text = "BY" },
             { type = "identifier", text = "category" },
             { type = "keyword", text = "HAVING" },
-            { type = "identifier", text = "COUNT" },
+            { type = "keyword", text = "COUNT" },
             { type = "paren_open", text = "(" },
             { type = "star", text = "*" },
             { type = "paren_close", text = ")" },
@@ -712,8 +715,7 @@ return {
         expected = {
             { type = "keyword", text = "EXEC" },
             { type = "identifier", text = "GetUserById" },
-            { type = "at", text = "@" },
-            { type = "identifier", text = "UserId" },
+            { type = "variable", text = "@UserId" },
             { type = "operator", text = "=" },
             { type = "number", text = "123" }
         }
@@ -725,13 +727,11 @@ return {
         input = "DECLARE @StartDate DATE, @EndDate DATE",
         expected = {
             { type = "keyword", text = "DECLARE" },
-            { type = "at", text = "@" },
-            { type = "identifier", text = "StartDate" },
-            { type = "identifier", text = "DATE" },
+            { type = "variable", text = "@StartDate" },
+            { type = "keyword", text = "DATE" },
             { type = "comma", text = "," },
-            { type = "at", text = "@" },
-            { type = "identifier", text = "EndDate" },
-            { type = "identifier", text = "DATE" }
+            { type = "variable", text = "@EndDate" },
+            { type = "keyword", text = "DATE" }
         }
     },
     {

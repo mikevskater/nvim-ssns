@@ -272,7 +272,7 @@ return {
         }
     },
 
-    -- Aggregate functions
+    -- Aggregate functions (COUNT, MAX, MIN, SUM, AVG are now keywords)
     {
         id = 1515,
         type = "tokenizer",
@@ -280,7 +280,7 @@ return {
         input = "SELECT COUNT(*) FROM Users",
         expected = {
             {type = "keyword", text = "SELECT", line = 1, col = 1},
-            {type = "identifier", text = "COUNT", line = 1, col = 8},
+            {type = "keyword", text = "COUNT", line = 1, col = 8},
             {type = "paren_open", text = "(", line = 1, col = 13},
             {type = "star", text = "*", line = 1, col = 14},
             {type = "paren_close", text = ")", line = 1, col = 15},
@@ -295,17 +295,17 @@ return {
         input = "SELECT COUNT(*), MAX(Age), MIN(Age) FROM Users",
         expected = {
             {type = "keyword", text = "SELECT", line = 1, col = 1},
-            {type = "identifier", text = "COUNT", line = 1, col = 8},
+            {type = "keyword", text = "COUNT", line = 1, col = 8},
             {type = "paren_open", text = "(", line = 1, col = 13},
             {type = "star", text = "*", line = 1, col = 14},
             {type = "paren_close", text = ")", line = 1, col = 15},
             {type = "comma", text = ",", line = 1, col = 16},
-            {type = "identifier", text = "MAX", line = 1, col = 18},
+            {type = "keyword", text = "MAX", line = 1, col = 18},
             {type = "paren_open", text = "(", line = 1, col = 21},
             {type = "identifier", text = "Age", line = 1, col = 22},
             {type = "paren_close", text = ")", line = 1, col = 25},
             {type = "comma", text = ",", line = 1, col = 26},
-            {type = "identifier", text = "MIN", line = 1, col = 28},
+            {type = "keyword", text = "MIN", line = 1, col = 28},
             {type = "paren_open", text = "(", line = 1, col = 31},
             {type = "identifier", text = "Age", line = 1, col = 32},
             {type = "paren_close", text = ")", line = 1, col = 35},
@@ -339,7 +339,7 @@ return {
             {type = "keyword", text = "SELECT", line = 1, col = 1},
             {type = "identifier", text = "Age", line = 1, col = 8},
             {type = "comma", text = ",", line = 1, col = 11},
-            {type = "identifier", text = "COUNT", line = 1, col = 13},
+            {type = "keyword", text = "COUNT", line = 1, col = 13},
             {type = "paren_open", text = "(", line = 1, col = 18},
             {type = "star", text = "*", line = 1, col = 19},
             {type = "paren_close", text = ")", line = 1, col = 20},
@@ -349,7 +349,7 @@ return {
             {type = "keyword", text = "BY", line = 1, col = 39},
             {type = "identifier", text = "Age", line = 1, col = 42},
             {type = "keyword", text = "HAVING", line = 1, col = 46},
-            {type = "identifier", text = "COUNT", line = 1, col = 53},
+            {type = "keyword", text = "COUNT", line = 1, col = 53},
             {type = "paren_open", text = "(", line = 1, col = 58},
             {type = "star", text = "*", line = 1, col = 59},
             {type = "paren_close", text = ")", line = 1, col = 60},
@@ -425,7 +425,7 @@ return {
         }
     },
 
-    -- Statements with comments
+    -- Statements with comments (comments now emitted as tokens)
     {
         id = 1523,
         type = "tokenizer",
@@ -434,6 +434,7 @@ return {
         expected = {
             {type = "keyword", text = "SELECT", line = 1, col = 1},
             {type = "star", text = "*", line = 1, col = 8},
+            {type = "comment", text = "/* all columns */", line = 1, col = 10},
             {type = "keyword", text = "FROM", line = 1, col = 28},
             {type = "identifier", text = "Users", line = 1, col = 33}
         }
@@ -446,6 +447,7 @@ return {
         expected = {
             {type = "keyword", text = "SELECT", line = 1, col = 1},
             {type = "identifier", text = "Name", line = 1, col = 8},
+            {type = "line_comment", text = "-- user name", line = 1, col = 13},
             {type = "keyword", text = "FROM", line = 2, col = 1},
             {type = "identifier", text = "Users", line = 2, col = 6}
         }
@@ -682,10 +684,11 @@ return {
             {type = "identifier", text = "Users", line = 1, col = 14},
             {type = "paren_open", text = "(", line = 1, col = 20},
             {type = "identifier", text = "Id", line = 1, col = 21},
-            {type = "identifier", text = "INT", line = 1, col = 24},
+            -- INT and VARCHAR are SQL data type keywords
+            {type = "keyword", text = "INT", line = 1, col = 24},
             {type = "comma", text = ",", line = 1, col = 27},
             {type = "identifier", text = "Name", line = 1, col = 29},
-            {type = "identifier", text = "VARCHAR", line = 1, col = 34},
+            {type = "keyword", text = "VARCHAR", line = 1, col = 34},
             {type = "paren_open", text = "(", line = 1, col = 41},
             {type = "number", text = "100", line = 1, col = 42},
             {type = "paren_close", text = ")", line = 1, col = 45},
@@ -693,7 +696,7 @@ return {
         }
     },
 
-    -- Temp tables
+    -- Temp tables (now emitted as single temp_table token)
     {
         id = 1537,
         type = "tokenizer",
@@ -703,14 +706,13 @@ return {
             {type = "keyword", text = "SELECT", line = 1, col = 1},
             {type = "star", text = "*", line = 1, col = 8},
             {type = "keyword", text = "INTO", line = 1, col = 10},
-            {type = "hash", text = "#", line = 1, col = 15},
-            {type = "identifier", text = "TempUsers", line = 1, col = 16},
+            {type = "temp_table", text = "#TempUsers", line = 1, col = 15},
             {type = "keyword", text = "FROM", line = 1, col = 26},
             {type = "identifier", text = "Users", line = 1, col = 31}
         }
     },
 
-    -- Variables
+    -- Variables (now emitted as single variable tokens)
     {
         id = 1538,
         type = "tokenizer",
@@ -718,16 +720,14 @@ return {
         input = "DECLARE @name VARCHAR(50); SET @name = 'John'",
         expected = {
             {type = "keyword", text = "DECLARE", line = 1, col = 1},
-            {type = "at", text = "@", line = 1, col = 9},
-            {type = "identifier", text = "name", line = 1, col = 10},
-            {type = "identifier", text = "VARCHAR", line = 1, col = 15},
+            {type = "variable", text = "@name", line = 1, col = 9},
+            {type = "keyword", text = "VARCHAR", line = 1, col = 15},
             {type = "paren_open", text = "(", line = 1, col = 22},
             {type = "number", text = "50", line = 1, col = 23},
             {type = "paren_close", text = ")", line = 1, col = 25},
             {type = "semicolon", text = ";", line = 1, col = 26},
             {type = "keyword", text = "SET", line = 1, col = 28},
-            {type = "at", text = "@", line = 1, col = 32},
-            {type = "identifier", text = "name", line = 1, col = 33},
+            {type = "variable", text = "@name", line = 1, col = 32},
             {type = "operator", text = "=", line = 1, col = 38},
             {type = "string", text = "'John'", line = 1, col = 40}
         }

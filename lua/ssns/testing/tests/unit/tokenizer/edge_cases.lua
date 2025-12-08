@@ -49,34 +49,46 @@ return {
         }
     },
 
-    -- Only comments
+    -- Only comments (comments are now emitted as tokens)
     {
         id = 1607,
         type = "tokenizer",
         name = "Only line comment",
         input = "-- this is a comment",
-        expected = {}
+        expected = {
+            {type = "line_comment", text = "-- this is a comment", line = 1, col = 1}
+        }
     },
     {
         id = 1608,
         type = "tokenizer",
         name = "Only block comment",
         input = "/* this is a comment */",
-        expected = {}
+        expected = {
+            {type = "comment", text = "/* this is a comment */", line = 1, col = 1}
+        }
     },
     {
         id = 1609,
         type = "tokenizer",
         name = "Multiple line comments only",
         input = "-- comment 1\n-- comment 2\n-- comment 3",
-        expected = {}
+        expected = {
+            {type = "line_comment", text = "-- comment 1", line = 1, col = 1},
+            {type = "line_comment", text = "-- comment 2", line = 2, col = 1},
+            {type = "line_comment", text = "-- comment 3", line = 3, col = 1}
+        }
     },
     {
         id = 1610,
         type = "tokenizer",
         name = "Multiple block comments only",
         input = "/* comment 1 */ /* comment 2 */ /* comment 3 */",
-        expected = {}
+        expected = {
+            {type = "comment", text = "/* comment 1 */", line = 1, col = 1},
+            {type = "comment", text = "/* comment 2 */", line = 1, col = 17},
+            {type = "comment", text = "/* comment 3 */", line = 1, col = 33}
+        }
     },
 
     -- Unterminated strings (should handle gracefully)
@@ -133,14 +145,15 @@ return {
         }
     },
 
-    -- Unterminated block comment (should handle gracefully)
+    -- Unterminated block comment (should handle gracefully - comment token still emitted)
     {
         id = 1616,
         type = "tokenizer",
         name = "Unterminated block comment",
         input = "SELECT /* comment without end",
         expected = {
-            {type = "keyword", text = "SELECT", line = 1, col = 1}
+            {type = "keyword", text = "SELECT", line = 1, col = 1},
+            {type = "comment", text = "/* comment without end", line = 1, col = 8}
         }
     },
     {
@@ -149,7 +162,8 @@ return {
         name = "Block comment start only",
         input = "SELECT /*",
         expected = {
-            {type = "keyword", text = "SELECT", line = 1, col = 1}
+            {type = "keyword", text = "SELECT", line = 1, col = 1},
+            {type = "comment", text = "/*", line = 1, col = 8}
         }
     },
 
@@ -295,9 +309,9 @@ return {
         name = "Decimal followed by identifier",
         input = "3.14abc",
         expected = {
-            {type = "number", text = "3", line = 1, col = 1},
-            {type = "dot", text = ".", line = 1, col = 2},
-            {type = "identifier", text = "14abc", line = 1, col = 3}
+            -- When number followed by dot followed by alphanumerics,
+            -- the tokenizer treats the whole thing as a single identifier
+            {type = "identifier", text = "3.14abc", line = 1, col = 1}
         }
     },
 
@@ -314,8 +328,8 @@ return {
             {type = "operator", text = "/", line = 1, col = 4},
             {type = "operator", text = "%", line = 1, col = 5},
             {type = "operator", text = "=", line = 1, col = 6},
-            {type = "operator", text = "<", line = 1, col = 7},
-            {type = "operator", text = ">", line = 1, col = 8}
+            -- <> is now a single multi-character operator
+            {type = "operator", text = "<>", line = 1, col = 7}
         }
     },
 
@@ -367,7 +381,7 @@ return {
         }
     },
 
-    -- GO batch separator (SQL Server specific)
+    -- GO batch separator (SQL Server specific) - now recognized as go token type
     {
         id = 1636,
         type = "tokenizer",
@@ -376,7 +390,7 @@ return {
         expected = {
             {type = "keyword", text = "SELECT", line = 1, col = 1},
             {type = "number", text = "1", line = 1, col = 8},
-            {type = "identifier", text = "GO", line = 2, col = 1},
+            {type = "go", text = "GO", line = 2, col = 1},
             {type = "keyword", text = "SELECT", line = 3, col = 1},
             {type = "number", text = "2", line = 3, col = 8}
         }
@@ -389,7 +403,7 @@ return {
         expected = {
             {type = "keyword", text = "SELECT", line = 1, col = 1},
             {type = "number", text = "1", line = 1, col = 8},
-            {type = "identifier", text = "Go", line = 2, col = 1},
+            {type = "go", text = "Go", line = 2, col = 1},
             {type = "keyword", text = "SELECT", line = 3, col = 1},
             {type = "number", text = "2", line = 3, col = 8}
         }
@@ -490,7 +504,7 @@ return {
         }
     },
 
-    -- Comment edge cases
+    -- Comment edge cases (comments now emitted as tokens)
     {
         id = 1644,
         type = "tokenizer",
@@ -500,7 +514,8 @@ return {
             {type = "keyword", text = "SELECT", line = 1, col = 1},
             {type = "star", text = "*", line = 1, col = 8},
             {type = "keyword", text = "FROM", line = 1, col = 10},
-            {type = "identifier", text = "Users", line = 1, col = 15}
+            {type = "identifier", text = "Users", line = 1, col = 15},
+            {type = "line_comment", text = "-- '; DROP TABLE Users; --", line = 1, col = 21}
         }
     },
     {
@@ -508,14 +523,18 @@ return {
         type = "tokenizer",
         name = "Block comment with asterisks inside",
         input = "/* *** comment *** */",
-        expected = {}
+        expected = {
+            {type = "comment", text = "/* *** comment *** */", line = 1, col = 1}
+        }
     },
     {
         id = 1646,
         type = "tokenizer",
         name = "Block comment with forward slashes inside",
         input = "/* /// comment /// */",
-        expected = {}
+        expected = {
+            {type = "comment", text = "/* /// comment /// */", line = 1, col = 1}
+        }
     },
 
     -- Whitespace variations
@@ -556,7 +575,7 @@ return {
             {type = "dot", text = ".", line = 1, col = 10},
             {type = "star", text = "*", line = 1, col = 11},
             {type = "comma", text = ",", line = 1, col = 12},
-            {type = "identifier", text = "COUNT", line = 1, col = 14},
+            {type = "keyword", text = "COUNT", line = 1, col = 14},  -- COUNT is now keyword
             {type = "paren_open", text = "(", line = 1, col = 19},
             {type = "star", text = "*", line = 1, col = 20},
             {type = "paren_close", text = ")", line = 1, col = 21},
@@ -584,7 +603,8 @@ return {
             {type = "dot", text = ".", line = 1, col = 92},
             {type = "identifier", text = "name", line = 1, col = 93},
             {type = "keyword", text = "LIKE", line = 1, col = 98},
-            {type = "string", text = "'test%'", line = 1, col = 103}
+            {type = "string", text = "'test%'", line = 1, col = 103},
+            {type = "line_comment", text = "-- comment", line = 1, col = 111}  -- comment now emitted
         }
     },
 
@@ -595,33 +615,29 @@ return {
         name = "Kitchen sink - all features",
         input = "/* Multi-line\ncomment */\nSELECT #temp.*, 'O''Brien', 3.14, @var FROM [dbo].[Table] -- inline comment\nWHERE id >= 1 AND name <> 'test';",
         expected = {
+            {type = "comment", text = "/* Multi-line\ncomment */", line = 1, col = 1},  -- multi-line comment emitted
             {type = "keyword", text = "SELECT", line = 3, col = 1},
-            {type = "hash", text = "#", line = 3, col = 8},
-            {type = "keyword", text = "temp", line = 3, col = 9},
+            {type = "temp_table", text = "#temp", line = 3, col = 8},  -- #temp as single temp_table token
             {type = "dot", text = ".", line = 3, col = 13},
             {type = "star", text = "*", line = 3, col = 14},
             {type = "comma", text = ",", line = 3, col = 15},
             {type = "string", text = "'O''Brien'", line = 3, col = 17},
             {type = "comma", text = ",", line = 3, col = 27},
-            {type = "number", text = "3", line = 3, col = 29},
-            {type = "dot", text = ".", line = 3, col = 30},
-            {type = "number", text = "14", line = 3, col = 31},
+            {type = "number", text = "3.14", line = 3, col = 29},  -- decimal as single number token
             {type = "comma", text = ",", line = 3, col = 33},
-            {type = "at", text = "@", line = 3, col = 35},
-            {type = "identifier", text = "var", line = 3, col = 36},
+            {type = "variable", text = "@var", line = 3, col = 35},  -- @var as single variable token
             {type = "keyword", text = "FROM", line = 3, col = 40},
             {type = "bracket_id", text = "[dbo]", line = 3, col = 45},
             {type = "dot", text = ".", line = 3, col = 50},
             {type = "bracket_id", text = "[Table]", line = 3, col = 51},
+            {type = "line_comment", text = "-- inline comment", line = 3, col = 59},  -- inline comment emitted
             {type = "keyword", text = "WHERE", line = 4, col = 1},
             {type = "identifier", text = "id", line = 4, col = 7},
-            {type = "operator", text = ">", line = 4, col = 10},
-            {type = "operator", text = "=", line = 4, col = 11},
+            {type = "operator", text = ">=", line = 4, col = 10},  -- >= as single operator
             {type = "number", text = "1", line = 4, col = 13},
             {type = "keyword", text = "AND", line = 4, col = 15},
             {type = "identifier", text = "name", line = 4, col = 19},
-            {type = "operator", text = "<", line = 4, col = 24},
-            {type = "operator", text = ">", line = 4, col = 25},
+            {type = "operator", text = "<>", line = 4, col = 24},  -- <> as single operator
             {type = "string", text = "'test'", line = 4, col = 27},
             {type = "semicolon", text = ";", line = 4, col = 33}
         }

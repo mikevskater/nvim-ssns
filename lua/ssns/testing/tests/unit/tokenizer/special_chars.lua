@@ -208,7 +208,8 @@ return {
         expected = {
             {type = "keyword", text = "SELECT", line = 1, col = 1},
             {type = "paren_open", text = "(", line = 1, col = 8},
-            {type = "identifier", text = "column", line = 1, col = 9},
+            -- "column" is a SQL keyword
+            {type = "keyword", text = "column", line = 1, col = 9},
             {type = "paren_close", text = ")", line = 1, col = 15}
         }
     },
@@ -218,7 +219,7 @@ return {
         name = "Function call",
         input = "COUNT(*)",
         expected = {
-            {type = "identifier", text = "COUNT", line = 1, col = 1},
+            {type = "keyword", text = "COUNT", line = 1, col = 1},
             {type = "paren_open", text = "(", line = 1, col = 6},
             {type = "star", text = "*", line = 1, col = 7},
             {type = "paren_close", text = ")", line = 1, col = 8}
@@ -230,9 +231,10 @@ return {
         name = "Function with arguments",
         input = "MAX(value)",
         expected = {
-            {type = "identifier", text = "MAX", line = 1, col = 1},
+            {type = "keyword", text = "MAX", line = 1, col = 1},
             {type = "paren_open", text = "(", line = 1, col = 4},
-            {type = "identifier", text = "value", line = 1, col = 5},
+            -- "value" is a SQL keyword
+            {type = "keyword", text = "value", line = 1, col = 5},
             {type = "paren_close", text = ")", line = 1, col = 10}
         }
     },
@@ -367,7 +369,7 @@ return {
         name = "Function with qualified column",
         input = "COUNT(t.id)",
         expected = {
-            {type = "identifier", text = "COUNT", line = 1, col = 1},
+            {type = "keyword", text = "COUNT", line = 1, col = 1},
             {type = "paren_open", text = "(", line = 1, col = 6},
             {type = "identifier", text = "t", line = 1, col = 7},
             {type = "dot", text = ".", line = 1, col = 8},
@@ -462,7 +464,7 @@ return {
         name = "Multi-line function call",
         input = "COUNT(\n*\n)",
         expected = {
-            {type = "identifier", text = "COUNT", line = 1, col = 1},
+            {type = "keyword", text = "COUNT", line = 1, col = 1},
             {type = "paren_open", text = "(", line = 1, col = 6},
             {type = "star", text = "*", line = 2, col = 1},
             {type = "paren_close", text = ")", line = 3, col = 1}
@@ -552,7 +554,8 @@ return {
         input = ".column",
         expected = {
             {type = "dot", text = ".", line = 1, col = 1},
-            {type = "identifier", text = "column", line = 1, col = 2}
+            -- "column" is a SQL keyword
+            {type = "keyword", text = "column", line = 1, col = 2}
         }
     },
     {

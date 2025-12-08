@@ -860,7 +860,7 @@ WHERE DepartmentID IN (SELECT DepartmentID FROM Departments WHERE Budget > 10000
                     start_line = 1,
                     end_line = 2,
                     start_col = 1,
-                    end_col = 23,
+                    end_col = 82,
                     go_batch_index = 0
                 }
             }
