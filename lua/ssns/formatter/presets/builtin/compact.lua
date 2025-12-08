@@ -131,5 +131,18 @@ return {
     in_list_style = "inline",
     expression_wrap_length = 0,
     boolean_operator_newline = false,
+
+    -- Indentation expansion (Phase 5) - minimal
+    continuation_indent = 0,
+    cte_indent = 0,
+    union_indent = 0,
+    nested_join_indent = 0,
+
+    -- Advanced (Phase 5)
+    keyword_right_align = false,
+    smart_indent = false,
+    preserve_original_layout = false,
+    format_only_selection = false,
+    batch_separator_style = "semicolon",
   },
 }

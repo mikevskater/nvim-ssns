@@ -319,6 +319,17 @@
 ---@field in_list_style string "inline"|"stacked" - IN clause value list layout (default: "inline")
 ---@field expression_wrap_length number Wrap long expressions at this length, 0=disable (default: 0)
 ---@field boolean_operator_newline boolean Put AND/OR on new lines in expressions (default: false)
+-- Indentation expansion (Phase 5)
+---@field continuation_indent number Wrapped line continuation indent (default: 1)
+---@field cte_indent number CTE body indent level (default: 1)
+---@field union_indent number UNION statement indent (default: 0)
+---@field nested_join_indent number Nested JOIN indent level (default: 1)
+-- Advanced options (Phase 5)
+---@field keyword_right_align boolean Right-align keywords for river style (default: false)
+---@field smart_indent boolean Context-aware indentation (default: false)
+---@field preserve_original_layout boolean Preserve user formatting where possible (default: false)
+---@field format_only_selection boolean Format selection only vs whole buffer (default: false)
+---@field batch_separator_style string "go"|"semicolon" - Batch separator preference (default: "go")
 ---@field rules FormatterRulesConfig Per-clause rule overrides
 
 ---@class FormatterRulesConfig
@@ -854,6 +865,19 @@ local default_config = {
     in_list_style = "inline",            -- "inline"|"stacked"
     expression_wrap_length = 0,          -- Wrap at N chars (0=disable)
     boolean_operator_newline = false,    -- AND/OR on new lines
+
+    -- Indentation expansion (Phase 5)
+    continuation_indent = 1,             -- Wrapped line continuation indent
+    cte_indent = 1,                      -- CTE body indent level
+    union_indent = 0,                    -- UNION statement indent
+    nested_join_indent = 1,              -- Nested JOIN indent level
+
+    -- Advanced options (Phase 5)
+    keyword_right_align = false,         -- Right-align keywords (river style)
+    smart_indent = false,                -- Context-aware indentation
+    preserve_original_layout = false,    -- Preserve user formatting
+    format_only_selection = false,       -- Format selection vs whole buffer
+    batch_separator_style = "go",        -- "go"|"semicolon"
 
     rules = {
       -- Per-clause rule overrides (optional)

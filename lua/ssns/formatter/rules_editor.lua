@@ -190,6 +190,19 @@ local RULE_DEFINITIONS = {
   { key = "in_list_style", name = "IN List Style", description = "IN clause value list layout", type = "enum", options = {"inline", "stacked"}, category = "Expressions" },
   { key = "expression_wrap_length", name = "Expr Wrap", description = "Wrap expressions at N chars (0=disable)", type = "number", min = 0, max = 200, step = 10, category = "Expressions" },
   { key = "boolean_operator_newline", name = "Bool Op Newline", description = "Put AND/OR on new lines in expressions", type = "boolean", category = "Expressions" },
+
+  -- Indentation expansion (Phase 5)
+  { key = "continuation_indent", name = "Continuation", description = "Wrapped line continuation indent", type = "number", min = 0, max = 4, step = 1, category = "Indentation" },
+  { key = "cte_indent", name = "CTE Indent", description = "CTE body indent level", type = "number", min = 0, max = 4, step = 1, category = "Indentation" },
+  { key = "union_indent", name = "UNION Indent", description = "UNION statement indent", type = "number", min = 0, max = 4, step = 1, category = "Indentation" },
+  { key = "nested_join_indent", name = "Nested JOIN", description = "Nested JOIN indent level", type = "number", min = 0, max = 4, step = 1, category = "Indentation" },
+
+  -- Advanced options (Phase 5)
+  { key = "keyword_right_align", name = "Right-Align Keywords", description = "Right-align keywords (river style)", type = "boolean", category = "Advanced" },
+  { key = "smart_indent", name = "Smart Indent", description = "Context-aware indentation", type = "boolean", category = "Advanced" },
+  { key = "preserve_original_layout", name = "Preserve Layout", description = "Preserve user formatting where possible", type = "boolean", category = "Advanced" },
+  { key = "format_only_selection", name = "Selection Only", description = "Format selection only vs whole buffer", type = "boolean", category = "Advanced" },
+  { key = "batch_separator_style", name = "Batch Separator", description = "Batch separator preference", type = "enum", options = {"go", "semicolon"}, category = "Advanced" },
 }
 
 -- Sample SQL for live preview

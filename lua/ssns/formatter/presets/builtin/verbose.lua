@@ -131,5 +131,18 @@ return {
     in_list_style = "stacked",
     expression_wrap_length = 60,
     boolean_operator_newline = true,
+
+    -- Indentation expansion (Phase 5) - generous
+    continuation_indent = 2,
+    cte_indent = 2,
+    union_indent = 0,
+    nested_join_indent = 2,
+
+    -- Advanced (Phase 5)
+    keyword_right_align = false,
+    smart_indent = true,
+    preserve_original_layout = false,
+    format_only_selection = false,
+    batch_separator_style = "go",
   },
 }
