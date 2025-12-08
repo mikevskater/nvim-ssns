@@ -22,5 +22,40 @@ return {
     operator_spacing = true,
     preserve_comments = true,
     format_on_save = false,
+
+    -- SELECT clause (Phase 1)
+    select_list_style = "stacked",
+    select_star_expand = false,
+    select_distinct_newline = false,
+    select_top_newline = false,
+    select_into_newline = true,
+    select_column_align = "left",
+    select_expression_wrap = 0,
+    use_as_keyword = true,
+
+    -- FROM clause (Phase 1)
+    from_newline = true,
+    from_table_style = "stacked",
+    from_alias_align = false,
+    from_schema_qualify = "preserve",
+    from_table_hints_newline = false,
+    derived_table_style = "newline",
+
+    -- WHERE clause (Phase 1)
+    where_newline = true,
+    where_condition_style = "stacked",
+    where_and_or_indent = 1,
+    where_in_list_style = "inline",
+    where_between_style = "inline",
+    where_exists_style = "newline",
+
+    -- JOIN clause (Phase 1)
+    join_newline = true,
+    join_keyword_style = "full",
+    join_indent_style = "indent",
+    on_condition_style = "inline",
+    on_and_position = "leading",
+    cross_apply_newline = true,
+    empty_line_before_join = false,
   },
 }

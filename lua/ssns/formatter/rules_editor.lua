@@ -62,13 +62,46 @@ local RULE_DEFINITIONS = {
   { key = "subquery_indent", name = "Subquery Indent", description = "Extra indent levels for subqueries", type = "number", min = 0, max = 4, step = 1, category = "Indentation" },
   { key = "case_indent", name = "CASE Indent", description = "Indent levels for CASE/WHEN blocks", type = "number", min = 0, max = 4, step = 1, category = "Indentation" },
 
-  -- Clauses
+  -- Clauses (legacy)
   { key = "newline_before_clause", name = "Newline Before Clause", description = "Start major clauses on new lines", type = "boolean", category = "Clauses" },
   { key = "comma_position", name = "Comma Position", description = "Place commas at start or end of line", type = "enum", options = {"trailing", "leading"}, category = "Clauses" },
   { key = "and_or_position", name = "AND/OR Position", description = "Place AND/OR at start or end of line", type = "enum", options = {"leading", "trailing"}, category = "Clauses" },
 
-  -- Joins
-  { key = "join_on_same_line", name = "JOIN ON Same Line", description = "Keep ON clause on same line as JOIN", type = "boolean", category = "Joins" },
+  -- SELECT Clause (Phase 1)
+  { key = "select_list_style", name = "Select List Style", description = "Columns inline or one per line", type = "enum", options = {"inline", "stacked"}, category = "SELECT" },
+  { key = "select_star_expand", name = "Expand SELECT *", description = "Auto-expand SELECT * to column list", type = "boolean", category = "SELECT" },
+  { key = "select_distinct_newline", name = "DISTINCT Newline", description = "Put DISTINCT on new line after SELECT", type = "boolean", category = "SELECT" },
+  { key = "select_top_newline", name = "TOP Newline", description = "Put TOP clause on new line after SELECT", type = "boolean", category = "SELECT" },
+  { key = "select_into_newline", name = "INTO Newline", description = "Put INTO clause on new line", type = "boolean", category = "SELECT" },
+  { key = "select_column_align", name = "Column Alignment", description = "Align columns to left or keyword", type = "enum", options = {"left", "keyword"}, category = "SELECT" },
+  { key = "select_expression_wrap", name = "Expression Wrap", description = "Wrap expressions longer than N chars (0=disable)", type = "number", min = 0, max = 200, step = 10, category = "SELECT" },
+  { key = "use_as_keyword", name = "Use AS Keyword", description = "Always use AS for column aliases", type = "boolean", category = "SELECT" },
+
+  -- FROM Clause (Phase 1)
+  { key = "from_newline", name = "FROM Newline", description = "FROM on new line", type = "boolean", category = "FROM" },
+  { key = "from_table_style", name = "Table Style", description = "Tables inline or one per line", type = "enum", options = {"inline", "stacked"}, category = "FROM" },
+  { key = "from_alias_align", name = "Alias Alignment", description = "Align table aliases", type = "boolean", category = "FROM" },
+  { key = "from_schema_qualify", name = "Schema Qualify", description = "Schema qualification style", type = "enum", options = {"always", "never", "preserve"}, category = "FROM" },
+  { key = "from_table_hints_newline", name = "Table Hints Newline", description = "Table hints on new line", type = "boolean", category = "FROM" },
+  { key = "derived_table_style", name = "Derived Table Style", description = "Derived table opening paren position", type = "enum", options = {"inline", "newline"}, category = "FROM" },
+
+  -- WHERE Clause (Phase 1)
+  { key = "where_newline", name = "WHERE Newline", description = "WHERE on new line", type = "boolean", category = "WHERE" },
+  { key = "where_condition_style", name = "Condition Style", description = "Conditions inline or stacked", type = "enum", options = {"inline", "stacked"}, category = "WHERE" },
+  { key = "where_and_or_indent", name = "AND/OR Indent", description = "AND/OR indent level", type = "number", min = 0, max = 4, step = 1, category = "WHERE" },
+  { key = "where_in_list_style", name = "IN List Style", description = "IN list inline or stacked", type = "enum", options = {"inline", "stacked"}, category = "WHERE" },
+  { key = "where_between_style", name = "BETWEEN Style", description = "BETWEEN values inline or stacked", type = "enum", options = {"inline", "stacked"}, category = "WHERE" },
+  { key = "where_exists_style", name = "EXISTS Style", description = "EXISTS subquery inline or newline", type = "enum", options = {"inline", "newline"}, category = "WHERE" },
+
+  -- JOIN Clause (Phase 1)
+  { key = "join_on_same_line", name = "ON Same Line", description = "Keep ON clause on same line as JOIN", type = "boolean", category = "JOIN" },
+  { key = "join_newline", name = "JOIN Newline", description = "JOIN on new line", type = "boolean", category = "JOIN" },
+  { key = "join_keyword_style", name = "Keyword Style", description = "INNER JOIN vs JOIN", type = "enum", options = {"full", "short"}, category = "JOIN" },
+  { key = "join_indent_style", name = "Indent Style", description = "JOIN alignment style", type = "enum", options = {"align", "indent"}, category = "JOIN" },
+  { key = "on_condition_style", name = "ON Condition Style", description = "ON conditions inline or stacked", type = "enum", options = {"inline", "stacked"}, category = "JOIN" },
+  { key = "on_and_position", name = "ON AND Position", description = "AND in ON clause position", type = "enum", options = {"leading", "trailing"}, category = "JOIN" },
+  { key = "cross_apply_newline", name = "CROSS APPLY Newline", description = "CROSS/OUTER APPLY on new line", type = "boolean", category = "JOIN" },
+  { key = "empty_line_before_join", name = "Empty Line Before", description = "Empty line before JOIN", type = "boolean", category = "JOIN" },
 
   -- Alignment
   { key = "align_aliases", name = "Align Aliases", description = "Vertically align AS keywords in SELECT", type = "boolean", category = "Alignment" },

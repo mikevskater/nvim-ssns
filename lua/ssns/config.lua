@@ -223,6 +223,37 @@
 ---@field operator_spacing boolean Add space around operators (default: true)
 ---@field preserve_comments boolean Keep comments in place (default: true)
 ---@field format_on_save boolean Auto-format on buffer save (default: false)
+-- SELECT clause rules (Phase 1)
+---@field select_list_style string "inline"|"stacked" - Columns inline or one per line (default: "stacked")
+---@field select_star_expand boolean Auto-expand SELECT * to column list (default: false)
+---@field select_distinct_newline boolean Put DISTINCT on new line after SELECT (default: false)
+---@field select_top_newline boolean Put TOP clause on new line after SELECT (default: false)
+---@field select_into_newline boolean Put INTO clause on new line (default: true)
+---@field select_column_align string "left"|"keyword" - Align columns to left or keyword (default: "left")
+---@field select_expression_wrap number Wrap expressions longer than N chars, 0=disable (default: 0)
+---@field use_as_keyword boolean Always use AS for column aliases (default: true)
+-- FROM clause rules (Phase 1)
+---@field from_newline boolean FROM on new line (default: true)
+---@field from_table_style string "inline"|"stacked" - Tables inline or one per line (default: "stacked")
+---@field from_alias_align boolean Align table aliases (default: false)
+---@field from_schema_qualify string "always"|"never"|"preserve" - Schema qualification (default: "preserve")
+---@field from_table_hints_newline boolean Table hints on new line (default: false)
+---@field derived_table_style string "inline"|"newline" - Derived table opening paren position (default: "newline")
+-- WHERE clause rules (Phase 1)
+---@field where_newline boolean WHERE on new line (default: true)
+---@field where_condition_style string "inline"|"stacked" - Conditions layout (default: "stacked")
+---@field where_and_or_indent number AND/OR indent level (default: 1)
+---@field where_in_list_style string "inline"|"stacked" - IN list layout (default: "inline")
+---@field where_between_style string "inline"|"stacked" - BETWEEN values layout (default: "inline")
+---@field where_exists_style string "inline"|"newline" - EXISTS subquery layout (default: "newline")
+-- JOIN clause rules (Phase 1)
+---@field join_newline boolean JOIN on new line (default: true)
+---@field join_keyword_style string "full"|"short" - INNER JOIN vs JOIN (default: "full")
+---@field join_indent_style string "align"|"indent" - JOIN alignment style (default: "indent")
+---@field on_condition_style string "inline"|"stacked" - ON conditions layout (default: "inline")
+---@field on_and_position string "leading"|"trailing" - AND in ON clause position (default: "leading")
+---@field cross_apply_newline boolean CROSS/OUTER APPLY on new line (default: true)
+---@field empty_line_before_join boolean Empty line before JOIN (default: false)
 ---@field rules FormatterRulesConfig Per-clause rule overrides
 
 ---@class FormatterRulesConfig
@@ -649,6 +680,42 @@ local default_config = {
     operator_spacing = true,     -- Add space around operators
     preserve_comments = true,    -- Keep comments in place
     format_on_save = false,      -- Auto-format on buffer save
+
+    -- SELECT clause rules (Phase 1)
+    select_list_style = "stacked",       -- "inline"|"stacked" - Columns layout
+    select_star_expand = false,          -- Auto-expand SELECT * to column list
+    select_distinct_newline = false,     -- DISTINCT on new line after SELECT
+    select_top_newline = false,          -- TOP clause on new line after SELECT
+    select_into_newline = true,          -- INTO clause on new line
+    select_column_align = "left",        -- "left"|"keyword" - Column alignment
+    select_expression_wrap = 0,          -- Wrap expressions longer than N chars (0=disable)
+    use_as_keyword = true,               -- Always use AS for column aliases
+
+    -- FROM clause rules (Phase 1)
+    from_newline = true,                 -- FROM on new line
+    from_table_style = "stacked",        -- "inline"|"stacked" - Tables layout
+    from_alias_align = false,            -- Align table aliases
+    from_schema_qualify = "preserve",    -- "always"|"never"|"preserve"
+    from_table_hints_newline = false,    -- Table hints on new line
+    derived_table_style = "newline",     -- "inline"|"newline" - Derived table paren
+
+    -- WHERE clause rules (Phase 1)
+    where_newline = true,                -- WHERE on new line
+    where_condition_style = "stacked",   -- "inline"|"stacked" - Conditions layout
+    where_and_or_indent = 1,             -- AND/OR indent level
+    where_in_list_style = "inline",      -- "inline"|"stacked" - IN list layout
+    where_between_style = "inline",      -- "inline"|"stacked" - BETWEEN layout
+    where_exists_style = "newline",      -- "inline"|"newline" - EXISTS subquery
+
+    -- JOIN clause rules (Phase 1)
+    join_newline = true,                 -- JOIN on new line
+    join_keyword_style = "full",         -- "full"|"short" - INNER JOIN vs JOIN
+    join_indent_style = "indent",        -- "align"|"indent" - JOIN alignment
+    on_condition_style = "inline",       -- "inline"|"stacked" - ON conditions
+    on_and_position = "leading",         -- "leading"|"trailing" - AND in ON clause
+    cross_apply_newline = true,          -- CROSS/OUTER APPLY on new line
+    empty_line_before_join = false,      -- Empty line before JOIN
+
     rules = {
       -- Per-clause rule overrides (optional)
       -- select = { one_column_per_line = true },
