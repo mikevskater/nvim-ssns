@@ -203,6 +203,7 @@ function Insert.get_config(config)
     values_style = config.insert_values_style or "inline",    -- "inline"|"stacked"
     into_keyword = config.insert_into_keyword ~= false,       -- default true
     multi_row_style = config.insert_multi_row_style or "stacked", -- "inline"|"stacked"
+    output_newline = config.output_clause_newline ~= false,   -- default true
     max_inline_values = 3, -- Go multi-line if more values per row
   }
 end
@@ -260,6 +261,7 @@ function Insert.apply(token, context, config)
   -- Mark OUTPUT keyword
   if Insert.is_output(token) then
     token.is_output_keyword = true
+    token.output_newline = insert_config.output_newline
   end
 
   -- Track INSERT statement context

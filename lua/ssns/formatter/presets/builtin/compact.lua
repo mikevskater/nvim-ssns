@@ -57,5 +57,32 @@ return {
     on_and_position = "trailing",
     cross_apply_newline = false,
     empty_line_before_join = false,
+
+    -- INSERT/UPDATE/DELETE (Phase 2) - compact DML
+    insert_columns_style = "inline",
+    insert_values_style = "inline",
+    insert_into_keyword = false,
+    insert_multi_row_style = "inline",
+    update_set_style = "inline",
+    update_set_align = false,
+    delete_from_keyword = false,
+    output_clause_newline = false,
+    merge_style = "compact",
+    merge_when_newline = false,
+
+    -- GROUP BY/ORDER BY (Phase 2) - inline
+    group_by_newline = true,
+    group_by_style = "inline",
+    having_newline = true,
+    order_by_newline = true,
+    order_by_style = "inline",
+    order_direction_style = "never",
+
+    -- CTE (Phase 2) - compact
+    cte_style = "compact",
+    cte_as_position = "same_line",
+    cte_parenthesis_style = "same_line",
+    cte_columns_style = "inline",
+    cte_separator_newline = false,
   },
 }

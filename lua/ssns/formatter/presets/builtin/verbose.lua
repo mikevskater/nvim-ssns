@@ -57,5 +57,32 @@ return {
     on_and_position = "leading",
     cross_apply_newline = true,
     empty_line_before_join = true,
+
+    -- INSERT/UPDATE/DELETE (Phase 2) - verbose DML
+    insert_columns_style = "stacked",
+    insert_values_style = "stacked",
+    insert_into_keyword = true,
+    insert_multi_row_style = "stacked",
+    update_set_style = "stacked",
+    update_set_align = true,
+    delete_from_keyword = true,
+    output_clause_newline = true,
+    merge_style = "expanded",
+    merge_when_newline = true,
+
+    -- GROUP BY/ORDER BY (Phase 2) - stacked
+    group_by_newline = true,
+    group_by_style = "stacked",
+    having_newline = true,
+    order_by_newline = true,
+    order_by_style = "stacked",
+    order_direction_style = "always",
+
+    -- CTE (Phase 2) - expanded
+    cte_style = "expanded",
+    cte_as_position = "new_line",
+    cte_parenthesis_style = "new_line",
+    cte_columns_style = "stacked",
+    cte_separator_newline = true,
   },
 }

@@ -103,13 +103,73 @@ local RULE_DEFINITIONS = {
   { key = "cross_apply_newline", name = "CROSS APPLY Newline", description = "CROSS/OUTER APPLY on new line", type = "boolean", category = "JOIN" },
   { key = "empty_line_before_join", name = "Empty Line Before", description = "Empty line before JOIN", type = "boolean", category = "JOIN" },
 
+  -- INSERT rules (Phase 2)
+  { key = "insert_columns_style", name = "Columns Style", description = "INSERT column list inline or stacked", type = "enum", options = {"inline", "stacked"}, category = "INSERT" },
+  { key = "insert_values_style", name = "Values Style", description = "VALUES clause inline or stacked", type = "enum", options = {"inline", "stacked"}, category = "INSERT" },
+  { key = "insert_into_keyword", name = "INTO Keyword", description = "Always use INTO keyword", type = "boolean", category = "INSERT" },
+  { key = "insert_multi_row_style", name = "Multi-Row Style", description = "Multiple VALUES rows inline or stacked", type = "enum", options = {"inline", "stacked"}, category = "INSERT" },
+
+  -- UPDATE rules (Phase 2)
+  { key = "update_set_style", name = "SET Style", description = "SET assignments inline or stacked", type = "enum", options = {"inline", "stacked"}, category = "UPDATE" },
+  { key = "update_set_align", name = "Align SET", description = "Align = in SET clause", type = "boolean", category = "UPDATE" },
+
+  -- DELETE rules (Phase 2)
+  { key = "delete_from_keyword", name = "FROM Keyword", description = "Always use FROM keyword", type = "boolean", category = "DELETE" },
+
+  -- OUTPUT/MERGE rules (Phase 2)
+  { key = "output_clause_newline", name = "OUTPUT Newline", description = "OUTPUT clause on new line", type = "boolean", category = "DML" },
+  { key = "merge_style", name = "MERGE Style", description = "MERGE statement style", type = "enum", options = {"compact", "expanded"}, category = "DML" },
+  { key = "merge_when_newline", name = "WHEN Newline", description = "WHEN clauses on new lines", type = "boolean", category = "DML" },
+
+  -- GROUP BY rules (Phase 2)
+  { key = "group_by_newline", name = "Newline", description = "GROUP BY on new line", type = "boolean", category = "GROUP BY" },
+  { key = "group_by_style", name = "Style", description = "GROUP BY columns inline or stacked", type = "enum", options = {"inline", "stacked"}, category = "GROUP BY" },
+  { key = "having_newline", name = "HAVING Newline", description = "HAVING on new line", type = "boolean", category = "GROUP BY" },
+
+  -- ORDER BY rules (Phase 2)
+  { key = "order_by_newline", name = "Newline", description = "ORDER BY on new line", type = "boolean", category = "ORDER BY" },
+  { key = "order_by_style", name = "Style", description = "ORDER BY columns inline or stacked", type = "enum", options = {"inline", "stacked"}, category = "ORDER BY" },
+  { key = "order_direction_style", name = "Direction Style", description = "ASC/DESC display mode", type = "enum", options = {"always", "explicit", "never"}, category = "ORDER BY" },
+
+  -- CTE rules (Phase 2)
+  { key = "cte_style", name = "CTE Style", description = "CTE layout style", type = "enum", options = {"compact", "expanded"}, category = "CTE" },
+  { key = "cte_as_position", name = "AS Position", description = "AS keyword on same or new line", type = "enum", options = {"same_line", "new_line"}, category = "CTE" },
+  { key = "cte_parenthesis_style", name = "Paren Style", description = "Opening paren on same or new line", type = "enum", options = {"same_line", "new_line"}, category = "CTE" },
+  { key = "cte_columns_style", name = "Columns Style", description = "CTE column list inline or stacked", type = "enum", options = {"inline", "stacked"}, category = "CTE" },
+  { key = "cte_separator_newline", name = "Separator Newline", description = "Comma between CTEs on new line", type = "boolean", category = "CTE" },
+
+  -- Casing rules (Phase 3)
+  { key = "function_case", name = "Function Case", description = "Built-in functions casing (COUNT, SUM, etc.)", type = "enum", options = {"upper", "lower", "preserve"}, category = "Casing" },
+  { key = "datatype_case", name = "Datatype Case", description = "Data types casing (INT, VARCHAR, etc.)", type = "enum", options = {"upper", "lower", "preserve"}, category = "Casing" },
+  { key = "identifier_case", name = "Identifier Case", description = "Table/column names casing", type = "enum", options = {"upper", "lower", "preserve"}, category = "Casing" },
+  { key = "alias_case", name = "Alias Case", description = "Alias names casing", type = "enum", options = {"upper", "lower", "preserve"}, category = "Casing" },
+
   -- Alignment
   { key = "align_aliases", name = "Align Aliases", description = "Vertically align AS keywords in SELECT", type = "boolean", category = "Alignment" },
   { key = "align_columns", name = "Align Columns", description = "Vertically align column expressions", type = "boolean", category = "Alignment" },
 
-  -- Spacing
+  -- Spacing rules (Phase 3)
   { key = "operator_spacing", name = "Operator Spacing", description = "Add spaces around operators (=, +, etc.)", type = "boolean", category = "Spacing" },
   { key = "parenthesis_spacing", name = "Parenthesis Spacing", description = "Add spaces inside parentheses", type = "boolean", category = "Spacing" },
+  { key = "comma_spacing", name = "Comma Spacing", description = "Spaces around commas", type = "enum", options = {"before", "after", "both", "none"}, category = "Spacing" },
+  { key = "semicolon_spacing", name = "Semicolon Spacing", description = "Space before semicolon", type = "boolean", category = "Spacing" },
+  { key = "bracket_spacing", name = "Bracket Spacing", description = "Spaces inside brackets []", type = "boolean", category = "Spacing" },
+  { key = "equals_spacing", name = "Equals Spacing", description = "Spaces around = in SET", type = "boolean", category = "Spacing" },
+  { key = "concatenation_spacing", name = "Concat Spacing", description = "Spaces around + concat operator", type = "boolean", category = "Spacing" },
+  { key = "comparison_spacing", name = "Comparison Spacing", description = "Spaces around <, >, etc.", type = "boolean", category = "Spacing" },
+
+  -- Blank lines rules (Phase 3)
+  { key = "blank_line_before_clause", name = "Before Clause", description = "Blank line before major clauses", type = "boolean", category = "Blank Lines" },
+  { key = "blank_line_after_go", name = "After GO", description = "Blank lines after GO batch separator", type = "number", min = 0, max = 3, category = "Blank Lines" },
+  { key = "blank_line_between_statements", name = "Between Statements", description = "Blank lines between statements", type = "number", min = 0, max = 3, category = "Blank Lines" },
+  { key = "blank_line_before_comment", name = "Before Comment", description = "Blank line before block comments", type = "boolean", category = "Blank Lines" },
+  { key = "collapse_blank_lines", name = "Collapse Blanks", description = "Collapse multiple consecutive blank lines", type = "boolean", category = "Blank Lines" },
+  { key = "max_consecutive_blank_lines", name = "Max Blanks", description = "Maximum consecutive blank lines allowed", type = "number", min = 1, max = 5, category = "Blank Lines" },
+
+  -- Comments rules (Phase 3)
+  { key = "comment_position", name = "Position", description = "Comment placement", type = "enum", options = {"preserve", "above", "inline"}, category = "Comments" },
+  { key = "block_comment_style", name = "Block Style", description = "Block comment formatting", type = "enum", options = {"preserve", "reformat"}, category = "Comments" },
+  { key = "inline_comment_align", name = "Align Inline", description = "Align inline comments", type = "boolean", category = "Comments" },
 }
 
 -- Sample SQL for live preview

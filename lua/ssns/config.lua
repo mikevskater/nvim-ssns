@@ -254,6 +254,53 @@
 ---@field on_and_position string "leading"|"trailing" - AND in ON clause position (default: "leading")
 ---@field cross_apply_newline boolean CROSS/OUTER APPLY on new line (default: true)
 ---@field empty_line_before_join boolean Empty line before JOIN (default: false)
+-- INSERT/UPDATE/DELETE rules (Phase 2)
+---@field insert_columns_style string "inline"|"stacked" - INSERT column list layout (default: "inline")
+---@field insert_values_style string "inline"|"stacked" - VALUES layout (default: "inline")
+---@field insert_into_keyword boolean Always use INTO keyword (default: true)
+---@field insert_multi_row_style string "inline"|"stacked" - Multiple VALUES rows (default: "stacked")
+---@field update_set_style string "inline"|"stacked" - SET assignments layout (default: "stacked")
+---@field update_set_align boolean Align = in SET clause (default: false)
+---@field delete_from_keyword boolean Always use FROM keyword (default: true)
+---@field output_clause_newline boolean OUTPUT clause on new line (default: true)
+---@field merge_style string "compact"|"expanded" - MERGE statement style (default: "expanded")
+---@field merge_when_newline boolean WHEN clauses on new lines (default: true)
+-- GROUP BY/ORDER BY rules (Phase 2)
+---@field group_by_newline boolean GROUP BY on new line (default: true)
+---@field group_by_style string "inline"|"stacked" - GROUP BY columns layout (default: "inline")
+---@field having_newline boolean HAVING on new line (default: true)
+---@field order_by_newline boolean ORDER BY on new line (default: true)
+---@field order_by_style string "inline"|"stacked" - ORDER BY columns layout (default: "inline")
+---@field order_direction_style string "always"|"explicit"|"never" - ASC/DESC display (default: "explicit")
+-- CTE rules (Phase 2)
+---@field cte_style string "compact"|"expanded" - CTE layout style (default: "expanded")
+---@field cte_as_position string "same_line"|"new_line" - AS keyword position (default: "same_line")
+---@field cte_parenthesis_style string "same_line"|"new_line" - Opening paren position (default: "new_line")
+---@field cte_columns_style string "inline"|"stacked" - CTE column list layout (default: "inline")
+---@field cte_separator_newline boolean Comma between CTEs on new line (default: false)
+-- Casing rules (Phase 3)
+---@field function_case string "upper"|"lower"|"preserve" - Built-in functions casing (default: "upper")
+---@field datatype_case string "upper"|"lower"|"preserve" - Data types casing (default: "upper")
+---@field identifier_case string "upper"|"lower"|"preserve" - Table/column names casing (default: "preserve")
+---@field alias_case string "upper"|"lower"|"preserve" - Alias names casing (default: "preserve")
+-- Spacing rules (Phase 3)
+---@field comma_spacing string "before"|"after"|"both"|"none" - Spaces around commas (default: "after")
+---@field semicolon_spacing boolean Space before semicolon (default: false)
+---@field bracket_spacing boolean Spaces inside brackets [] (default: false)
+---@field equals_spacing boolean Spaces around = in SET (default: true)
+---@field concatenation_spacing boolean Spaces around + concat operator (default: true)
+---@field comparison_spacing boolean Spaces around comparison operators (default: true)
+-- Blank lines rules (Phase 3)
+---@field blank_line_before_clause boolean Blank line before major clauses (default: false)
+---@field blank_line_after_go number Blank lines after GO batch separator (default: 1)
+---@field blank_line_between_statements number Blank lines between statements (default: 1)
+---@field blank_line_before_comment boolean Blank line before block comments (default: false)
+---@field collapse_blank_lines boolean Collapse multiple consecutive blank lines (default: true)
+---@field max_consecutive_blank_lines number Maximum consecutive blank lines allowed (default: 2)
+-- Comments rules (Phase 3)
+---@field comment_position string "preserve"|"above"|"inline" - Comment placement (default: "preserve")
+---@field block_comment_style string "preserve"|"reformat" - Block comment formatting (default: "preserve")
+---@field inline_comment_align boolean Align inline comments (default: false)
 ---@field rules FormatterRulesConfig Per-clause rule overrides
 
 ---@class FormatterRulesConfig
@@ -715,6 +762,60 @@ local default_config = {
     on_and_position = "leading",         -- "leading"|"trailing" - AND in ON clause
     cross_apply_newline = true,          -- CROSS/OUTER APPLY on new line
     empty_line_before_join = false,      -- Empty line before JOIN
+
+    -- INSERT/UPDATE/DELETE rules (Phase 2)
+    insert_columns_style = "inline",     -- "inline"|"stacked" - INSERT column list
+    insert_values_style = "inline",      -- "inline"|"stacked" - VALUES layout
+    insert_into_keyword = true,          -- Always use INTO keyword
+    insert_multi_row_style = "stacked",  -- "inline"|"stacked" - Multiple VALUES rows
+    update_set_style = "stacked",        -- "inline"|"stacked" - SET assignments
+    update_set_align = false,            -- Align = in SET clause
+    delete_from_keyword = true,          -- Always use FROM keyword
+    output_clause_newline = true,        -- OUTPUT clause on new line
+    merge_style = "expanded",            -- "compact"|"expanded" - MERGE style
+    merge_when_newline = true,           -- WHEN clauses on new lines
+
+    -- GROUP BY/ORDER BY rules (Phase 2)
+    group_by_newline = true,             -- GROUP BY on new line
+    group_by_style = "inline",           -- "inline"|"stacked" - GROUP BY columns
+    having_newline = true,               -- HAVING on new line
+    order_by_newline = true,             -- ORDER BY on new line
+    order_by_style = "inline",           -- "inline"|"stacked" - ORDER BY columns
+    order_direction_style = "explicit",  -- "always"|"explicit"|"never" - ASC/DESC
+
+    -- CTE rules (Phase 2)
+    cte_style = "expanded",              -- "compact"|"expanded" - CTE layout
+    cte_as_position = "same_line",       -- "same_line"|"new_line" - AS position
+    cte_parenthesis_style = "new_line",  -- "same_line"|"new_line" - Opening paren
+    cte_columns_style = "inline",        -- "inline"|"stacked" - CTE column list
+    cte_separator_newline = false,       -- Comma between CTEs on new line
+
+    -- Casing rules (Phase 3)
+    function_case = "upper",             -- "upper"|"lower"|"preserve" - Functions
+    datatype_case = "upper",             -- "upper"|"lower"|"preserve" - Data types
+    identifier_case = "preserve",        -- "upper"|"lower"|"preserve" - Identifiers
+    alias_case = "preserve",             -- "upper"|"lower"|"preserve" - Aliases
+
+    -- Spacing rules (Phase 3)
+    comma_spacing = "after",             -- "before"|"after"|"both"|"none"
+    semicolon_spacing = false,           -- Space before semicolon
+    bracket_spacing = false,             -- Spaces inside brackets []
+    equals_spacing = true,               -- Spaces around = in SET
+    concatenation_spacing = true,        -- Spaces around + concat
+    comparison_spacing = true,           -- Spaces around <, >, etc.
+
+    -- Blank lines rules (Phase 3)
+    blank_line_before_clause = false,    -- Blank line before major clauses
+    blank_line_after_go = 1,             -- Blank lines after GO
+    blank_line_between_statements = 1,   -- Blank lines between statements
+    blank_line_before_comment = false,   -- Blank line before block comments
+    collapse_blank_lines = true,         -- Collapse multiple blank lines
+    max_consecutive_blank_lines = 2,     -- Max consecutive blank lines
+
+    -- Comments rules (Phase 3)
+    comment_position = "preserve",       -- "preserve"|"above"|"inline"
+    block_comment_style = "preserve",    -- "preserve"|"reformat"
+    inline_comment_align = false,        -- Align inline comments
 
     rules = {
       -- Per-clause rule overrides (optional)

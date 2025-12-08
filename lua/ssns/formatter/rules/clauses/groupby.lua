@@ -253,7 +253,18 @@ end
 ---@return table groupby_config
 function GroupBy.get_config(config)
   return {
-    one_column_per_line = false, -- Keep columns on same line by default
+    -- GROUP BY config (Phase 2)
+    group_by_newline = config.group_by_newline ~= false,  -- default true
+    group_by_style = config.group_by_style or "inline",   -- "inline"|"stacked"
+    having_newline = config.having_newline ~= false,      -- default true
+
+    -- ORDER BY config (Phase 2)
+    order_by_newline = config.order_by_newline ~= false,  -- default true
+    order_by_style = config.order_by_style or "inline",   -- "inline"|"stacked"
+    order_direction_style = config.order_direction_style or "explicit", -- "always"|"explicit"|"never"
+
+    -- Derived settings
+    one_column_per_line = (config.group_by_style == "stacked") or (config.order_by_style == "stacked"),
     max_columns_inline = 5, -- Go multi-line if more columns
     indent_columns = true,
   }
@@ -274,21 +285,48 @@ end
 ---@param config FormatterConfig
 ---@return table token Modified token with formatting hints
 function GroupBy.apply(token, context, config)
+  local groupby_config = GroupBy.get_config(config)
+
   -- Add formatting metadata
   local clause = context.current_clause
   if clause == "GROUP BY" or clause == "GROUP" then
     token.in_groupby_clause = true
+    token.groupby_style = groupby_config.group_by_style
   elseif clause == "ORDER BY" or clause == "ORDER" then
     token.in_orderby_clause = true
+    token.orderby_style = groupby_config.order_by_style
+    token.order_direction_style = groupby_config.order_direction_style
   elseif clause == "HAVING" then
     token.in_having_clause = true
+  end
+
+  -- Mark GROUP keyword
+  if GroupBy.is_group(token) then
+    token.is_groupby_keyword = true
+    token.groupby_newline = groupby_config.group_by_newline
+    token.groupby_style = groupby_config.group_by_style
+  end
+
+  -- Mark ORDER keyword
+  if GroupBy.is_order(token) then
+    token.is_orderby_keyword = true
+    token.orderby_newline = groupby_config.order_by_newline
+    token.orderby_style = groupby_config.order_by_style
+  end
+
+  -- Mark HAVING keyword
+  if GroupBy.is_having(token) then
+    token.is_having_keyword = true
+    token.having_newline = groupby_config.having_newline
   end
 
   -- Mark direction tokens
   if GroupBy.is_asc(token) then
     token.is_sort_direction = true
+    token.order_direction_style = groupby_config.order_direction_style
   elseif GroupBy.is_desc(token) then
     token.is_sort_direction = true
+    token.order_direction_style = groupby_config.order_direction_style
   end
 
   return token
