@@ -95,9 +95,13 @@ local function needs_space_before(prev, curr, config)
     return config.parenthesis_spacing
   end
 
-  -- Space after closing paren before keyword/identifier (e.g., COUNT(*) AS)
+  -- Space after closing paren before keyword/identifier/operator (e.g., COUNT(*) AS, (a+b) * c)
   if prev.type == "paren_close" then
     if curr.type == "keyword" or curr.type == "identifier" or curr.type == "bracket_id" then
+      return true
+    end
+    -- Space before operator after closing paren
+    if curr.type == "operator" then
       return true
     end
   end
