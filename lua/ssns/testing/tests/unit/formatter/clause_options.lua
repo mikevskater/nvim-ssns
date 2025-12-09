@@ -1827,4 +1827,219 @@ return {
             matches = { "FROM sys.dm_exec_requests r\nCROSS APPLY" }
         }
     },
+
+    -- ============================================
+    -- insert_columns_style tests (IDs: 8720-8729)
+    -- ============================================
+    {
+        id = 8720,
+        type = "formatter",
+        name = "insert_columns_style inline (default) - all columns on one line",
+        input = "INSERT INTO users (id, name, email, created_at) VALUES (1, 'John', 'john@test.com', GETDATE())",
+        opts = { insert_columns_style = "inline" },
+        expected = {
+            contains = { "(id, name, email, created_at)" }
+        }
+    },
+    {
+        id = 8721,
+        type = "formatter",
+        name = "insert_columns_style stacked - each column on new line",
+        input = "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@test.com')",
+        opts = { insert_columns_style = "stacked" },
+        expected = {
+            matches = { "%(id,\n.-name,\n.-email%)" }
+        }
+    },
+    {
+        id = 8722,
+        type = "formatter",
+        name = "insert_columns_style stacked_indent - first column on new line",
+        input = "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@test.com')",
+        opts = { insert_columns_style = "stacked_indent" },
+        expected = {
+            matches = { "%(\n.-id,\n.-name,\n.-email" }
+        }
+    },
+    {
+        id = 8723,
+        type = "formatter",
+        name = "insert_columns_style stacked - with schema qualified table",
+        input = "INSERT INTO dbo.users (id, name, email) VALUES (1, 'John', 'john@test.com')",
+        opts = { insert_columns_style = "stacked" },
+        expected = {
+            -- No space between table name and ( is allowed
+            matches = { "INTO dbo.users%s*%(id,\n.-name,\n.-email%)" }
+        }
+    },
+    {
+        id = 8724,
+        type = "formatter",
+        name = "insert_columns_style stacked - VALUES stays on same line (inline)",
+        input = "INSERT INTO users (id, name) VALUES (1, 'John')",
+        opts = { insert_columns_style = "stacked", insert_values_style = "inline" },
+        expected = {
+            matches = { "%(id,\n.-name%)" },
+            contains = { "VALUES (1, 'John')" }
+        }
+    },
+    {
+        id = 8725,
+        type = "formatter",
+        name = "insert_columns_style inline - many columns stay on one line",
+        input = "INSERT INTO orders (id, user_id, product_id, quantity, price, status) VALUES (1, 2, 3, 10, 99.99, 'pending')",
+        opts = { insert_columns_style = "inline" },
+        expected = {
+            contains = { "(id, user_id, product_id, quantity, price, status)" }
+        }
+    },
+    {
+        id = 8726,
+        type = "formatter",
+        name = "insert_columns_style stacked - bracket identifiers",
+        input = "INSERT INTO [users] ([id], [first name], [email]) VALUES (1, 'John', 'john@test.com')",
+        opts = { insert_columns_style = "stacked" },
+        expected = {
+            matches = { "%[id%],\n.-%[first name%],\n.-%[email%]" }
+        }
+    },
+    {
+        id = 8727,
+        type = "formatter",
+        name = "insert_columns_style inline - preserves column order",
+        input = "INSERT INTO users (z_col, a_col, m_col) VALUES (1, 2, 3)",
+        opts = { insert_columns_style = "inline" },
+        expected = {
+            contains = { "(z_col, a_col, m_col)" }
+        }
+    },
+    {
+        id = 8728,
+        type = "formatter",
+        name = "insert_columns_style stacked - does not affect SELECT INTO",
+        input = "SELECT id, name INTO #temp FROM users",
+        opts = { insert_columns_style = "stacked" },
+        expected = {
+            -- SELECT INTO should not be affected by insert_columns_style
+            contains = { "SELECT id," }
+        }
+    },
+    {
+        id = 8729,
+        type = "formatter",
+        name = "insert_columns_style stacked_indent - closing paren after last column",
+        input = "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@test.com')",
+        opts = { insert_columns_style = "stacked_indent" },
+        expected = {
+            -- First column on new line after (, closing paren on same line as last column
+            matches = { "%(\n.-id,\n.-name,\n.-email%)" }
+        }
+    },
+
+    -- ============================================
+    -- insert_values_style tests (IDs: 8730-8739)
+    -- ============================================
+    {
+        id = 8730,
+        type = "formatter",
+        name = "insert_values_style inline (default) - all values on one line",
+        input = "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@test.com')",
+        opts = { insert_values_style = "inline" },
+        expected = {
+            contains = { "VALUES (1, 'John', 'john@test.com')" }
+        }
+    },
+    {
+        id = 8731,
+        type = "formatter",
+        name = "insert_values_style stacked - each value on new line",
+        input = "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@test.com')",
+        opts = { insert_values_style = "stacked" },
+        expected = {
+            matches = { "VALUES %(1,\n.-'John',\n.-'john@test.com'%)" }
+        }
+    },
+    {
+        id = 8732,
+        type = "formatter",
+        name = "insert_values_style stacked_indent - first value on new line",
+        input = "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@test.com')",
+        opts = { insert_values_style = "stacked_indent" },
+        expected = {
+            matches = { "VALUES %(\n.-1,\n.-'John',\n.-'john@test.com'" }
+        }
+    },
+    {
+        id = 8733,
+        type = "formatter",
+        name = "insert_values_style stacked - numeric and function values",
+        input = "INSERT INTO orders (id, created_at, total) VALUES (1, GETDATE(), 99.99)",
+        opts = { insert_values_style = "stacked" },
+        expected = {
+            matches = { "VALUES %(1,\n.-GETDATE%(%),\n.-99.99%)" }
+        }
+    },
+    {
+        id = 8734,
+        type = "formatter",
+        name = "insert_values_style stacked - columns stay inline when columns_style is inline",
+        input = "INSERT INTO users (id, name) VALUES (1, 'John')",
+        opts = { insert_columns_style = "inline", insert_values_style = "stacked" },
+        expected = {
+            contains = { "(id, name)" },
+            matches = { "VALUES %(1,\n.-'John'%)" }
+        }
+    },
+    {
+        id = 8735,
+        type = "formatter",
+        name = "insert_values_style inline - many values stay on one line",
+        input = "INSERT INTO orders (a, b, c, d, e, f) VALUES (1, 2, 3, 4, 5, 6)",
+        opts = { insert_values_style = "inline" },
+        expected = {
+            contains = { "VALUES (1, 2, 3, 4, 5, 6)" }
+        }
+    },
+    {
+        id = 8736,
+        type = "formatter",
+        name = "insert_values_style stacked - NULL values",
+        input = "INSERT INTO users (id, name, email) VALUES (1, NULL, 'test@test.com')",
+        opts = { insert_values_style = "stacked" },
+        expected = {
+            matches = { "VALUES %(1,\n.-NULL,\n.-'test@test.com'%)" }
+        }
+    },
+    {
+        id = 8737,
+        type = "formatter",
+        name = "insert_values_style stacked - with multi-row (multi_row_style also stacked)",
+        input = "INSERT INTO users (id, name) VALUES (1, 'John'), (2, 'Jane')",
+        opts = { insert_values_style = "stacked", insert_multi_row_style = "stacked" },
+        expected = {
+            -- Each row on new line, values within row also stacked
+            matches = { "%(1,\n.-'John'%)" }
+        }
+    },
+    {
+        id = 8738,
+        type = "formatter",
+        name = "insert_values_style inline - preserves value order",
+        input = "INSERT INTO t (a, b, c) VALUES ('z', 'a', 'm')",
+        opts = { insert_values_style = "inline" },
+        expected = {
+            contains = { "VALUES ('z', 'a', 'm')" }
+        }
+    },
+    {
+        id = 8739,
+        type = "formatter",
+        name = "insert_values_style stacked_indent - closing paren after last value",
+        input = "INSERT INTO users (id, name) VALUES (1, 'John')",
+        opts = { insert_values_style = "stacked_indent" },
+        expected = {
+            -- First value on new line after (, closing paren on same line as last value
+            matches = { "VALUES %(\n.-1,\n.-'John'%)" }
+        }
+    },
 }

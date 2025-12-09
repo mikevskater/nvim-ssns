@@ -587,6 +587,12 @@ function Output.generate(tokens, config)
   local in_set_clause = false
   local in_values_clause = false
   local in_insert_columns = false  -- Column list in INSERT
+  local in_insert_columns_paren = false  -- Inside INSERT (...) column list parentheses
+  local insert_columns_paren_depth = 0  -- Track parenthesis depth for INSERT column list
+  local pending_insert_columns_stacked_indent_newline = false  -- For stacked_indent: newline after INSERT (
+  local in_values_paren = false  -- Inside VALUES (...) parentheses
+  local values_paren_depth = 0  -- Track parenthesis depth for VALUES clause
+  local pending_values_stacked_indent_newline = false  -- For stacked_indent: newline after VALUES (
   local in_merge_statement = false
   local in_cte = false  -- Track if we're in CTE section
   local in_create_table = false  -- Track if we're in CREATE TABLE column definitions
@@ -622,6 +628,46 @@ function Output.generate(tokens, config)
   -- Blank line tracking (Phase 3)
   local last_line_was_blank = false
   local consecutive_blank_lines = 0
+
+  -- Comprehensive state reset function for statement/batch boundaries
+  -- This resets all clause tracking and pending flags
+  local function reset_all_state()
+    in_select_list = false
+    in_from_clause = false
+    in_where_clause = false
+    in_join_clause = false
+    in_on_clause = false
+    in_group_by_clause = false
+    in_order_by_clause = false
+    in_having_clause = false
+    in_set_clause = false
+    in_values_clause = false
+    in_insert_columns = false
+    in_insert_columns_paren = false
+    insert_columns_paren_depth = 0
+    pending_insert_columns_stacked_indent_newline = false
+    in_values_paren = false
+    values_paren_depth = 0
+    pending_values_stacked_indent_newline = false
+    in_merge_statement = false
+    in_cte = false
+    in_create_table = false
+    create_table_paren_depth = 0
+    pending_create = false
+    in_in_clause = false
+    in_clause_paren_depth = 0
+    pending_in = false
+    pending_in_stacked_indent_newline = false
+    pending_join = false
+    pending_stacked_indent_newline = false
+    pending_where_stacked_indent_newline = false
+    pending_from_stacked_indent_newline = false
+    pending_on_stacked_indent_newline = false
+    pending_function_call = false
+    pending_function_stacked_indent_newline = false
+    function_call_stack = {}
+    function_paren_depth = 0
+  end
 
   for i, token in ipairs(tokens) do
     local text = token.text
@@ -685,6 +731,24 @@ function Output.generate(tokens, config)
       current_indent = token.indent_level or 0
       extra_indent = 1
       pending_in_stacked_indent_newline = false
+    end
+
+    -- Phase 2: Handle pending insert_columns_style stacked_indent newline (first column after INSERT (...))
+    if pending_insert_columns_stacked_indent_newline and not token.is_comment and token.type ~= "paren_close" then
+      -- First column after INSERT ( - add newline
+      needs_newline = true
+      current_indent = token.indent_level or 0
+      extra_indent = 1
+      pending_insert_columns_stacked_indent_newline = false
+    end
+
+    -- Phase 2: Handle pending insert_values_style stacked_indent newline (first value after VALUES (...))
+    if pending_values_stacked_indent_newline and not token.is_comment and token.type ~= "paren_close" then
+      -- First value after VALUES ( - add newline
+      needs_newline = true
+      current_indent = token.indent_level or 0
+      extra_indent = 1
+      pending_values_stacked_indent_newline = false
     end
 
     -- Phase 4: Handle pending function_arg_style stacked_indent newline (first arg after function ()
@@ -789,6 +853,9 @@ function Output.generate(tokens, config)
         in_set_clause = false
         in_values_clause = false
         in_insert_columns = false
+        in_insert_columns_paren = false
+        insert_columns_paren_depth = 0
+        pending_insert_columns_stacked_indent_newline = false
         pending_join = false
         pending_where_stacked_indent_newline = false
         pending_from_stacked_indent_newline = false
@@ -1682,6 +1749,92 @@ function Output.generate(tokens, config)
       line_just_started = true  -- Skip space before next token
     end
 
+    -- Phase 2: INSERT column list parenthesis tracking
+    -- Track when we enter INSERT INTO table (...) column list
+    if in_insert_columns and not in_insert_columns_paren and token.type == "paren_open" then
+      -- Entering column list parentheses
+      in_insert_columns_paren = true
+      insert_columns_paren_depth = 1
+
+      -- Check for stacked_indent - need newline after opening paren
+      local insert_col_style = config.insert_columns_style or "inline"
+      if insert_col_style == "stacked_indent" then
+        pending_insert_columns_stacked_indent_newline = true
+      end
+    elseif in_insert_columns_paren then
+      if token.type == "paren_open" then
+        insert_columns_paren_depth = insert_columns_paren_depth + 1
+      elseif token.type == "paren_close" then
+        insert_columns_paren_depth = insert_columns_paren_depth - 1
+        if insert_columns_paren_depth <= 0 then
+          -- Exiting INSERT column list
+          in_insert_columns_paren = false
+          in_insert_columns = false  -- No longer in INSERT context after column list
+          insert_columns_paren_depth = 0
+          pending_insert_columns_stacked_indent_newline = false
+        end
+      end
+    end
+
+    -- Phase 2: insert_columns_style - each column in INSERT column list on new line
+    local insert_col_style = config.insert_columns_style or "inline"
+    if token.type == "comma" and in_insert_columns_paren and insert_columns_paren_depth == 1 and insert_col_style ~= "inline" then
+      local line_text = table.concat(current_line, "")
+      if line_text:match("%S") then
+        table.insert(result, line_text)
+      end
+      current_line = {}
+      local base_indent = token.indent_level or 0
+      local indent = get_indent(config, base_indent + 1)
+      if indent ~= "" then
+        table.insert(current_line, indent)
+      end
+      line_just_started = true  -- Skip space before next token
+    end
+
+    -- Phase 2: VALUES parenthesis tracking
+    -- Track when we enter VALUES (...) value list
+    if in_values_clause and not in_values_paren and token.type == "paren_open" then
+      -- Entering VALUES parentheses
+      in_values_paren = true
+      values_paren_depth = 1
+
+      -- Check for stacked_indent - need newline after opening paren
+      local values_style = config.insert_values_style or "inline"
+      if values_style == "stacked_indent" then
+        pending_values_stacked_indent_newline = true
+      end
+    elseif in_values_paren then
+      if token.type == "paren_open" then
+        values_paren_depth = values_paren_depth + 1
+      elseif token.type == "paren_close" then
+        values_paren_depth = values_paren_depth - 1
+        if values_paren_depth <= 0 then
+          -- Exiting VALUES value list
+          in_values_paren = false
+          values_paren_depth = 0
+          pending_values_stacked_indent_newline = false
+          -- Don't reset in_values_clause here - might have more value rows
+        end
+      end
+    end
+
+    -- Phase 2: insert_values_style - each value in VALUES clause on new line
+    local values_style = config.insert_values_style or "inline"
+    if token.type == "comma" and in_values_paren and values_paren_depth == 1 and values_style ~= "inline" then
+      local line_text = table.concat(current_line, "")
+      if line_text:match("%S") then
+        table.insert(result, line_text)
+      end
+      current_line = {}
+      local base_indent = token.indent_level or 0
+      local indent = get_indent(config, base_indent + 1)
+      if indent ~= "" then
+        table.insert(current_line, indent)
+      end
+      line_just_started = true  -- Skip space before next token
+    end
+
     -- Phase 4: function_arg_style - track function calls
     -- When we see paren_open after function keyword, push onto function call stack
     local func_style = config.function_arg_style or "inline"
@@ -1791,29 +1944,7 @@ function Output.generate(tokens, config)
       end
       current_line = {}
       current_indent = 0
-
-      -- Reset all clause tracking
-      in_select_list = false
-      in_from_clause = false
-      in_where_clause = false
-      in_join_clause = false
-      in_on_clause = false
-      in_group_by_clause = false
-      in_order_by_clause = false
-      in_having_clause = false
-      in_set_clause = false
-      in_values_clause = false
-      in_insert_columns = false
-      in_merge_statement = false
-      in_cte = false
-      in_create_table = false
-      create_table_paren_depth = 0
-      pending_create = false
-      in_in_clause = false
-      in_clause_paren_depth = 0
-      pending_in = false
-      pending_in_stacked_indent_newline = false
-      pending_join = false
+      reset_all_state()
 
       -- Phase 3: blank_line_between_statements
       local blank_lines = config.blank_line_between_statements or 1
@@ -1842,29 +1973,7 @@ function Output.generate(tokens, config)
         current_line = {}
       end
       current_indent = 0
-
-      -- Reset all clause tracking
-      in_select_list = false
-      in_from_clause = false
-      in_where_clause = false
-      in_join_clause = false
-      in_on_clause = false
-      in_group_by_clause = false
-      in_order_by_clause = false
-      in_having_clause = false
-      in_set_clause = false
-      in_values_clause = false
-      in_insert_columns = false
-      in_merge_statement = false
-      in_cte = false
-      in_create_table = false
-      create_table_paren_depth = 0
-      pending_create = false
-      in_in_clause = false
-      in_clause_paren_depth = 0
-      pending_in = false
-      pending_in_stacked_indent_newline = false
-      pending_join = false
+      reset_all_state()
 
       -- Phase 3: blank_line_after_go
       local blank_lines = config.blank_line_after_go or 1

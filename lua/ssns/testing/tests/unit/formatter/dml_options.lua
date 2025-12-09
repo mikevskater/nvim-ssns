@@ -4,10 +4,12 @@
 
 return {
     -- INSERT column style
+    -- Note: Primary insert_columns_style tests are in clause_options.lua (IDs 8720-8729)
+    -- These tests use different IDs to avoid conflicts
     {
-        id = 8521,
+        id = 85211,
         type = "formatter",
-        name = "insert_columns_style inline (default)",
+        name = "insert_columns_style inline (default) - dml_options",
         input = "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')",
         opts = { insert_columns_style = "inline" },
         expected = {
@@ -15,22 +17,24 @@ return {
         }
     },
     {
-        id = 8522,
+        id = 85221,
         type = "formatter",
-        name = "insert_columns_style stacked",
+        name = "insert_columns_style stacked - dml_options",
         input = "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')",
         opts = { insert_columns_style = "stacked" },
         expected = {
-            -- TODO: insert_columns_style not yet implemented - columns stay inline
-            contains = { "(id, name, email)" }
+            -- Now implemented - columns are stacked
+            matches = { "%(id,\n.-name,\n.-email%)" }
         }
     },
 
     -- INSERT values style
+    -- Note: Primary insert_values_style tests are in clause_options.lua (IDs 8730-8739)
+    -- These tests use different IDs to avoid conflicts
     {
-        id = 8525,
+        id = 85251,
         type = "formatter",
-        name = "insert_values_style inline (default)",
+        name = "insert_values_style inline (default) - dml_options",
         input = "INSERT INTO users (id, name) VALUES (1, 'John')",
         opts = { insert_values_style = "inline" },
         expected = {
@@ -38,14 +42,14 @@ return {
         }
     },
     {
-        id = 8526,
+        id = 85261,
         type = "formatter",
-        name = "insert_values_style stacked",
+        name = "insert_values_style stacked - dml_options",
         input = "INSERT INTO users (id, name) VALUES (1, 'John')",
         opts = { insert_values_style = "stacked" },
         expected = {
-            -- TODO: insert_values_style not yet implemented - values stay inline
-            contains = { "VALUES (1, 'John')" }
+            -- Now implemented - values are stacked
+            matches = { "VALUES %(1,\n.-'John'%)" }
         }
     },
 
