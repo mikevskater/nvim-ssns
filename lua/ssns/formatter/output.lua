@@ -468,6 +468,8 @@ function Output.generate(tokens, config)
   local in_merge_statement = false
   local in_cte = false  -- Track if we're in CTE section
   local pending_join = false -- Track if we're building a compound JOIN keyword
+  local pending_stacked_indent_newline = false -- For stacked_indent: newline after SELECT
+  local line_just_started = false -- Track if we just started a new line with indent
 
   -- Blank line tracking (Phase 3)
   local last_line_was_blank = false
@@ -478,6 +480,28 @@ function Output.generate(tokens, config)
     local needs_newline = false
     local extra_indent = 0
     local add_empty_line_after_flush = false  -- Flag to add empty line after flushing current line
+    local skip_space_before = line_just_started  -- Skip space if we just added indent
+    line_just_started = false  -- Reset the flag
+
+    -- Phase 1: Handle pending stacked_indent newline (first column after SELECT)
+    -- Skip SELECT modifiers (DISTINCT, TOP, ALL) - only trigger newline for actual columns
+    if pending_stacked_indent_newline and not token.is_comment then
+      local upper = token.type == "keyword" and string.upper(token.text) or ""
+      local is_select_modifier = upper == "DISTINCT" or upper == "TOP" or upper == "ALL"
+      -- Also skip numbers after TOP (e.g., TOP 10)
+      local is_top_number = token.type == "number"
+      -- Skip PERCENT and WITH TIES after TOP
+      local is_top_modifier = upper == "PERCENT" or upper == "WITH" or upper == "TIES"
+
+      if not is_select_modifier and not is_top_number and not is_top_modifier then
+        -- This is the first actual column - add newline
+        needs_newline = true
+        current_indent = token.indent_level or 0
+        extra_indent = 1
+        pending_stacked_indent_newline = false
+      end
+      -- If it's a modifier, keep the flag active for next token
+    end
 
     -- Handle comments specially
     if token.is_comment then
@@ -810,9 +834,12 @@ function Output.generate(tokens, config)
     end
 
     -- Handle comma for column lists (SELECT)
+    -- Phase 1: select_list_style controls whether columns are stacked or inline
     if token.type == "comma" and in_select_list then
-      if config.comma_position == "leading" then
-        -- Comma starts new line
+      local list_style = config.select_list_style or "stacked"
+      -- Note: stacked_indent also stacks columns (it's stacked with first on new line)
+      if (list_style == "stacked" or list_style == "stacked_indent") and config.comma_position == "leading" then
+        -- Comma starts new line (stacked style with leading commas)
         needs_newline = true
         current_indent = token.indent_level or 0
         extra_indent = 1
@@ -850,8 +877,8 @@ function Output.generate(tokens, config)
         table.insert(current_line, indent)
       end
     else
-      -- Add space between tokens if needed
-      if needs_space_before(prev_token, token, config) then
+      -- Add space between tokens if needed (but skip if we just started a line with indent)
+      if not skip_space_before and needs_space_before(prev_token, token, config) then
         table.insert(current_line, " ")
       end
     end
@@ -860,10 +887,19 @@ function Output.generate(tokens, config)
     local formatted_text = apply_token_casing(token, config)
     table.insert(current_line, formatted_text)
 
+    -- Phase 1: select_list_style stacked_indent - set flag to add newline before first column
+    local select_list_style = config.select_list_style or "stacked"
+    if token.type == "keyword" and string.upper(token.text) == "SELECT" and select_list_style == "stacked_indent" then
+      -- Set flag - next token (first column) will trigger newline
+      pending_stacked_indent_newline = true
+    end
+
     -- Handle trailing comma newline in SELECT list
+    -- Phase 1: select_list_style controls whether columns are stacked or inline
     -- Only at paren_depth 0 (not inside function calls like COUNT(*), COALESCE(a, b), etc.)
     local paren_depth = token.paren_depth or 0
-    if token.type == "comma" and in_select_list and config.comma_position == "trailing" and paren_depth == 0 then
+    -- Note: stacked_indent also stacks columns (it's stacked with first on new line)
+    if token.type == "comma" and in_select_list and (select_list_style == "stacked" or select_list_style == "stacked_indent") and config.comma_position == "trailing" and paren_depth == 0 then
       local line_text = table.concat(current_line, "")
       if line_text:match("%S") then
         table.insert(result, line_text)
@@ -875,6 +911,7 @@ function Output.generate(tokens, config)
       if indent ~= "" then
         table.insert(current_line, indent)
       end
+      line_just_started = true  -- Skip space before next token
     end
 
     -- Handle trailing comma newline in SET clause (UPDATE assignments)
@@ -891,6 +928,7 @@ function Output.generate(tokens, config)
       if indent ~= "" then
         table.insert(current_line, indent)
       end
+      line_just_started = true  -- Skip space before next token
     end
 
     -- Phase 2: GROUP BY stacked style
@@ -905,6 +943,7 @@ function Output.generate(tokens, config)
       if indent ~= "" then
         table.insert(current_line, indent)
       end
+      line_just_started = true  -- Skip space before next token
     end
 
     -- Phase 2: ORDER BY stacked style
@@ -919,6 +958,7 @@ function Output.generate(tokens, config)
       if indent ~= "" then
         table.insert(current_line, indent)
       end
+      line_just_started = true  -- Skip space before next token
     end
 
     -- Phase 2: VALUES multi-row style (stacked)
@@ -934,6 +974,7 @@ function Output.generate(tokens, config)
       if indent ~= "" then
         table.insert(current_line, indent)
       end
+      line_just_started = true  -- Skip space before next token
     end
 
     -- Handle CTE separator comma (between CTE definitions)

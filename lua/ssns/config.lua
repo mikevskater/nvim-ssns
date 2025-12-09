@@ -224,7 +224,7 @@
 ---@field preserve_comments boolean Keep comments in place (default: true)
 ---@field format_on_save boolean Auto-format on buffer save (default: false)
 -- SELECT clause rules (Phase 1)
----@field select_list_style string "inline"|"stacked" - Columns inline or one per line (default: "stacked")
+---@field select_list_style string "inline"|"stacked"|"stacked_indent" - Columns layout: inline=all on one line, stacked=one per line with first on SELECT line, stacked_indent=one per line with first on new line (default: "stacked")
 ---@field select_star_expand boolean Auto-expand SELECT * to column list (default: false)
 ---@field select_distinct_newline boolean Put DISTINCT on new line after SELECT (default: false)
 ---@field select_top_newline boolean Put TOP clause on new line after SELECT (default: false)
