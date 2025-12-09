@@ -771,4 +771,69 @@ return {
             contains = { "SELECT *", "FROM" }
         }
     },
+
+    -- in_list_style tests (Phase 4 Expressions / also where_in_list_style)
+    {
+        id = 8526,
+        type = "formatter",
+        name = "in_list_style inline (default) - all values on one line",
+        input = "SELECT * FROM users WHERE id IN (1, 2, 3, 4, 5)",
+        opts = { in_list_style = "inline" },
+        expected = {
+            contains = { "IN (1, 2, 3, 4, 5)" }
+        }
+    },
+    {
+        id = 8527,
+        type = "formatter",
+        name = "in_list_style stacked - each value on new line",
+        input = "SELECT * FROM users WHERE id IN (1, 2, 3)",
+        opts = { in_list_style = "stacked" },
+        expected = {
+            matches = { "IN %(1,\n.-2,\n.-3%)" }
+        }
+    },
+    {
+        id = 8528,
+        type = "formatter",
+        name = "in_list_style stacked_indent - first value on new line",
+        input = "SELECT * FROM users WHERE id IN (1, 2, 3)",
+        opts = { in_list_style = "stacked_indent" },
+        expected = {
+            -- Opening paren, then newline, then values stacked
+            matches = { "IN %(\n.-1,\n.-2,\n.-3" }
+        }
+    },
+    {
+        id = 8529,
+        type = "formatter",
+        name = "in_list_style stacked with string values",
+        input = "SELECT * FROM users WHERE status IN ('active', 'pending', 'approved')",
+        opts = { in_list_style = "stacked" },
+        expected = {
+            matches = { "IN %('active',\n.-'pending',\n.-'approved'%)" }
+        }
+    },
+    {
+        id = 85291,
+        type = "formatter",
+        name = "in_list_style inline - NOT IN also handled",
+        input = "SELECT * FROM users WHERE id NOT IN (1, 2, 3)",
+        opts = { in_list_style = "inline" },
+        expected = {
+            contains = { "NOT IN (1, 2, 3)" }
+        }
+    },
+    {
+        id = 85292,
+        type = "formatter",
+        name = "in_list_style stacked - nested function calls stay inline",
+        input = "SELECT * FROM users WHERE id IN (1, GETDATE(), 3)",
+        opts = { in_list_style = "stacked" },
+        expected = {
+            -- Function calls within IN list should stay inline
+            contains = { "GETDATE()" },
+            matches = { "IN %(1,\n.-GETDATE%(%),\n.-3%)" }
+        }
+    },
 }

@@ -470,6 +470,10 @@ function Output.generate(tokens, config)
   local in_create_table = false  -- Track if we're in CREATE TABLE column definitions
   local create_table_paren_depth = 0  -- Track parenthesis depth for CREATE TABLE
   local pending_create = false  -- Track if we saw CREATE (waiting for TABLE/VIEW/etc)
+  local in_in_clause = false  -- Track if we're in IN (...) list
+  local in_clause_paren_depth = 0  -- Track parenthesis depth for IN clause
+  local pending_in = false  -- Track if we saw IN keyword (waiting for open paren)
+  local pending_in_stacked_indent_newline = false  -- For stacked_indent: newline after IN (
   local pending_join = false -- Track if we're building a compound JOIN keyword
   local join_modifiers = {} -- Track accumulated JOIN modifiers (LEFT, RIGHT, FULL, INNER, OUTER)
   local pending_stacked_indent_newline = false -- For stacked_indent: newline after SELECT
@@ -516,6 +520,15 @@ function Output.generate(tokens, config)
       current_indent = token.indent_level or 0
       extra_indent = 1
       pending_where_stacked_indent_newline = false
+    end
+
+    -- Phase 4: Handle pending in_list_style stacked_indent newline (first value after IN ()
+    if pending_in_stacked_indent_newline and not token.is_comment and token.type ~= "paren_open" then
+      -- First value after IN ( - add newline
+      needs_newline = true
+      current_indent = token.indent_level or 0
+      extra_indent = 1
+      pending_in_stacked_indent_newline = false
     end
 
     -- Handle comments specially
@@ -670,6 +683,7 @@ function Output.generate(tokens, config)
         in_join_clause = true
         in_on_clause = false
       end
+
     end
 
     -- Handle newlines before major clauses
@@ -1142,6 +1156,57 @@ function Output.generate(tokens, config)
       line_just_started = true  -- Skip space before next token
     end
 
+    -- Phase 4: IN clause parenthesis and stacked_indent handling
+    -- Track when we enter IN (...)
+    if pending_in and token.type == "paren_open" then
+      pending_in = false
+      in_in_clause = true
+      in_clause_paren_depth = 1
+
+      -- Check for stacked_indent - need newline after opening paren
+      local in_style = config.in_list_style or config.where_in_list_style or "inline"
+      if in_style == "stacked_indent" then
+        pending_in_stacked_indent_newline = true
+      end
+    elseif in_in_clause then
+      if token.type == "paren_open" then
+        in_clause_paren_depth = in_clause_paren_depth + 1
+      elseif token.type == "paren_close" then
+        in_clause_paren_depth = in_clause_paren_depth - 1
+        if in_clause_paren_depth <= 0 then
+          in_in_clause = false
+          in_clause_paren_depth = 0
+          pending_in_stacked_indent_newline = false
+        end
+      end
+    end
+
+    -- Reset pending_in if we see something other than paren_open after IN
+    if pending_in and token.type ~= "paren_open" and token.type ~= "whitespace" then
+      pending_in = false
+    end
+
+    -- Track IN clause for in_list_style (AFTER the reset check above)
+    if token.type == "keyword" and string.upper(token.text) == "IN" then
+      pending_in = true
+    end
+
+    -- Phase 4: in_list_style - each value in IN clause on new line
+    local in_style = config.in_list_style or config.where_in_list_style or "inline"
+    if token.type == "comma" and in_in_clause and in_clause_paren_depth == 1 and in_style ~= "inline" then
+      local line_text = table.concat(current_line, "")
+      if line_text:match("%S") then
+        table.insert(result, line_text)
+      end
+      current_line = {}
+      local base_indent = token.indent_level or 0
+      local indent = get_indent(config, base_indent + 1)
+      if indent ~= "" then
+        table.insert(current_line, indent)
+      end
+      line_just_started = true  -- Skip space before next token
+    end
+
     -- Handle semicolon - end of statement
     if token.type == "semicolon" then
       local line_text = table.concat(current_line, "")
@@ -1168,6 +1233,10 @@ function Output.generate(tokens, config)
       in_create_table = false
       create_table_paren_depth = 0
       pending_create = false
+      in_in_clause = false
+      in_clause_paren_depth = 0
+      pending_in = false
+      pending_in_stacked_indent_newline = false
       pending_join = false
 
       -- Phase 3: blank_line_between_statements
@@ -1215,6 +1284,10 @@ function Output.generate(tokens, config)
       in_create_table = false
       create_table_paren_depth = 0
       pending_create = false
+      in_in_clause = false
+      in_clause_paren_depth = 0
+      pending_in = false
+      pending_in_stacked_indent_newline = false
       pending_join = false
 
       -- Phase 3: blank_line_after_go
