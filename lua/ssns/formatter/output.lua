@@ -439,6 +439,29 @@ local function needs_space_before(prev, curr, config)
   return false
 end
 
+---Flush SET alignment buffer to result
+---@param buffer table[] Array of assignment entries {column_name, tokens_text, indent}
+---@param result table[] Result lines array
+---@param max_width number Maximum column name width
+---@param config FormatterConfig Formatter configuration
+local function flush_set_align_buffer(buffer, result, max_width, config)
+  for idx, entry in ipairs(buffer) do
+    local col_name = entry.column_name
+    local value_text = entry.value_text
+    local indent = entry.indent or ""
+
+    -- Calculate padding needed to align equals sign
+    local padding = string.rep(" ", max_width - #col_name)
+
+    -- Build the line: indent + column + padding + space + = + space + value + comma
+    local line = indent .. col_name .. padding .. " = " .. value_text
+    if idx < #buffer then
+      line = line .. ","
+    end
+    table.insert(result, line)
+  end
+end
+
 ---Generate formatted output from processed tokens
 ---@param tokens table[] Processed tokens with formatting metadata
 ---@param config FormatterConfig Formatter configuration
@@ -480,6 +503,13 @@ function Output.generate(tokens, config)
   local pending_where_stacked_indent_newline = false -- For where stacked_indent: newline after WHERE
   local line_just_started = false -- Track if we just started a new line with indent
   local skip_token = false -- Flag to skip outputting current token (for join_keyword_style)
+
+  -- Phase 2: update_set_align - buffering for SET clause alignment
+  local set_align_buffer = {} -- Buffer for SET assignments: {column_name, assignment_tokens}
+  local set_align_current = nil -- Current assignment being built: {column = "", tokens = {}}
+  local set_align_active = false -- Whether we're actively buffering SET assignments
+  local set_align_max_col_width = 0 -- Maximum column name width in SET clause
+  local in_update_statement = false -- Track if we're in UPDATE statement
 
   -- Blank line tracking (Phase 3)
   local last_line_was_blank = false
@@ -615,9 +645,81 @@ function Output.generate(tokens, config)
         reset_clauses()
         in_select_list = true
       elseif upper == "FROM" then
+        -- Flush SET alignment buffer if active (UPDATE ... SET ... FROM)
+        if set_align_active then
+          -- Capture the last assignment (the current_line before FROM)
+          local line_text = table.concat(current_line, "")
+          if line_text:match("%S") then
+            -- Parse the line to extract column name and value
+            local indent_part, prefix, col_part, value_part
+            -- First try with SET prefix (single assignment case)
+            indent_part, prefix, col_part, value_part = line_text:match("^(%s*)(SET%s+)([^=]+)%s*=%s*(.+)$")
+            if not indent_part then
+              -- Try without SET
+              indent_part, col_part, value_part = line_text:match("^(%s*)([^=]+)%s*=%s*(.+)$")
+              prefix = ""
+            end
+            if col_part then
+              col_part = col_part:match("^%s*(.-)%s*$") -- trim
+              if #col_part > set_align_max_col_width then
+                set_align_max_col_width = #col_part
+              end
+              table.insert(set_align_buffer, {
+                column_name = col_part,
+                value_text = value_part or "",
+                indent = (indent_part or "") .. (prefix or "")
+              })
+            end
+          end
+          if #set_align_buffer > 0 then
+            flush_set_align_buffer(set_align_buffer, result, set_align_max_col_width, config)
+          end
+          current_line = {}  -- Clear current line since we handled it
+          skip_space_before = true  -- Skip leading space for FROM
+          set_align_active = false
+          set_align_buffer = {}
+          set_align_current = nil
+          in_update_statement = false
+        end
         reset_clauses()
         in_from_clause = true
       elseif upper == "WHERE" then
+        -- Flush SET alignment buffer if active (UPDATE ... SET ... WHERE)
+        if set_align_active then
+          -- Capture the last assignment (the current_line before WHERE)
+          local line_text = table.concat(current_line, "")
+          if line_text:match("%S") then
+            -- Parse the line to extract column name and value
+            local indent_part, prefix, col_part, value_part
+            -- First try with SET prefix (single assignment case)
+            indent_part, prefix, col_part, value_part = line_text:match("^(%s*)(SET%s+)([^=]+)%s*=%s*(.+)$")
+            if not indent_part then
+              -- Try without SET
+              indent_part, col_part, value_part = line_text:match("^(%s*)([^=]+)%s*=%s*(.+)$")
+              prefix = ""
+            end
+            if col_part then
+              col_part = col_part:match("^%s*(.-)%s*$") -- trim
+              if #col_part > set_align_max_col_width then
+                set_align_max_col_width = #col_part
+              end
+              table.insert(set_align_buffer, {
+                column_name = col_part,
+                value_text = value_part or "",
+                indent = (indent_part or "") .. (prefix or "")
+              })
+            end
+          end
+          if #set_align_buffer > 0 then
+            flush_set_align_buffer(set_align_buffer, result, set_align_max_col_width, config)
+          end
+          current_line = {}  -- Clear current line since we handled it
+          skip_space_before = true  -- Skip leading space for WHERE
+          set_align_active = false
+          set_align_buffer = {}
+          set_align_current = nil
+          in_update_statement = false
+        end
         reset_clauses()
         in_where_clause = true
         -- Phase 1: where_condition_style stacked_indent - set flag for first condition
@@ -637,6 +739,13 @@ function Output.generate(tokens, config)
       elseif upper == "SET" then
         reset_clauses()
         in_set_clause = true
+        -- Activate SET alignment buffering if enabled and in UPDATE statement with stacked style
+        if in_update_statement and config.update_set_align and config.update_set_style == "stacked" then
+          set_align_active = true
+          set_align_buffer = {}
+          set_align_current = { column_name = "", value_tokens = {}, seen_equals = false }
+          set_align_max_col_width = 0
+        end
       elseif upper == "VALUES" then
         reset_clauses()
         in_values_clause = true
@@ -653,6 +762,7 @@ function Output.generate(tokens, config)
           in_cte = false
         end
         reset_clauses()
+        in_update_statement = true
       elseif upper == "INSERT" then
         if in_cte and (token.paren_depth or 0) == 0 then
           in_cte = false
@@ -1054,7 +1164,45 @@ function Output.generate(tokens, config)
     if token.type == "comma" and in_set_clause and config.update_set_style == "stacked" then
       local line_text = table.concat(current_line, "")
       if line_text:match("%S") then
-        table.insert(result, line_text)
+        -- If alignment is active, buffer this assignment instead of outputting
+        if set_align_active then
+          -- Parse the line to extract column name and value
+          -- Format: "SET col = value," or "  col = value," (first has SET, rest have indent)
+          -- The comma is already in line_text because it was added before this check
+          local indent_part, prefix, col_part, value_part
+
+          -- First try with SET prefix (first assignment)
+          indent_part, prefix, col_part, value_part = line_text:match("^(%s*)(SET%s+)([^=]+)%s*=%s*(.+),$")
+          if not indent_part then
+            -- Try without SET (subsequent assignments)
+            indent_part, col_part, value_part = line_text:match("^(%s*)([^=]+)%s*=%s*(.+),$")
+            prefix = ""
+          end
+          if not indent_part then
+            -- Try without trailing comma
+            indent_part, prefix, col_part, value_part = line_text:match("^(%s*)(SET%s+)([^=]+)%s*=%s*(.+)$")
+            if not indent_part then
+              indent_part, col_part, value_part = line_text:match("^(%s*)([^=]+)%s*=%s*(.+)$")
+              prefix = ""
+            end
+          end
+          if col_part then
+            col_part = col_part:match("^%s*(.-)%s*$") -- trim whitespace
+            if #col_part > set_align_max_col_width then
+              set_align_max_col_width = #col_part
+            end
+            table.insert(set_align_buffer, {
+              column_name = col_part,
+              value_text = value_part or "",
+              indent = (indent_part or "") .. (prefix or "")
+            })
+          else
+            -- Fallback: output as-is if parsing fails
+            table.insert(result, line_text)
+          end
+        else
+          table.insert(result, line_text)
+        end
       end
       current_line = {}
       -- Indent continuation for SET assignments
@@ -1209,9 +1357,48 @@ function Output.generate(tokens, config)
 
     -- Handle semicolon - end of statement
     if token.type == "semicolon" then
-      local line_text = table.concat(current_line, "")
-      if line_text:match("%S") then
-        table.insert(result, line_text)
+      -- Flush SET alignment buffer if active (UPDATE ... SET ... ;)
+      if set_align_active then
+        local line_text = table.concat(current_line, "")
+        if line_text:match("%S") then
+          -- Parse the line to extract column name and value
+          local indent_part, prefix, col_part, value_part
+          -- First try with SET prefix (single assignment case)
+          indent_part, prefix, col_part, value_part = line_text:match("^(%s*)(SET%s+)([^=]+)%s*=%s*(.+)$")
+          if not indent_part then
+            -- Try without SET
+            indent_part, col_part, value_part = line_text:match("^(%s*)([^=]+)%s*=%s*(.+)$")
+            prefix = ""
+          end
+          if col_part then
+            col_part = col_part:match("^%s*(.-)%s*$") -- trim
+            if #col_part > set_align_max_col_width then
+              set_align_max_col_width = #col_part
+            end
+            table.insert(set_align_buffer, {
+              column_name = col_part,
+              value_text = value_part or "",
+              indent = (indent_part or "") .. (prefix or "")
+            })
+          end
+        end
+        if #set_align_buffer > 0 then
+          flush_set_align_buffer(set_align_buffer, result, set_align_max_col_width, config)
+        end
+        current_line = {}
+        set_align_active = false
+        set_align_buffer = {}
+        set_align_current = nil
+        in_update_statement = false
+        -- Add semicolon to the last line
+        if #result > 0 then
+          result[#result] = result[#result] .. ";"
+        end
+      else
+        local line_text = table.concat(current_line, "")
+        if line_text:match("%S") then
+          table.insert(result, line_text)
+        end
       end
       current_line = {}
       current_indent = 0

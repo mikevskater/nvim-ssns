@@ -95,12 +95,51 @@ return {
     {
         id = 8542,
         type = "formatter",
-        name = "update_set_align true",
+        name = "update_set_align true - equals aligned",
         input = "UPDATE users SET name = 'John', email = 'john@example.com' WHERE id = 1",
         opts = { update_set_style = "stacked", update_set_align = true },
         expected = {
-            -- Assignment operators should be aligned (approximate test)
-            matches = { "SET name", "email" }
+            -- With alignment: name and email should have equals at same column
+            -- name  = 'John',
+            -- email = 'john@example.com'
+            -- The = should align - email is 5 chars, name is 4 chars, so name gets 1 space padding
+            contains = { "name  =", "email =" }
+        }
+    },
+    {
+        id = 8543,
+        type = "formatter",
+        name = "update_set_align true - multiple columns",
+        input = "UPDATE users SET a = 1, bb = 2, ccc = 3 WHERE id = 1",
+        opts = { update_set_style = "stacked", update_set_align = true },
+        expected = {
+            -- Longest column is 'ccc' (3 chars), so:
+            -- a   = 1,
+            -- bb  = 2,
+            -- ccc = 3
+            contains = { "a   =", "bb  =", "ccc =" }
+        }
+    },
+    {
+        id = 8544,
+        type = "formatter",
+        name = "update_set_align false - no alignment",
+        input = "UPDATE users SET a = 1, bb = 2, ccc = 3 WHERE id = 1",
+        opts = { update_set_style = "stacked", update_set_align = false },
+        expected = {
+            -- Without alignment, standard spacing (one space around =)
+            contains = { "a = 1", "bb = 2", "ccc = 3" }
+        }
+    },
+    {
+        id = 8545,
+        type = "formatter",
+        name = "update_set_align with qualified column names",
+        input = "UPDATE u SET u.name = 'John', u.email = 'john@example.com' FROM users u WHERE u.id = 1",
+        opts = { update_set_style = "stacked", update_set_align = true },
+        expected = {
+            -- Qualified names: u.name (6 chars) and u.email (7 chars)
+            contains = { "u.name  =", "u.email =" }
         }
     },
 
