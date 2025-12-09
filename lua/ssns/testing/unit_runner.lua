@@ -111,6 +111,14 @@ function UnitRunner.run_test(test)
     expected = test.expected,
   }
 
+  -- Skip tests marked with skip = true
+  if test.skip then
+    result.passed = true
+    result.skipped = true
+    result.duration_ms = 0
+    return result
+  end
+
   local ok, err = pcall(function()
     if test.type == "tokenizer" then
       result.actual, result.passed, result.error = UnitRunner._run_tokenizer_test(test)
@@ -209,42 +217,231 @@ end
 
 -- Internal functions
 
+---Create mock column object
+---@param name string Column name
+---@param data_type string Data type
+---@param is_primary_key? boolean Is primary key
+---@param is_nullable? boolean Is nullable
+---@return table column Mock column object
+local function create_mock_column(name, data_type, is_primary_key, is_nullable)
+  return {
+    name = name,
+    column_name = name,
+    data_type = data_type,
+    is_primary_key = is_primary_key or false,
+    is_nullable = is_nullable ~= false, -- Default to true
+    object_type = "column",
+  }
+end
+
+---Create mock table with columns
+---@param name string Table name
+---@param schema string Schema name
+---@param columns table[] Column definitions
+---@return table table_obj Mock table object
+local function create_mock_table(name, schema, columns)
+  local tbl = {
+    name = name,
+    schema = schema,
+    object_type = "table",
+    _columns = columns or {},
+  }
+  -- Add get_columns method
+  function tbl:get_columns()
+    return self._columns
+  end
+  return tbl
+end
+
 ---Create mock database structure for provider tests
+---Matches the structure in lua/ssns/testing/database_structure.md
 ---@param connection_config table Connection configuration from test.context.connection
 ---@return table database Mock database object
 function UnitRunner._create_mock_database(connection_config)
+  -- ============================================================================
+  -- vim_dadbod_test.dbo Tables (matching database_structure.md)
+  -- ============================================================================
+
+  -- Regions table
+  local regions_cols = {
+    create_mock_column("RegionID", "int", true, false),
+    create_mock_column("RegionName", "nvarchar(100)", false, false),
+  }
+
+  -- Countries table
+  local countries_cols = {
+    create_mock_column("CountryID", "int", true, false),
+    create_mock_column("CountryName", "nvarchar(100)", false, false),
+    create_mock_column("RegionID", "int", false, true),
+  }
+
+  -- Customers table
+  local customers_cols = {
+    create_mock_column("Id", "int", true, false),
+    create_mock_column("CustomerId", "int", false, true),
+    create_mock_column("Name", "nvarchar(100)", false, true),
+    create_mock_column("Email", "nvarchar(100)", false, true),
+    create_mock_column("CompanyId", "int", false, true),
+    create_mock_column("Country", "nvarchar(50)", false, true),
+    create_mock_column("Active", "bit", false, true),
+    create_mock_column("CreatedDate", "datetime", false, true),
+    create_mock_column("CountryID", "int", false, true),
+  }
+
+  -- Departments table
+  local departments_cols = {
+    create_mock_column("DepartmentID", "int", true, false),
+    create_mock_column("DepartmentName", "nvarchar(100)", false, false),
+    create_mock_column("ManagerID", "int", false, true),
+    create_mock_column("Budget", "decimal(12,2)", false, true),
+  }
+
+  -- Employees table (main test table)
+  local employees_cols = {
+    create_mock_column("EmployeeID", "int", true, false),
+    create_mock_column("FirstName", "nvarchar(50)", false, false),
+    create_mock_column("LastName", "nvarchar(50)", false, false),
+    create_mock_column("Email", "nvarchar(100)", false, true),
+    create_mock_column("DepartmentID", "int", false, true),
+    create_mock_column("HireDate", "date", false, true),
+    create_mock_column("Salary", "decimal(10,2)", false, true),
+    create_mock_column("IsActive", "bit", false, true),
+    create_mock_column("ManagerID", "int", false, true),  -- Added for FK tests
+  }
+
+  -- Branches table (for tests expecting this table)
+  local branches_cols = {
+    create_mock_column("BranchID", "int", true, false),
+    create_mock_column("BranchName", "nvarchar(100)", false, false),
+    create_mock_column("Location", "nvarchar(200)", false, true),
+    create_mock_column("ManagerID", "int", false, true),
+  }
+
+  -- EmployeeReviews table (for hr schema tests)
+  local employee_reviews_cols = {
+    create_mock_column("ReviewID", "int", true, false),
+    create_mock_column("EmployeeID", "int", false, false),
+    create_mock_column("ReviewDate", "date", false, true),
+    create_mock_column("Rating", "int", false, true),
+    create_mock_column("Comments", "nvarchar(500)", false, true),
+  }
+
+  -- Orders table
+  local orders_cols = {
+    create_mock_column("Id", "int", true, false),
+    create_mock_column("OrderId", "int", false, true),
+    create_mock_column("CustomerId", "int", false, true),
+    create_mock_column("EmployeeId", "int", false, true),
+    create_mock_column("OrderDate", "date", false, true),
+    create_mock_column("Total", "decimal(18,2)", false, true),
+    create_mock_column("Status", "nvarchar(50)", false, true),
+  }
+
+  -- Products table
+  local products_cols = {
+    create_mock_column("Id", "int", true, false),
+    create_mock_column("ProductId", "int", false, true),
+    create_mock_column("Name", "nvarchar(100)", false, true),
+    create_mock_column("CategoryId", "int", false, true),
+    create_mock_column("Price", "decimal(18,2)", false, true),
+    create_mock_column("Active", "bit", false, true),
+  }
+
+  -- Projects table
+  local projects_cols = {
+    create_mock_column("ProjectID", "int", true, false),
+    create_mock_column("ProjectName", "nvarchar(100)", false, false),
+    create_mock_column("StartDate", "date", false, true),
+    create_mock_column("EndDate", "date", false, true),
+    create_mock_column("Budget", "decimal(12,2)", false, true),
+    create_mock_column("Status", "nvarchar(20)", false, true),
+  }
+
+  -- ============================================================================
+  -- vim_dadbod_test.hr Tables
+  -- ============================================================================
+
+  -- hr.Benefits table
+  local benefits_cols = {
+    create_mock_column("BenefitID", "int", true, false),
+    create_mock_column("EmployeeID", "int", false, true),
+    create_mock_column("BenefitType", "nvarchar(50)", false, true),
+    create_mock_column("StartDate", "date", false, true),
+    create_mock_column("EndDate", "date", false, true),
+    create_mock_column("Cost", "decimal(10,2)", false, true),
+  }
+
+  -- ============================================================================
+  -- All mock tables
+  -- ============================================================================
   local mock_tables = {
-    { name = "Employees", schema = "dbo", object_type = "table" },
-    { name = "Departments", schema = "dbo", object_type = "table" },
-    { name = "Orders", schema = "dbo", object_type = "table" },
-    { name = "Customers", schema = "dbo", object_type = "table" },
-    { name = "Products", schema = "dbo", object_type = "table" },
-    { name = "Branches", schema = "dbo", object_type = "table" },
-    { name = "test_table1", schema = "dbo", object_type = "table" },
-    { name = "test_table2", schema = "dbo", object_type = "table" },
-    { name = "Benefits", schema = "hr", object_type = "table" },
-    { name = "EmployeeReviews", schema = "hr", object_type = "table" },
-    { name = "Salaries", schema = "hr", object_type = "table" },
-    { name = "AllDivisions", schema = "Branch", object_type = "table" },
-    { name = "CentralDivision", schema = "Branch", object_type = "table" },
-    { name = "BranchManagers", schema = "Branch", object_type = "table" },
-    { name = "BranchLocations", schema = "Branch", object_type = "table" },
-    { name = "ExternalTable1", schema = "dbo", object_type = "table", database = "OtherDB" },
-    { name = "ExternalTable2", schema = "dbo", object_type = "table", database = "OtherDB" },
-    { name = "My Table", schema = "dbo", object_type = "table" },
-    { name = "My Other Table", schema = "dbo", object_type = "table" },
+    -- dbo schema tables
+    create_mock_table("Regions", "dbo", regions_cols),
+    create_mock_table("Countries", "dbo", countries_cols),
+    create_mock_table("Customers", "dbo", customers_cols),
+    create_mock_table("Departments", "dbo", departments_cols),
+    create_mock_table("Employees", "dbo", employees_cols),
+    create_mock_table("Orders", "dbo", orders_cols),
+    create_mock_table("Products", "dbo", products_cols),
+    create_mock_table("Projects", "dbo", projects_cols),
+    create_mock_table("Branches", "dbo", branches_cols),
+    -- hr schema tables
+    create_mock_table("Benefits", "hr", benefits_cols),
+    create_mock_table("EmployeeReviews", "hr", employee_reviews_cols),
+  }
+
+  -- ============================================================================
+  -- Views (matching database_structure.md)
+  -- ============================================================================
+
+  -- vw_ActiveEmployees - shows active employees
+  local vw_active_employees_cols = {
+    create_mock_column("EmployeeID", "int", false, false),
+    create_mock_column("FirstName", "nvarchar(50)", false, false),
+    create_mock_column("LastName", "nvarchar(50)", false, false),
+    create_mock_column("Email", "nvarchar(100)", false, true),
+    create_mock_column("DepartmentID", "int", false, true),
+    create_mock_column("HireDate", "date", false, true),
+    create_mock_column("Salary", "decimal(10,2)", false, true),
+  }
+
+  -- vw_DepartmentSummary - aggregates department stats
+  local vw_dept_summary_cols = {
+    create_mock_column("DepartmentID", "int", false, false),
+    create_mock_column("DepartmentName", "nvarchar(100)", false, false),
+    create_mock_column("Budget", "decimal(12,2)", false, true),
+    create_mock_column("EmployeeCount", "int", false, true),
+    create_mock_column("AvgSalary", "decimal(38,6)", false, true),
+  }
+
+  -- vw_ProjectStatus - project status view
+  local vw_project_status_cols = {
+    create_mock_column("ProjectID", "int", false, false),
+    create_mock_column("ProjectName", "nvarchar(100)", false, false),
+    create_mock_column("StartDate", "date", false, true),
+    create_mock_column("EndDate", "date", false, true),
+    create_mock_column("Budget", "decimal(12,2)", false, true),
+    create_mock_column("Status", "varchar(11)", false, false),
   }
 
   local mock_views = {
-    { name = "vw_ActiveEmployees", schema = "dbo", object_type = "view" },
-    { name = "vw_DepartmentSummary", schema = "dbo", object_type = "view" },
-    { name = "vw_EmployeeDetails", schema = "dbo", object_type = "view" },
+    create_mock_table("vw_ActiveEmployees", "dbo", vw_active_employees_cols),
+    create_mock_table("vw_DepartmentSummary", "dbo", vw_dept_summary_cols),
+    create_mock_table("vw_ProjectStatus", "dbo", vw_project_status_cols),
   }
+  -- Mark as views
+  for _, v in ipairs(mock_views) do
+    v.object_type = "view"
+  end
 
+  -- ============================================================================
+  -- Synonyms (matching database_structure.md)
+  -- ============================================================================
   local mock_synonyms = {
-    { name = "syn_Employees", schema = "dbo", object_type = "synonym" },
-    { name = "syn_Depts", schema = "dbo", object_type = "synonym" },
-    { name = "syn_RemoteTable", schema = "dbo", object_type = "synonym" },
+    { name = "syn_ActiveEmployees", schema = "dbo", object_type = "synonym", base_object = "dbo.vw_ActiveEmployees", get_columns = function() return vw_active_employees_cols end },
+    { name = "syn_Depts", schema = "dbo", object_type = "synonym", base_object = "dbo.Departments", get_columns = function() return departments_cols end },
+    { name = "syn_Employees", schema = "dbo", object_type = "synonym", base_object = "dbo.Employees", get_columns = function() return employees_cols end },
+    { name = "syn_HRBenefits", schema = "dbo", object_type = "synonym", base_object = "hr.Benefits", get_columns = function() return benefits_cols end },
   }
 
   -- Build mock database structure matching DbClass format
@@ -265,6 +462,10 @@ function UnitRunner._create_mock_database(connection_config)
         children = mock_synonyms,
       },
     },
+    -- Store mock data for accessor methods
+    _mock_tables = mock_tables,
+    _mock_views = mock_views,
+    _mock_synonyms = mock_synonyms,
     get_adapter = function()
       return {
         features = {
@@ -272,10 +473,144 @@ function UnitRunner._create_mock_database(connection_config)
           synonyms = true,
           functions = true,
         },
+        -- Mock quote_identifier for SQL Server style (brackets)
+        quote_identifier = function(self, identifier)
+          if not identifier then return identifier end
+          -- Check if already quoted
+          if identifier:match("^%[.*%]$") then
+            return identifier
+          end
+          -- Check if needs quoting (has special chars or is reserved word)
+          if identifier:match("[%s%-%.]") or identifier:match("^%d") then
+            return "[" .. identifier .. "]"
+          end
+          return identifier
+        end,
       }
     end,
     load = function() end, -- No-op for mock
   }
+
+  -- Add get_tables method matching DbClass interface
+  function database:get_tables(schema_filter, opts)
+    if schema_filter then
+      local filtered = {}
+      for _, t in ipairs(self._mock_tables) do
+        if t.schema == schema_filter then
+          table.insert(filtered, t)
+        end
+      end
+      return filtered
+    end
+    return self._mock_tables
+  end
+
+  -- Add get_views method matching DbClass interface
+  function database:get_views(schema_filter, opts)
+    if schema_filter then
+      local filtered = {}
+      for _, v in ipairs(self._mock_views) do
+        if v.schema == schema_filter then
+          table.insert(filtered, v)
+        end
+      end
+      return filtered
+    end
+    return self._mock_views
+  end
+
+  -- Add get_synonyms method matching DbClass interface
+  function database:get_synonyms(schema_filter, opts)
+    if schema_filter then
+      local filtered = {}
+      for _, s in ipairs(self._mock_synonyms) do
+        if s.schema == schema_filter then
+          table.insert(filtered, s)
+        end
+      end
+      return filtered
+    end
+    return self._mock_synonyms
+  end
+
+  -- Add get_functions method matching DbClass interface (empty for now)
+  function database:get_functions(schema_filter, opts)
+    return {}
+  end
+
+  -- Add get_procedures method matching DbClass interface
+  function database:get_procedures(schema_filter, opts)
+    -- Create procedures with get_parameters method
+    local function create_proc(name, schema, params)
+      return {
+        name = name,
+        schema = schema,
+        object_type = "procedure",
+        _params = params,
+        get_parameters = function(self)
+          return self._params or {}
+        end,
+      }
+    end
+
+    local mock_procedures = {
+      create_proc("usp_GetEmployeesByDepartment", "dbo", {
+        { name = "@DepartmentID", data_type = "int", direction = "IN" },
+      }),
+      create_proc("usp_InsertEmployee", "dbo", {
+        { name = "@FirstName", data_type = "nvarchar(50)", direction = "IN" },
+        { name = "@LastName", data_type = "nvarchar(50)", direction = "IN" },
+        { name = "@Email", data_type = "nvarchar(100)", direction = "IN" },
+        { name = "@DepartmentID", data_type = "int", direction = "IN" },
+        { name = "@Salary", data_type = "decimal(18,2)", direction = "IN" },
+      }),
+      create_proc("usp_GetDivisionMetrics", "dbo", {
+        { name = "@DivisionName", data_type = "nvarchar(100)", direction = "IN" },
+        { name = "@Year", data_type = "int", direction = "IN" },
+      }),
+      -- sp_SearchEmployees - heavily tested procedure
+      create_proc("sp_SearchEmployees", "dbo", {
+        { name = "@SearchTerm", data_type = "nvarchar(100)", direction = "IN" },
+        { name = "@DepartmentID", data_type = "int", direction = "IN" },
+        { name = "@IncludeInactive", data_type = "bit", direction = "IN" },
+        { name = "@IncludeSalary", data_type = "bit", direction = "IN" },
+        { name = "@TotalCount", data_type = "int", direction = "OUT" },
+      }),
+      -- Additional common procedures
+      create_proc("usp_UpdateEmployee", "dbo", {
+        { name = "@EmployeeID", data_type = "int", direction = "IN" },
+        { name = "@FirstName", data_type = "nvarchar(50)", direction = "IN" },
+        { name = "@LastName", data_type = "nvarchar(50)", direction = "IN" },
+      }),
+      create_proc("usp_ProcessOrder", "dbo", {
+        { name = "@CustomerID", data_type = "int", direction = "IN" },
+        { name = "@DaysBack", data_type = "int", direction = "IN" },
+      }),
+      create_proc("usp_GetEmployeeCount", "dbo", {
+        { name = "@DepartmentID", data_type = "int", direction = "IN" },
+        { name = "@TotalCount", data_type = "int", direction = "OUT" },
+      }),
+    }
+    if schema_filter then
+      local filtered = {}
+      for _, p in ipairs(mock_procedures) do
+        if p.schema == schema_filter then
+          table.insert(filtered, p)
+        end
+      end
+      return filtered
+    end
+    return mock_procedures
+  end
+
+  -- Add get_schemas method matching DbClass interface
+  function database:get_schemas()
+    return {
+      { name = "dbo" },
+      { name = "hr" },
+      { name = "Branch" },
+    }
+  end
 
   return database
 end
@@ -321,22 +656,30 @@ function UnitRunner._compare_provider_results(actual_items, expected)
       local includes = exp_items.includes or {}
       local excludes = exp_items.excludes or {}
 
-      -- Build set of actual labels
+      -- Build set of actual labels (including unqualified versions for qualified columns)
       local actual_labels = {}
+      local actual_unqualified = {} -- Map unqualified name -> full qualified name
       for _, item in ipairs(actual_items) do
         actual_labels[item.label] = true
+        -- Also store unqualified version (part after last dot)
+        local unqualified = item.label:match("%.([^%.]+)$")
+        if unqualified then
+          actual_unqualified[unqualified] = true
+        end
       end
 
-      -- Check all includes are present
+      -- Check all includes are present (match both qualified and unqualified)
       for _, inc_label in ipairs(includes) do
-        if not actual_labels[inc_label] then
+        local found = actual_labels[inc_label] or actual_unqualified[inc_label]
+        if not found then
           return false, string.format("Expected included item '%s' not found in results", inc_label)
         end
       end
 
-      -- Check all excludes are absent
+      -- Check all excludes are absent (check both qualified and unqualified)
       for _, exc_label in ipairs(excludes) do
-        if actual_labels[exc_label] then
+        local found = actual_labels[exc_label] or actual_unqualified[exc_label]
+        if found then
           return false, string.format("Expected excluded item '%s' found in results", exc_label)
         end
       end
@@ -415,10 +758,28 @@ end
 ---@return boolean passed Whether test passed
 ---@return string? error Error message if failed
 function UnitRunner._run_provider_test(test)
-  -- Load the TablesProvider (add other providers when available)
-  local ok, TablesProvider = pcall(require, "ssns.completion.providers.tables")
+  -- Determine which provider to use based on test.provider field
+  local provider_name = test.provider or "tables"
+  local provider_module_map = {
+    tables = "ssns.completion.providers.tables",
+    columns = "ssns.completion.providers.columns",
+    joins = "ssns.completion.providers.joins",
+    keywords = "ssns.completion.providers.keywords",
+    parameters = "ssns.completion.providers.parameters",
+    procedures = "ssns.completion.providers.procedures",
+    functions = "ssns.completion.providers.functions",
+    schemas = "ssns.completion.providers.schemas",
+    databases = "ssns.completion.providers.databases",
+  }
+
+  local module_path = provider_module_map[provider_name]
+  if not module_path then
+    return nil, false, "Unknown provider: " .. tostring(provider_name)
+  end
+
+  local ok, Provider = pcall(require, module_path)
   if not ok then
-    return nil, false, "Failed to load TablesProvider: " .. tostring(TablesProvider)
+    return nil, false, "Failed to load provider " .. provider_name .. ": " .. tostring(Provider)
   end
 
   -- Parse test input to extract SQL and cursor position
@@ -452,7 +813,34 @@ function UnitRunner._run_provider_test(test)
   local mock_server = {
     is_connected = function() return true end,
     name = test.context.connection.server or "localhost",
+    get_db_type = function() return "sqlserver" end,
+    get_databases = function()
+      return {
+        { name = "vim_dadbod_test" },
+        { name = "TEST" },
+        { name = "Branch_Prod" },
+        { name = "master" },
+        { name = "tempdb" },
+      }
+    end,
+    get_database = function(self, db_name)
+      -- Return mock database for any database name requested
+      return mock_database
+    end,
   }
+
+  -- Build aliases dict from tables_in_scope if not already provided
+  local sql_context = test.context or {}
+  if sql_context.tables_in_scope and not sql_context.aliases then
+    sql_context.aliases = {}
+    for _, table_info in ipairs(sql_context.tables_in_scope) do
+      local alias = table_info.alias
+      local name = table_info.name or table_info.table
+      if alias and name then
+        sql_context.aliases[alias:lower()] = name
+      end
+    end
+  end
 
   -- Create mock context for the provider
   local mock_ctx = {
@@ -463,11 +851,11 @@ function UnitRunner._run_provider_test(test)
       database = mock_database,
       schema = test.context.connection.schema or "dbo",
     },
-    sql_context = test.context or {},
+    sql_context = sql_context,
   }
 
   -- Call the provider's internal implementation (synchronous)
-  local items_ok, items = pcall(TablesProvider._get_completions_impl, mock_ctx)
+  local items_ok, items = pcall(Provider._get_completions_impl, mock_ctx)
   if not items_ok then
     return nil, false, "Provider execution failed: " .. tostring(items)
   end
