@@ -713,4 +713,60 @@ return {
             matches = { "\n\nINNER JOIN", "WHERE x = 1\n.-AND y = 2", "GROUP BY a,\n", "ORDER BY a DESC" }
         }
     },
+
+    -- DDL options (Phase 4)
+    -- create_table_column_newline tests
+    {
+        id = 8521,
+        type = "formatter",
+        name = "create_table_column_newline true (default) - columns on separate lines",
+        input = "CREATE TABLE users (id INT, name VARCHAR(100), email VARCHAR(255))",
+        opts = { create_table_column_newline = true },
+        expected = {
+            matches = { "id INT,\n.-name VARCHAR", "name VARCHAR%(100%),\n.-email VARCHAR" }
+        }
+    },
+    {
+        id = 8522,
+        type = "formatter",
+        name = "create_table_column_newline false - columns on one line",
+        input = "CREATE TABLE users (id INT, name VARCHAR(100), email VARCHAR(255))",
+        opts = { create_table_column_newline = false },
+        expected = {
+            contains = { "id INT, name VARCHAR(100), email VARCHAR(255)" }
+        }
+    },
+    {
+        id = 8523,
+        type = "formatter",
+        name = "create_table_column_newline with PRIMARY KEY constraint",
+        input = "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))",
+        opts = { create_table_column_newline = true },
+        expected = {
+            matches = { "id INT PRIMARY KEY,\n.-name VARCHAR" }
+        }
+    },
+    {
+        id = 8524,
+        type = "formatter",
+        name = "create_table_column_newline with complex constraints",
+        input = "CREATE TABLE orders (id INT NOT NULL, user_id INT FOREIGN KEY REFERENCES users(id), total DECIMAL(10,2))",
+        opts = { create_table_column_newline = true },
+        expected = {
+            -- Each column on new line, but nested parens in DECIMAL(10,2) don't trigger newlines
+            matches = { "id INT NOT NULL,\n", "user_id INT FOREIGN KEY REFERENCES users%(id%),\n", "total DECIMAL%(10,2%)" }
+        }
+    },
+    {
+        id = 8525,
+        type = "formatter",
+        name = "create_table_column_newline - SELECT after CREATE TABLE",
+        input = "CREATE TABLE temp (a INT, b INT); SELECT * FROM temp",
+        opts = { create_table_column_newline = true },
+        expected = {
+            -- CREATE TABLE has columns on new lines, then SELECT follows normally
+            matches = { "a INT,\n.-b INT" },
+            contains = { "SELECT *", "FROM temp" }
+        }
+    },
 }

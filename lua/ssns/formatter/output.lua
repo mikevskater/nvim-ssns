@@ -467,6 +467,9 @@ function Output.generate(tokens, config)
   local in_insert_columns = false  -- Column list in INSERT
   local in_merge_statement = false
   local in_cte = false  -- Track if we're in CTE section
+  local in_create_table = false  -- Track if we're in CREATE TABLE column definitions
+  local create_table_paren_depth = 0  -- Track parenthesis depth for CREATE TABLE
+  local pending_create = false  -- Track if we saw CREATE (waiting for TABLE/VIEW/etc)
   local pending_join = false -- Track if we're building a compound JOIN keyword
   local join_modifiers = {} -- Track accumulated JOIN modifiers (LEFT, RIGHT, FULL, INNER, OUTER)
   local pending_stacked_indent_newline = false -- For stacked_indent: newline after SELECT
@@ -648,6 +651,17 @@ function Output.generate(tokens, config)
           in_cte = false
         end
         reset_clauses()
+      elseif upper == "CREATE" then
+        -- Track CREATE for DDL statements
+        pending_create = true
+        reset_clauses()
+      elseif upper == "TABLE" and pending_create then
+        -- CREATE TABLE detected - will enter column definitions at next open paren
+        in_create_table = true
+        pending_create = false
+      elseif pending_create then
+        -- CREATE followed by something other than TABLE (VIEW, PROCEDURE, etc.)
+        pending_create = false
       end
 
       -- Track JOIN state
@@ -1098,6 +1112,36 @@ function Output.generate(tokens, config)
       end
     end
 
+    -- Phase 4: CREATE TABLE column newline handling
+    -- Track parenthesis depth for CREATE TABLE
+    if in_create_table then
+      if token.type == "paren_open" then
+        create_table_paren_depth = create_table_paren_depth + 1
+      elseif token.type == "paren_close" then
+        create_table_paren_depth = create_table_paren_depth - 1
+        if create_table_paren_depth <= 0 then
+          -- Exiting CREATE TABLE column definitions
+          in_create_table = false
+          create_table_paren_depth = 0
+        end
+      end
+    end
+
+    -- Phase 4: create_table_column_newline - each column definition on new line
+    if token.type == "comma" and in_create_table and create_table_paren_depth == 1 and config.create_table_column_newline ~= false then
+      local line_text = table.concat(current_line, "")
+      if line_text:match("%S") then
+        table.insert(result, line_text)
+      end
+      current_line = {}
+      local base_indent = token.indent_level or 0
+      local indent = get_indent(config, base_indent + 1)
+      if indent ~= "" then
+        table.insert(current_line, indent)
+      end
+      line_just_started = true  -- Skip space before next token
+    end
+
     -- Handle semicolon - end of statement
     if token.type == "semicolon" then
       local line_text = table.concat(current_line, "")
@@ -1121,6 +1165,9 @@ function Output.generate(tokens, config)
       in_insert_columns = false
       in_merge_statement = false
       in_cte = false
+      in_create_table = false
+      create_table_paren_depth = 0
+      pending_create = false
       pending_join = false
 
       -- Phase 3: blank_line_between_statements
@@ -1165,6 +1212,9 @@ function Output.generate(tokens, config)
       in_insert_columns = false
       in_merge_statement = false
       in_cte = false
+      in_create_table = false
+      create_table_paren_depth = 0
+      pending_create = false
       pending_join = false
 
       -- Phase 3: blank_line_after_go
