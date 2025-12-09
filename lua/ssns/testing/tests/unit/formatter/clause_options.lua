@@ -1201,4 +1201,42 @@ return {
             contains = { "OVER (ORDER BY" }
         }
     },
+
+    -- ============================================
+    -- max_consecutive_blank_lines tests (IDs: 8567-8572)
+    -- ============================================
+    {
+        id = 8567,
+        type = "formatter",
+        name = "max_consecutive_blank_lines 0 - no blank lines between statements",
+        input = "SELECT * FROM users; SELECT * FROM orders;",
+        opts = { max_consecutive_blank_lines = 0 },
+        expected = {
+            -- No blank lines between statements
+            matches = { "users;\nSELECT" }
+        }
+    },
+    {
+        id = 8568,
+        type = "formatter",
+        name = "max_consecutive_blank_lines 1 - limits to 1 blank line",
+        input = "SELECT * FROM users; SELECT * FROM orders;",
+        opts = { max_consecutive_blank_lines = 1, blank_line_between_statements = 3 },
+        expected = {
+            -- Should be limited to 1 blank line even though 3 requested
+            matches = { "users;\n\nSELECT" },
+            not_matches = { "users;\n\n\nSELECT" }
+        }
+    },
+    {
+        id = 8569,
+        type = "formatter",
+        name = "max_consecutive_blank_lines default (2)",
+        input = "SELECT * FROM users; SELECT * FROM orders;",
+        opts = { blank_line_between_statements = 5 },
+        expected = {
+            -- Default max is 2, so 5 requested should be limited to 2
+            matches = { "users;\n\n\nSELECT" }
+        }
+    },
 }

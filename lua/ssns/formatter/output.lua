@@ -1703,6 +1703,28 @@ function Output.generate(tokens, config)
   -- Post-process: apply FROM alias alignment if enabled
   result = align_from_aliases(result, config)
 
+  -- Post-process: limit consecutive blank lines
+  local max_blank = config.max_consecutive_blank_lines
+  if max_blank and max_blank >= 0 then
+    local filtered = {}
+    local blank_count = 0
+    for _, line in ipairs(result) do
+      if line:match("^%s*$") then
+        -- This is a blank line
+        blank_count = blank_count + 1
+        if blank_count <= max_blank then
+          table.insert(filtered, line)
+        end
+        -- If over the limit, skip this blank line
+      else
+        -- Non-blank line
+        blank_count = 0
+        table.insert(filtered, line)
+      end
+    end
+    result = filtered
+  end
+
   return table.concat(result, "\n")
 end
 
