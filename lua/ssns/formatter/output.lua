@@ -468,9 +468,11 @@ function Output.generate(tokens, config)
   local in_merge_statement = false
   local in_cte = false  -- Track if we're in CTE section
   local pending_join = false -- Track if we're building a compound JOIN keyword
+  local join_modifiers = {} -- Track accumulated JOIN modifiers (LEFT, RIGHT, FULL, INNER, OUTER)
   local pending_stacked_indent_newline = false -- For stacked_indent: newline after SELECT
   local pending_where_stacked_indent_newline = false -- For where stacked_indent: newline after WHERE
   local line_just_started = false -- Track if we just started a new line with indent
+  local skip_token = false -- Flag to skip outputting current token (for join_keyword_style)
 
   -- Blank line tracking (Phase 3)
   local last_line_was_blank = false
@@ -674,6 +676,8 @@ function Output.generate(tokens, config)
         if not pending_join then
           needs_newline = true
           current_indent = base_indent
+          -- Reset join modifiers for new join clause
+          join_modifiers = {}
 
           -- Phase 1: empty_line_before_join option
           if config.empty_line_before_join then
@@ -681,11 +685,26 @@ function Output.generate(tokens, config)
           end
         end
         pending_join = true
+        -- Track this modifier for join_keyword_style processing
+        table.insert(join_modifiers, upper)
+
+        -- Phase 1: join_keyword_style - skip INNER or OUTER in short mode
+        -- "preserve" (default) keeps original, "full" expands, "short" abbreviates
+        local join_style = config.join_keyword_style or "preserve"
+        if join_style == "short" then
+          if upper == "INNER" then
+            skip_token = true  -- Skip INNER in short mode
+          elseif upper == "OUTER" then
+            skip_token = true  -- Skip OUTER in short mode
+          end
+        end
       elseif is_join_keyword(upper) then
         -- This is JOIN - only add newline if no modifier preceded it
         if not pending_join then
           needs_newline = true
           current_indent = base_indent
+          -- Reset join modifiers for standalone JOIN
+          join_modifiers = {}
 
           -- Phase 1: empty_line_before_join option
           if config.empty_line_before_join then
@@ -711,6 +730,20 @@ function Output.generate(tokens, config)
             current_indent = base_indent
           end
           -- If delete_from_newline is false, FROM stays on same line as DELETE
+        -- Special handling for FROM clause - controlled by from_newline option
+        elseif upper == "FROM" then
+          if config.from_newline ~= false then  -- Default is true
+            needs_newline = true
+            current_indent = base_indent
+          end
+          -- If from_newline is false, FROM stays on same line
+        -- Special handling for WHERE clause - controlled by where_newline option
+        elseif upper == "WHERE" then
+          if config.where_newline ~= false then  -- Default is true
+            needs_newline = true
+            current_indent = base_indent
+          end
+          -- If where_newline is false, WHERE stays on same line
         else
           needs_newline = true
           current_indent = base_indent
@@ -903,8 +936,43 @@ function Output.generate(tokens, config)
     end
 
     -- Add the token text with proper casing (Phase 3)
-    local formatted_text = apply_token_casing(token, config)
-    table.insert(current_line, formatted_text)
+    -- But first check if we should skip this token (for join_keyword_style)
+    if skip_token then
+      -- Reset skip flag and don't output this token
+      skip_token = false
+    else
+      local formatted_text = apply_token_casing(token, config)
+
+      -- Phase 1: join_keyword_style "full" - insert OUTER before JOIN if needed
+      -- "preserve" (default) keeps original, "full" expands, "short" abbreviates
+      local join_style = config.join_keyword_style or "preserve"
+      if is_join_keyword(string.upper(token.text)) and join_style == "full" then
+        -- Check what modifiers we have
+        local has_outer = false
+        local has_inner = false
+        local has_left_right_full = false
+
+        for _, mod in ipairs(join_modifiers) do
+          if mod == "OUTER" then has_outer = true end
+          if mod == "INNER" then has_inner = true end
+          if mod == "LEFT" or mod == "RIGHT" or mod == "FULL" then has_left_right_full = true end
+        end
+
+        -- For standalone JOIN (no modifiers), add INNER
+        if #join_modifiers == 0 then
+          local case_fn = (config.keyword_case == "lower") and string.lower or string.upper
+          table.insert(current_line, case_fn("INNER") .. " ")
+        -- For LEFT/RIGHT/FULL JOIN without OUTER, add OUTER
+        elseif has_left_right_full and not has_outer then
+          local case_fn = (config.keyword_case == "lower") and string.lower or string.upper
+          table.insert(current_line, case_fn("OUTER") .. " ")
+        end
+        -- Reset join_modifiers after processing JOIN
+        join_modifiers = {}
+      end
+
+      table.insert(current_line, formatted_text)
+    end
 
     -- Phase 1: select_list_style stacked_indent - set flag to add newline before first column
     local select_list_style = config.select_list_style or "stacked"

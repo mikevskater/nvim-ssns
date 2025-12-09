@@ -218,7 +218,214 @@ return {
         }
     },
 
-    -- WHERE clause options
+    -- join_keyword_style tests
+    {
+        id = 84651,
+        type = "formatter",
+        name = "join_keyword_style full - JOIN becomes INNER JOIN",
+        input = "SELECT * FROM users u JOIN orders o ON u.id = o.user_id",
+        opts = { join_keyword_style = "full" },
+        expected = {
+            contains = { "INNER JOIN orders" }
+        }
+    },
+    {
+        id = 84652,
+        type = "formatter",
+        name = "join_keyword_style full - LEFT JOIN becomes LEFT OUTER JOIN",
+        input = "SELECT * FROM users u LEFT JOIN orders o ON u.id = o.user_id",
+        opts = { join_keyword_style = "full" },
+        expected = {
+            contains = { "LEFT OUTER JOIN orders" }
+        }
+    },
+    {
+        id = 84653,
+        type = "formatter",
+        name = "join_keyword_style full - RIGHT JOIN becomes RIGHT OUTER JOIN",
+        input = "SELECT * FROM users u RIGHT JOIN orders o ON u.id = o.user_id",
+        opts = { join_keyword_style = "full" },
+        expected = {
+            contains = { "RIGHT OUTER JOIN orders" }
+        }
+    },
+    {
+        id = 84654,
+        type = "formatter",
+        name = "join_keyword_style full - FULL JOIN becomes FULL OUTER JOIN",
+        input = "SELECT * FROM users u FULL JOIN orders o ON u.id = o.user_id",
+        opts = { join_keyword_style = "full" },
+        expected = {
+            contains = { "FULL OUTER JOIN orders" }
+        }
+    },
+    {
+        id = 84655,
+        type = "formatter",
+        name = "join_keyword_style full - INNER JOIN stays INNER JOIN",
+        input = "SELECT * FROM users u INNER JOIN orders o ON u.id = o.user_id",
+        opts = { join_keyword_style = "full" },
+        expected = {
+            contains = { "INNER JOIN orders" }
+        }
+    },
+    {
+        id = 84656,
+        type = "formatter",
+        name = "join_keyword_style short - INNER JOIN becomes JOIN",
+        input = "SELECT * FROM users u INNER JOIN orders o ON u.id = o.user_id",
+        opts = { join_keyword_style = "short" },
+        expected = {
+            contains = { "JOIN orders" },
+            not_contains = { "INNER JOIN" }
+        }
+    },
+    {
+        id = 84657,
+        type = "formatter",
+        name = "join_keyword_style short - LEFT OUTER JOIN becomes LEFT JOIN",
+        input = "SELECT * FROM users u LEFT OUTER JOIN orders o ON u.id = o.user_id",
+        opts = { join_keyword_style = "short" },
+        expected = {
+            contains = { "LEFT JOIN orders" },
+            not_contains = { "LEFT OUTER JOIN" }
+        }
+    },
+    {
+        id = 84658,
+        type = "formatter",
+        name = "join_keyword_style short - RIGHT OUTER JOIN becomes RIGHT JOIN",
+        input = "SELECT * FROM users u RIGHT OUTER JOIN orders o ON u.id = o.user_id",
+        opts = { join_keyword_style = "short" },
+        expected = {
+            contains = { "RIGHT JOIN orders" },
+            not_contains = { "RIGHT OUTER JOIN" }
+        }
+    },
+    {
+        id = 84659,
+        type = "formatter",
+        name = "join_keyword_style short - FULL OUTER JOIN becomes FULL JOIN",
+        input = "SELECT * FROM users u FULL OUTER JOIN orders o ON u.id = o.user_id",
+        opts = { join_keyword_style = "short" },
+        expected = {
+            contains = { "FULL JOIN orders" },
+            not_contains = { "FULL OUTER JOIN" }
+        }
+    },
+    {
+        id = 846591,
+        type = "formatter",
+        name = "join_keyword_style short - plain JOIN stays JOIN",
+        input = "SELECT * FROM users u JOIN orders o ON u.id = o.user_id",
+        opts = { join_keyword_style = "short" },
+        expected = {
+            contains = { "JOIN orders" },
+            not_contains = { "INNER" }
+        }
+    },
+    {
+        id = 846592,
+        type = "formatter",
+        name = "join_keyword_style full - CROSS JOIN stays unchanged",
+        input = "SELECT * FROM users u CROSS JOIN orders o",
+        opts = { join_keyword_style = "full" },
+        expected = {
+            contains = { "CROSS JOIN orders" }
+        }
+    },
+
+    -- FROM clause options
+    {
+        id = 8466,
+        type = "formatter",
+        name = "from_newline true (default) - FROM on new line",
+        input = "SELECT id, name FROM users",
+        opts = { from_newline = true },
+        expected = {
+            matches = { "SELECT.-\nFROM" }
+        }
+    },
+    {
+        id = 8467,
+        type = "formatter",
+        name = "from_newline false - FROM on same line",
+        input = "SELECT id, name FROM users",
+        opts = { from_newline = false },
+        expected = {
+            contains = { "name FROM users" }
+        }
+    },
+    {
+        id = 8468,
+        type = "formatter",
+        name = "from_newline false with multiple columns",
+        input = "SELECT a, b, c FROM t",
+        opts = { from_newline = false, select_list_style = "inline" },
+        expected = {
+            -- Everything on one line when both options set
+            contains = { "SELECT a, b, c FROM t" }
+        }
+    },
+    {
+        id = 8469,
+        type = "formatter",
+        name = "from_newline false still keeps WHERE on new line",
+        input = "SELECT * FROM users WHERE active = 1",
+        opts = { from_newline = false },
+        expected = {
+            -- FROM on same line as SELECT, but WHERE on new line
+            contains = { "SELECT * FROM users" },
+            matches = { "\nWHERE" }
+        }
+    },
+
+    -- WHERE clause newline options
+    {
+        id = 84691,
+        type = "formatter",
+        name = "where_newline true (default) - WHERE on new line",
+        input = "SELECT * FROM users WHERE active = 1",
+        opts = { where_newline = true },
+        expected = {
+            matches = { "users\nWHERE" }
+        }
+    },
+    {
+        id = 84692,
+        type = "formatter",
+        name = "where_newline false - WHERE on same line",
+        input = "SELECT * FROM users WHERE active = 1",
+        opts = { where_newline = false },
+        expected = {
+            contains = { "users WHERE active" }
+        }
+    },
+    {
+        id = 84693,
+        type = "formatter",
+        name = "where_newline false with from_newline false - all on one line",
+        input = "SELECT id FROM t WHERE x = 1",
+        opts = { where_newline = false, from_newline = false, select_list_style = "inline" },
+        expected = {
+            -- Everything on one line
+            contains = { "SELECT id FROM t WHERE x = 1" }
+        }
+    },
+    {
+        id = 84694,
+        type = "formatter",
+        name = "where_newline false still keeps AND/OR on new lines",
+        input = "SELECT * FROM users WHERE a = 1 AND b = 2",
+        opts = { where_newline = false, where_condition_style = "stacked" },
+        expected = {
+            -- WHERE on same line, but AND on new line
+            contains = { "users WHERE a = 1" },
+            matches = { "\n.-AND b = 2" }
+        }
+    },
+
+    -- WHERE clause condition options
     {
         id = 8470,
         type = "formatter",
