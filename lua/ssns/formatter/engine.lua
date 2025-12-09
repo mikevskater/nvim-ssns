@@ -218,11 +218,103 @@ end
 ---Format SQL text with error recovery
 ---@param sql string The SQL text to format
 ---@param config FormatterConfig The formatter configuration
+---Default formatter configuration values
+---These are applied when config values are nil
+local DEFAULT_CONFIG = {
+  -- Basic formatting
+  enabled = true,
+  indent_style = "space",
+  indent_size = 4,
+  keyword_case = "upper",
+  max_line_length = 120,
+  newline_before_clause = true,
+  align_aliases = false,
+  align_columns = false,
+  comma_position = "trailing",
+  and_or_position = "leading",
+  operator_spacing = true,
+  parenthesis_spacing = false,
+  join_on_same_line = false,
+  -- Phase 1: SELECT/FROM/WHERE/JOIN
+  select_distinct_newline = false,
+  select_top_newline = false,
+  select_into_newline = false,
+  empty_line_before_join = false,
+  on_and_position = "leading",
+  where_and_or_indent = 1,
+  -- Phase 2: DML/Grouping
+  update_set_style = "stacked",
+  group_by_style = "inline",
+  order_by_style = "inline",
+  insert_columns_style = "inline",
+  insert_values_style = "inline",
+  insert_multi_row_style = "stacked",
+  output_clause_newline = true,
+  merge_when_newline = true,
+  -- Phase 2: CTE
+  cte_as_position = "same_line",
+  cte_parenthesis_style = "same_line",
+  cte_separator_newline = true,
+  cte_indent = 1,
+  -- Phase 3: Casing
+  function_case = "upper",
+  datatype_case = "upper",
+  identifier_case = "preserve",
+  alias_case = "preserve",
+  -- Phase 3: Spacing
+  comma_spacing = "after",
+  semicolon_spacing = false,
+  bracket_spacing = false,
+  equals_spacing = true,
+  comparison_spacing = true,
+  concatenation_spacing = true,
+  -- Phase 3: Blank lines
+  blank_line_before_clause = false,
+  blank_line_between_statements = 1,
+  blank_line_after_go = 1,
+  collapse_blank_lines = true,
+  -- Phase 4: Expressions
+  case_style = "stacked",
+  case_then_position = "same_line",
+  boolean_operator_newline = false,
+  -- Phase 5: Advanced
+  union_indent = 0,
+  continuation_indent = 1,
+}
+
+---Merge provided config with defaults
+---@param config table? Provided config
+---@return table Merged config with defaults applied
+local function merge_config_with_defaults(config)
+  if not config then
+    return DEFAULT_CONFIG
+  end
+
+  local merged = {}
+  for k, v in pairs(DEFAULT_CONFIG) do
+    if config[k] ~= nil then
+      merged[k] = config[k]
+    else
+      merged[k] = v
+    end
+  end
+  -- Also copy any additional keys from config that aren't in defaults
+  for k, v in pairs(config) do
+    if merged[k] == nil then
+      merged[k] = v
+    end
+  end
+  return merged
+end
+
 ---@param opts? {dialect?: string, skip_stats?: boolean} Optional formatting options
 ---@return string formatted The formatted SQL text
 function Engine.format(sql, config, opts)
   opts = opts or {}
   local skip_stats = opts.skip_stats
+
+  -- Merge config with defaults to ensure all values are present
+  config = merge_config_with_defaults(config)
 
   -- Handle empty input
   if not sql or sql == "" then
