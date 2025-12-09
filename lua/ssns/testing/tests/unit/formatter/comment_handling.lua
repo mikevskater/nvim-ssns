@@ -262,4 +262,233 @@ return {
             contains = { "-- Primary key", "-- User's full name", "-- Contact email" }
         }
     },
+
+    -- =========================================================================
+    -- Inline Comment Alignment (IDs: 8900-8915)
+    -- =========================================================================
+
+    -- Basic inline comment alignment
+    {
+        id = 8900,
+        type = "formatter",
+        name = "Align inline comments - basic SELECT columns",
+        input = "SELECT\n    id, -- Primary key\n    name, -- User name\n    email -- Contact\nFROM users",
+        config = {
+            inline_comment_align = true,
+            select_list_style = "stacked"
+        },
+        expected = {
+            -- All comments should align to the same column
+            -- id is 2 chars, name is 4 chars, email is 5 chars
+            -- Comments should align after longest item (email,)
+            pattern = "id,%s+-- Primary key"
+        }
+    },
+    {
+        id = 8901,
+        type = "formatter",
+        name = "Align inline comments - disabled by default",
+        input = "SELECT\n    id, -- Primary key\n    name, -- User name\n    email -- Contact\nFROM users",
+        config = {
+            inline_comment_align = false,
+            select_list_style = "stacked"
+        },
+        expected = {
+            -- Comments should NOT be aligned when disabled
+            contains = { "-- Primary key", "-- User name", "-- Contact" }
+        }
+    },
+    {
+        id = 8902,
+        type = "formatter",
+        name = "Align inline comments - varying column lengths",
+        input = "SELECT\n    a, -- Short\n    very_long_column_name, -- Long column\n    b -- Another short\nFROM t",
+        config = {
+            inline_comment_align = true,
+            select_list_style = "stacked"
+        },
+        expected = {
+            -- Comments should align after longest column (very_long_column_name,)
+            pattern = "a,%s+-- Short"
+        }
+    },
+    {
+        id = 8903,
+        type = "formatter",
+        name = "Align inline comments - SET clause",
+        input = "UPDATE users SET\n    id = 1, -- PK\n    name = 'test', -- Name value\n    email = 'a@b.com' -- Email\nWHERE x = 1",
+        config = {
+            inline_comment_align = true,
+            update_set_style = "stacked"
+        },
+        expected = {
+            -- Comments in SET clause should align
+            pattern = "id = 1,%s+-- PK"
+        }
+    },
+    {
+        id = 8904,
+        type = "formatter",
+        name = "Align inline comments - mixed with non-commented lines",
+        input = "SELECT\n    id, -- Has comment\n    name,\n    email, -- Also has comment\n    status\nFROM users",
+        config = {
+            inline_comment_align = true,
+            select_list_style = "stacked"
+        },
+        expected = {
+            -- Only lines with comments participate in alignment
+            contains = { "-- Has comment", "-- Also has comment" }
+        }
+    },
+    {
+        id = 8905,
+        type = "formatter",
+        name = "Align inline comments - FROM clause with aliases",
+        input = "SELECT * FROM users u -- Users table\nJOIN orders o -- Orders table\n    ON u.id = o.user_id",
+        config = {
+            inline_comment_align = true
+        },
+        expected = {
+            -- Comments after table aliases should align
+            contains = { "-- Users table", "-- Orders table" }
+        }
+    },
+    {
+        id = 8906,
+        type = "formatter",
+        name = "Align inline comments - block comments ignored",
+        input = "SELECT\n    id, /* block */ -- line comment\n    name -- another\nFROM users",
+        config = {
+            inline_comment_align = true,
+            select_list_style = "stacked"
+        },
+        expected = {
+            -- Only line comments (--) should be aligned
+            contains = { "/* block */", "-- line comment", "-- another" }
+        }
+    },
+    {
+        id = 8907,
+        type = "formatter",
+        name = "Align inline comments - preserves comment content",
+        input = "SELECT\n    x, -- Comment with @param and special chars!?\n    y -- Normal\nFROM t",
+        config = {
+            inline_comment_align = true,
+            select_list_style = "stacked"
+        },
+        expected = {
+            -- Comment content should be preserved exactly
+            contains = { "-- Comment with @param and special chars!?", "-- Normal" }
+        }
+    },
+    {
+        id = 8908,
+        type = "formatter",
+        name = "Align inline comments - minimum padding added",
+        input = "SELECT\n    short, -- A\n    x -- B\nFROM t",
+        config = {
+            inline_comment_align = true,
+            select_list_style = "stacked"
+        },
+        expected = {
+            -- Shorter line (x) should have padding, longer line (short) should have minimal space
+            pattern = "x,%s+-- B"
+        }
+    },
+    {
+        id = 8909,
+        type = "formatter",
+        name = "Align inline comments - single comment no change",
+        input = "SELECT id, -- Only comment\n    name\nFROM users",
+        config = {
+            inline_comment_align = true,
+            select_list_style = "stacked"
+        },
+        expected = {
+            -- Single inline comment should still work (nothing to align with)
+            contains = { "-- Only comment" }
+        }
+    },
+
+    -- Edge cases
+    {
+        id = 8910,
+        type = "formatter",
+        name = "Align inline comments - empty input",
+        input = "SELECT * FROM users",
+        config = {
+            inline_comment_align = true
+        },
+        expected = {
+            -- No comments = no alignment needed
+            not_contains = { "--" }
+        }
+    },
+    {
+        id = 8911,
+        type = "formatter",
+        name = "Align inline comments - only standalone comments",
+        input = "-- Standalone comment\nSELECT * FROM users\n-- Another standalone",
+        config = {
+            inline_comment_align = true
+        },
+        expected = {
+            -- Standalone comments (on their own line) should not be aligned
+            contains = { "-- Standalone comment", "-- Another standalone" }
+        }
+    },
+    {
+        id = 8912,
+        type = "formatter",
+        name = "Align inline comments - WHERE conditions",
+        input = "SELECT * FROM users\nWHERE id = 1 -- Filter by ID\n    AND name = 'test' -- Filter by name\n    AND active = 1 -- Only active",
+        config = {
+            inline_comment_align = true,
+            where_condition_style = "stacked"
+        },
+        expected = {
+            -- Comments on WHERE conditions should align
+            contains = { "-- Filter by ID", "-- Filter by name", "-- Only active" }
+        }
+    },
+    {
+        id = 8913,
+        type = "formatter",
+        name = "Align inline comments - multiple statements",
+        input = "SELECT id -- First\nFROM t1;\n\nSELECT name -- Second\nFROM t2",
+        config = {
+            inline_comment_align = true
+        },
+        expected = {
+            -- Comments in separate statements should be independent
+            contains = { "-- First", "-- Second" }
+        }
+    },
+    {
+        id = 8914,
+        type = "formatter",
+        name = "Align inline comments - CTE",
+        input = "WITH cte AS ( -- CTE definition\n    SELECT id -- Column\n    FROM t\n)\nSELECT * FROM cte",
+        config = {
+            inline_comment_align = true
+        },
+        expected = {
+            -- Comments in CTE should be preserved
+            contains = { "-- CTE definition", "-- Column" }
+        }
+    },
+    {
+        id = 8915,
+        type = "formatter",
+        name = "Align inline comments - INSERT columns",
+        input = "INSERT INTO users (id, -- PK\n    name, -- Name\n    email) -- Email\nVALUES (1, 'x', 'y')",
+        config = {
+            inline_comment_align = true,
+            insert_columns_style = "stacked"
+        },
+        expected = {
+            -- Comments in INSERT column list should align
+            contains = { "-- PK", "-- Name", "-- Email" }
+        }
+    },
 }

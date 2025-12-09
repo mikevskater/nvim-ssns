@@ -3,8 +3,9 @@
 ---This pass runs after structure/spacing passes and adds padding for alignment.
 ---
 ---Handles:
----  from_alias_align: true   - Align table aliases in FROM/JOIN clauses
----  update_set_align: true   - Align equals signs in SET clause
+---  from_alias_align: true      - Align table aliases in FROM/JOIN clauses
+---  update_set_align: true      - Align equals signs in SET clause
+---  inline_comment_align: true  - Align inline comments (-- style) to same column
 ---
 ---Annotations added:
 ---  token.align_padding      - Number of spaces to add before token for alignment
@@ -188,6 +189,73 @@ local function find_set_columns(tokens, config)
   return columns
 end
 
+---Check if token is a line comment (-- style)
+---@param token table
+---@return boolean
+local function is_line_comment(token)
+  return token.type == "line_comment"
+end
+
+---Find inline line comments and calculate content length before each
+---An inline comment is a line comment that follows code on the same line.
+---We detect this by checking if there's no newline_before annotation on the comment.
+---@param tokens table[] Array of tokens
+---@param config table Formatter config
+---@return table[] Array of {comment_idx, content_len} - comment index and length of content before it
+local function find_inline_comments(tokens, config)
+  local comments = {}
+
+  -- Track content length on current line
+  local current_line_len = 0
+  local last_newline_idx = 0
+
+  for i, token in ipairs(tokens) do
+    -- Skip whitespace tokens (we handle spacing via annotations)
+    if token.type == "whitespace" or token.type == "newline" then
+      goto continue
+    end
+
+    -- Check for newline_before - resets line tracking
+    if token.newline_before then
+      current_line_len = 0
+      last_newline_idx = i
+
+      -- Add indent to line length
+      if token.indent_level and token.indent_level > 0 then
+        local indent_size = config.indent_size or 4
+        current_line_len = token.indent_level * indent_size
+      end
+    end
+
+    -- Check if this is an inline line comment
+    if is_line_comment(token) then
+      -- A comment is inline if it doesn't start on a new line
+      -- and there was content before it on this line
+      if not token.newline_before and current_line_len > 0 then
+        table.insert(comments, {
+          comment_idx = i,
+          content_len = current_line_len,
+        })
+      end
+    else
+      -- Add token length to current line
+      -- Include space_before if present
+      if token.space_before and current_line_len > 0 then
+        current_line_len = current_line_len + 1
+      end
+      -- Add align_padding if already set by other alignment
+      if token.align_padding then
+        current_line_len = current_line_len + token.align_padding
+      end
+      current_line_len = current_line_len + text_length(token.text)
+    end
+
+    ::continue::
+  end
+
+  return comments
+end
+
 -- =============================================================================
 -- Pass Implementation
 -- =============================================================================
@@ -251,6 +319,30 @@ function AlignPass.run(tokens, config)
     end
   end
 
+  -- Inline comment alignment
+  -- Aligns line comments (-- style) that appear after code on the same line
+  if config.inline_comment_align then
+    local comments = find_inline_comments(tokens, config)
+
+    if #comments > 1 then
+      -- Find max content length before comments
+      local max_len = 0
+      for _, info in ipairs(comments) do
+        if info.content_len > max_len then
+          max_len = info.content_len
+        end
+      end
+
+      -- Apply padding to comment tokens
+      for _, info in ipairs(comments) do
+        local padding = max_len - info.content_len
+        if padding > 0 then
+          tokens[info.comment_idx].align_padding = (tokens[info.comment_idx].align_padding or 0) + padding
+        end
+      end
+    end
+  end
+
   return tokens
 end
 
@@ -260,7 +352,7 @@ function AlignPass.info()
   return {
     name = "align",
     order = 8,
-    description = "Handle alignment features (from_alias_align, update_set_align)",
+    description = "Handle alignment features (from_alias_align, update_set_align, inline_comment_align)",
     annotations = {
       "align_padding",
     },
