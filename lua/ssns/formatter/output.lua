@@ -462,6 +462,90 @@ local function flush_set_align_buffer(buffer, result, max_width, config)
   end
 end
 
+---Parse a FROM/JOIN line to extract components
+---@param line string The line to parse
+---@return string|nil indent Leading whitespace
+---@return string|nil keyword FROM or JOIN keyword with trailing space
+---@return string|nil table_name Table name (possibly schema-qualified)
+---@return string|nil as_keyword AS keyword if present (with space)
+---@return string|nil alias Table alias
+---@return string|nil rest Remainder of line (e.g., ON clause)
+local function parse_from_join_line(line)
+  -- Try JOIN patterns first (INNER JOIN, LEFT JOIN, RIGHT JOIN, CROSS JOIN, JOIN)
+  -- Pattern with AS keyword
+  local indent, keyword, table_name, as_kw, alias, rest = line:match("^(%s*)([A-Z]*%s*JOIN%s+)([%w_.]+)%s+([Aa][Ss])%s+([%w_]+)(.*)$")
+  if indent then
+    return indent, keyword, table_name, as_kw .. " ", alias, rest
+  end
+
+  -- JOIN pattern without AS keyword
+  indent, keyword, table_name, alias, rest = line:match("^(%s*)([A-Z]*%s*JOIN%s+)([%w_.]+)%s+([%w_]+)(.*)$")
+  if indent then
+    return indent, keyword, table_name, nil, alias, rest
+  end
+
+  -- Try FROM patterns
+  -- Pattern with AS keyword
+  indent, keyword, table_name, as_kw, alias, rest = line:match("^(%s*)(FROM%s+)([%w_.]+)%s+([Aa][Ss])%s+([%w_]+)(.*)$")
+  if indent then
+    return indent, keyword, table_name, as_kw .. " ", alias, rest
+  end
+
+  -- FROM pattern without AS keyword
+  indent, keyword, table_name, alias, rest = line:match("^(%s*)(FROM%s+)([%w_.]+)%s+([%w_]+)(.*)$")
+  if indent then
+    return indent, keyword, table_name, nil, alias, rest
+  end
+
+  return nil
+end
+
+---Post-process result lines to align FROM/JOIN table aliases
+---@param result table[] Result lines array
+---@param config FormatterConfig Formatter configuration
+---@return table[] Modified result lines
+local function align_from_aliases(result, config)
+  if not config.from_alias_align then
+    return result
+  end
+
+  -- First pass: find all FROM/JOIN lines and max table name width
+  local max_table_width = 0
+  local from_join_info = {} -- Store parsed info for each matching line
+
+  for i, line in ipairs(result) do
+    local indent, keyword, table_name, as_kw, alias, rest = parse_from_join_line(line)
+    if table_name and alias then
+      from_join_info[i] = {
+        indent = indent,
+        keyword = keyword,
+        table_name = table_name,
+        as_keyword = as_kw,
+        alias = alias,
+        rest = rest or ""
+      }
+      if #table_name > max_table_width then
+        max_table_width = #table_name
+      end
+    end
+  end
+
+  -- Second pass: apply alignment padding
+  for i, info in pairs(from_join_info) do
+    local padding = string.rep(" ", max_table_width - #info.table_name + 1) -- +1 for minimum space
+    local new_line = info.indent .. info.keyword .. info.table_name .. padding
+    if info.as_keyword then
+      new_line = new_line .. info.as_keyword .. info.alias
+    else
+      new_line = new_line .. info.alias
+    end
+    new_line = new_line .. info.rest
+    result[i] = new_line
+  end
+
+  return result
+end
+
 ---Generate formatted output from processed tokens
 ---@param tokens table[] Processed tokens with formatting metadata
 ---@param config FormatterConfig Formatter configuration
@@ -1503,6 +1587,9 @@ function Output.generate(tokens, config)
       table.insert(result, line_text)
     end
   end
+
+  -- Post-process: apply FROM alias alignment if enabled
+  result = align_from_aliases(result, config)
 
   return table.concat(result, "\n")
 end

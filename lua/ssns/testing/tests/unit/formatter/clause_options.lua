@@ -836,4 +836,72 @@ return {
             matches = { "IN %(1,\n.-GETDATE%(%),\n.-3%)" }
         }
     },
+
+    -- from_alias_align tests (IDs: 8530-8535)
+    {
+        id = 8530,
+        type = "formatter",
+        name = "from_alias_align true - basic alignment",
+        input = "SELECT * FROM users u JOIN orders o ON u.id = o.user_id",
+        opts = { from_alias_align = true },
+        expected = {
+            -- users (5 chars) and orders (6 chars) - users gets 1 space padding
+            contains = { "users  u", "orders o" }
+        }
+    },
+    {
+        id = 8531,
+        type = "formatter",
+        name = "from_alias_align true - multiple joins",
+        input = "SELECT * FROM users u JOIN orders o ON u.id = o.user_id JOIN order_items oi ON o.id = oi.order_id",
+        opts = { from_alias_align = true },
+        expected = {
+            -- users (5), orders (6), order_items (11) - align to 11
+            contains = { "users       u", "orders      o", "order_items oi" }
+        }
+    },
+    {
+        id = 8532,
+        type = "formatter",
+        name = "from_alias_align false - no alignment",
+        input = "SELECT * FROM users u JOIN orders o ON u.id = o.user_id",
+        opts = { from_alias_align = false },
+        expected = {
+            -- Standard spacing
+            contains = { "users u", "orders o" }
+        }
+    },
+    {
+        id = 8533,
+        type = "formatter",
+        name = "from_alias_align with schema-qualified tables",
+        input = "SELECT * FROM dbo.users u JOIN dbo.orders o ON u.id = o.user_id",
+        opts = { from_alias_align = true },
+        expected = {
+            -- dbo.users (9 chars) and dbo.orders (10 chars)
+            contains = { "dbo.users  u", "dbo.orders o" }
+        }
+    },
+    {
+        id = 8534,
+        type = "formatter",
+        name = "from_alias_align with AS keyword",
+        input = "SELECT * FROM users AS u JOIN orders AS o ON u.id = o.user_id",
+        opts = { from_alias_align = true },
+        expected = {
+            -- AS keyword should be included in alignment
+            contains = { "users  AS u", "orders AS o" }
+        }
+    },
+    {
+        id = 8535,
+        type = "formatter",
+        name = "from_alias_align with LEFT/RIGHT joins",
+        input = "SELECT * FROM users u LEFT JOIN orders o ON u.id = o.user_id RIGHT JOIN payments p ON o.id = p.order_id",
+        opts = { from_alias_align = true },
+        expected = {
+            -- users (5), orders (6), payments (8)
+            contains = { "users    u", "orders   o", "payments p" }
+        }
+    },
 }
