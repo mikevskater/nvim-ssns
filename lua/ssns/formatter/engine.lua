@@ -136,6 +136,8 @@ local function create_state()
     insert_expecting_table = false,  -- Expecting table name after INSERT INTO
     in_values = false,         -- Currently inside VALUES clause
     in_update = false,         -- Currently inside UPDATE statement
+    in_delete = false,         -- Currently inside DELETE statement
+    delete_expecting_alias_or_from = false,  -- After DELETE, expecting alias or FROM
   }
 end
 
@@ -289,6 +291,9 @@ local DEFAULT_CONFIG = {
   -- Indentation
   subquery_indent = 1,
   case_indent = 1,
+  -- DELETE formatting
+  delete_from_newline = true,    -- FROM on new line after DELETE (default: true)
+  delete_alias_newline = false,  -- Alias on own line after DELETE (default: false, keeps DELETE s together)
 }
 
 ---Merge provided config with defaults
@@ -578,6 +583,17 @@ function Engine.format(sql, config, opts)
           processed.is_update_from = true
         end
 
+        -- Handle DELETE statement tracking
+        if upper == "DELETE" then
+          state.in_delete = true
+          state.delete_expecting_alias_or_from = true
+          processed.is_delete_start = true
+        elseif upper == "FROM" and state.in_delete then
+          processed.is_delete_from = true
+          state.delete_expecting_alias_or_from = false
+          state.in_delete = false  -- FROM ends the DELETE-specific tracking
+        end
+
         -- Handle CASE expression tracking
         if upper == "CASE" then
           -- Push current indent onto case stack and start CASE expression
@@ -626,6 +642,13 @@ function Engine.format(sql, config, opts)
         processed.is_cte_name = true
         state.cte_name_expected = false
         state.cte_as_expected = true
+      end
+
+      -- Handle DELETE alias (e.g., DELETE s FROM dbo.Table s)
+      if (token.type == "identifier" or token.type == "bracket_id") and state.delete_expecting_alias_or_from then
+        processed.is_delete_alias = true
+        state.delete_expecting_alias_or_from = false
+        -- Still in_delete, waiting for FROM
       end
 
       -- Preserve comments - pass through with metadata

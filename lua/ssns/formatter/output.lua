@@ -268,11 +268,15 @@ local function needs_space_before(prev, curr, config)
   end
 
   -- Space before opening paren after keyword (IN (, EXISTS (, AS (, etc.)
-  -- But NOT for function calls (COUNT(, SUM(, etc.) or table/column names
+  -- But NOT for function calls (COUNT(, SUM(, etc.) or table/column names or datatypes
   if curr.type == "paren_open" then
     if prev.type == "keyword" then
       -- No space for SQL functions (COUNT, SUM, AVG, etc.)
       if prev.keyword_category == "function" then
+        return false
+      end
+      -- No space for datatypes (VARCHAR(50), DECIMAL(10,2), etc.)
+      if prev.keyword_category == "datatype" then
         return false
       end
       -- Space for keywords like IN, EXISTS, AS
@@ -473,6 +477,7 @@ function Output.generate(tokens, config)
     local text = token.text
     local needs_newline = false
     local extra_indent = 0
+    local add_empty_line_after_flush = false  -- Flag to add empty line after flushing current line
 
     -- Handle comments specially
     if token.is_comment then
@@ -631,8 +636,8 @@ function Output.generate(tokens, config)
           current_indent = base_indent
 
           -- Phase 1: empty_line_before_join option
-          if config.empty_line_before_join and #result > 0 then
-            table.insert(result, "")  -- Add blank line before JOIN
+          if config.empty_line_before_join then
+            add_empty_line_after_flush = true  -- Add blank line after flushing current content
           end
         end
         pending_join = true
@@ -643,8 +648,8 @@ function Output.generate(tokens, config)
           current_indent = base_indent
 
           -- Phase 1: empty_line_before_join option
-          if config.empty_line_before_join and #result > 0 then
-            table.insert(result, "")  -- Add blank line before JOIN
+          if config.empty_line_before_join then
+            add_empty_line_after_flush = true  -- Add blank line after flushing current content
           end
         end
         pending_join = false
@@ -659,19 +664,24 @@ function Output.generate(tokens, config)
             current_indent = base_indent
           end
           -- If output_clause_newline is false, don't add newline
+        -- Special handling for FROM after DELETE - controlled by delete_from_newline option
+        elseif token.is_delete_from then
+          if config.delete_from_newline then
+            needs_newline = true
+            current_indent = base_indent
+          end
+          -- If delete_from_newline is false, FROM stays on same line as DELETE
         else
           needs_newline = true
           current_indent = base_indent
           pending_join = false
 
           -- Phase 3: blank_line_before_clause option
-          if config.blank_line_before_clause and #result > 0 then
-            -- Add blank line before major clauses (SELECT, FROM, WHERE, etc.)
-            -- But not at the start of the statement
-            local prev_line = result[#result]
-            if prev_line and prev_line ~= "" then
-              table.insert(result, "")
-            end
+          -- Only add blank lines at top level (not inside subqueries)
+          local pd = token.paren_depth or 0
+          if config.blank_line_before_clause and pd == 0 then
+            -- Flag to add blank line after flushing current content
+            add_empty_line_after_flush = true
           end
         end
       end
@@ -701,6 +711,13 @@ function Output.generate(tokens, config)
         needs_newline = true
         current_indent = base_indent
       end
+    end
+
+    -- Handle DELETE alias newline (e.g., DELETE s FROM ...)
+    if token.is_delete_alias and config.delete_alias_newline then
+      needs_newline = true
+      current_indent = token.indent_level or 0
+      extra_indent = 1
     end
 
     -- Handle ON clause positioning
@@ -821,6 +838,11 @@ function Output.generate(tokens, config)
         table.insert(result, line_text)
       end
       current_line = {}
+
+      -- Add empty line after flush if flagged (for empty_line_before_join)
+      if add_empty_line_after_flush and #result > 0 then
+        table.insert(result, "")
+      end
 
       -- Start new line with indent
       local indent = get_indent(config, current_indent + extra_indent)
