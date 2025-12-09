@@ -2151,4 +2151,117 @@ return {
             contains = { "(z_col, a_col, m_col)" }
         }
     },
+
+    -- ============================================
+    -- where_between_style tests (IDs: 8750-8759)
+    -- Controls formatting of BETWEEN ... AND expressions
+    -- ============================================
+    {
+        id = 8750,
+        type = "formatter",
+        name = "where_between_style inline (default) - all on one line",
+        input = "SELECT * FROM orders WHERE created_at BETWEEN '2020-01-01' AND '2020-12-31'",
+        opts = { where_between_style = "inline" },
+        expected = {
+            contains = { "BETWEEN '2020-01-01' AND '2020-12-31'" }
+        }
+    },
+    {
+        id = 8751,
+        type = "formatter",
+        name = "where_between_style stacked - AND on new line",
+        input = "SELECT * FROM orders WHERE created_at BETWEEN '2020-01-01' AND '2020-12-31'",
+        opts = { where_between_style = "stacked" },
+        expected = {
+            matches = { "BETWEEN '2020%-01%-01'\n.-AND '2020%-12%-31'" }
+        }
+    },
+    {
+        id = 8752,
+        type = "formatter",
+        name = "where_between_style stacked_indent - first value on new line",
+        input = "SELECT * FROM orders WHERE created_at BETWEEN '2020-01-01' AND '2020-12-31'",
+        opts = { where_between_style = "stacked_indent" },
+        expected = {
+            matches = { "BETWEEN\n.-'2020%-01%-01'\n.-AND '2020%-12%-31'" }
+        }
+    },
+    {
+        id = 8753,
+        type = "formatter",
+        name = "where_between_style stacked - numeric values",
+        input = "SELECT * FROM products WHERE price BETWEEN 10 AND 100",
+        opts = { where_between_style = "stacked" },
+        expected = {
+            matches = { "BETWEEN 10\n.-AND 100" }
+        }
+    },
+    {
+        id = 8754,
+        type = "formatter",
+        name = "where_between_style stacked - column references",
+        input = "SELECT * FROM orders WHERE o.date BETWEEN start_date AND end_date",
+        opts = { where_between_style = "stacked" },
+        expected = {
+            matches = { "BETWEEN start_date\n.-AND end_date" }
+        }
+    },
+    {
+        id = 8755,
+        type = "formatter",
+        name = "where_between_style stacked - function calls",
+        input = "SELECT * FROM orders WHERE created_at BETWEEN DATEADD(day, -30, GETDATE()) AND GETDATE()",
+        opts = { where_between_style = "stacked" },
+        expected = {
+            -- Function calls stay intact, AND on new line
+            -- Note: 'day' is uppercased to 'DAY' as it's a keyword
+            contains = { "DATEADD(DAY, -30, GETDATE())", "GETDATE()" },
+            matches = { "BETWEEN DATEADD.-\n.-AND GETDATE" }
+        }
+    },
+    {
+        id = 8756,
+        type = "formatter",
+        name = "where_between_style stacked - NOT BETWEEN",
+        input = "SELECT * FROM products WHERE price NOT BETWEEN 10 AND 100",
+        opts = { where_between_style = "stacked" },
+        expected = {
+            matches = { "NOT BETWEEN 10\n.-AND 100" }
+        }
+    },
+    {
+        id = 8757,
+        type = "formatter",
+        name = "where_between_style inline - multiple BETWEEN in WHERE",
+        input = "SELECT * FROM orders WHERE date BETWEEN '2020-01-01' AND '2020-12-31' AND price BETWEEN 10 AND 100",
+        opts = { where_between_style = "inline", and_or_position = "leading" },
+        expected = {
+            -- Both BETWEEN clauses inline
+            contains = { "BETWEEN '2020-01-01' AND '2020-12-31'", "BETWEEN 10 AND 100" }
+        }
+    },
+    {
+        id = 8758,
+        type = "formatter",
+        name = "where_between_style stacked_indent - CASE expression BETWEEN",
+        input = "SELECT CASE WHEN x BETWEEN 1 AND 10 THEN 'low' ELSE 'high' END FROM t",
+        opts = { where_between_style = "stacked_indent" },
+        expected = {
+            -- BETWEEN in CASE expression
+            matches = { "BETWEEN\n.-1\n.-AND 10" }
+        }
+    },
+    {
+        id = 8759,
+        type = "formatter",
+        name = "where_between_style stacked - preserves other AND/OR",
+        input = "SELECT * FROM orders WHERE status = 'active' AND date BETWEEN '2020-01-01' AND '2020-12-31' OR status = 'pending'",
+        opts = { where_between_style = "stacked", and_or_position = "leading" },
+        expected = {
+            -- BETWEEN AND is stacked, but boolean AND/OR follow their own rules
+            -- Note: 'date' is uppercased to 'DATE' as it's a reserved word
+            matches = { "BETWEEN '2020%-01%-01'\n.-AND '2020%-12%-31'" },
+            contains = { "AND DATE BETWEEN", "OR status" }
+        }
+    },
 }

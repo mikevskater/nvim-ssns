@@ -487,6 +487,11 @@ function Engine.format(sql, config, opts)
           end
         end
 
+        -- Handle BETWEEN keyword (for BETWEEN ... AND expressions)
+        if upper == "BETWEEN" then
+          processed.is_between_keyword = true
+        end
+
         -- Handle CTE (WITH clause) tracking
         if upper == "WITH" then
           state.in_cte = true

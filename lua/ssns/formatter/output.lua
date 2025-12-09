@@ -599,6 +599,9 @@ function Output.generate(tokens, config)
   local in_cte_columns_paren = false  -- Inside CTE column list parentheses
   local cte_columns_paren_depth = 0  -- Track parenthesis depth for CTE column list
   local pending_cte_columns_stacked_indent_newline = false  -- For stacked_indent: newline after CTE name (
+  local in_between_clause = false  -- Track if we're in BETWEEN ... AND
+  local between_value_count = 0  -- Track how many values seen in BETWEEN (0=none, 1=first value, 2=after AND)
+  local pending_between_stacked_indent_newline = false  -- For stacked_indent: newline after BETWEEN
   local in_create_table = false  -- Track if we're in CREATE TABLE column definitions
   local create_table_paren_depth = 0  -- Track parenthesis depth for CREATE TABLE
   local pending_create = false  -- Track if we saw CREATE (waiting for TABLE/VIEW/etc)
@@ -659,6 +662,9 @@ function Output.generate(tokens, config)
     in_cte_columns_paren = false
     cte_columns_paren_depth = 0
     pending_cte_columns_stacked_indent_newline = false
+    in_between_clause = false
+    between_value_count = 0
+    pending_between_stacked_indent_newline = false
     in_create_table = false
     create_table_paren_depth = 0
     pending_create = false
@@ -766,6 +772,15 @@ function Output.generate(tokens, config)
       current_indent = token.indent_level or 0
       extra_indent = 1
       pending_cte_columns_stacked_indent_newline = false
+    end
+
+    -- Phase 1: Handle pending where_between_style stacked_indent newline (first value after BETWEEN)
+    if pending_between_stacked_indent_newline and not token.is_comment then
+      -- First value after BETWEEN - add newline
+      needs_newline = true
+      current_indent = token.indent_level or 0
+      extra_indent = 1
+      pending_between_stacked_indent_newline = false
     end
 
     -- Phase 4: Handle pending function_arg_style stacked_indent newline (first arg after function ()
@@ -1259,14 +1274,24 @@ function Output.generate(tokens, config)
 
     -- Handle AND/OR positioning in WHERE clause
     -- Phase 1: where_condition_style controls whether conditions are stacked
+    -- Skip if we're in a BETWEEN clause - BETWEEN AND is handled separately by where_between_style
     local where_style = config.where_condition_style or "stacked"
-    if in_where_clause and is_and_or(token) and where_style ~= "inline" then
+    if in_where_clause and is_and_or(token) and where_style ~= "inline" and not in_between_clause then
       -- stacked and stacked_indent both stack conditions
       if config.and_or_position == "leading" then
         needs_newline = true
         current_indent = token.indent_level or 0
         extra_indent = config.where_and_or_indent or 1  -- Phase 1: configurable indent
       end
+    end
+
+    -- Phase 1: where_between_style - handle AND in BETWEEN clause (leading newline for stacked/stacked_indent)
+    local between_style = config.where_between_style or "inline"
+    if in_between_clause and token.type == "keyword" and string.upper(token.text) == "AND" and between_style ~= "inline" then
+      -- stacked and stacked_indent both put AND on new line
+      needs_newline = true
+      current_indent = token.indent_level or 0
+      extra_indent = 1
     end
 
     -- Phase 1: Handle AND/OR positioning in ON clause (join conditions)
@@ -1497,8 +1522,9 @@ function Output.generate(tokens, config)
     end
 
     -- Phase 1: Handle trailing AND/OR in WHERE clause (newline after AND/OR)
+    -- Skip if we're in a BETWEEN clause - BETWEEN AND is handled separately by where_between_style
     local where_cond_style = config.where_condition_style or "stacked"
-    if in_where_clause and is_and_or(token) and where_cond_style ~= "inline" and config.and_or_position == "trailing" then
+    if in_where_clause and is_and_or(token) and where_cond_style ~= "inline" and config.and_or_position == "trailing" and not in_between_clause then
       local line_text = table.concat(current_line, "")
       if line_text:match("%S") then
         table.insert(result, line_text)
@@ -1905,6 +1931,44 @@ function Output.generate(tokens, config)
         table.insert(current_line, indent)
       end
       line_just_started = true  -- Skip space before next token
+    end
+
+    -- Phase 1: BETWEEN clause tracking
+    -- Detect BETWEEN keyword and track until we see the AND that completes it
+    if token.is_between_keyword then
+      in_between_clause = true
+      between_value_count = 0
+
+      -- Check for stacked_indent - need newline after BETWEEN keyword
+      local between_style = config.where_between_style or "inline"
+      if between_style == "stacked_indent" then
+        pending_between_stacked_indent_newline = true
+      end
+    end
+
+    -- Track AND in BETWEEN context - exit BETWEEN clause after AND
+    -- Note: Newline before AND is handled earlier via needs_newline for stacked/stacked_indent styles
+    if in_between_clause and token.type == "keyword" and string.upper(token.text) == "AND" then
+      -- After AND in BETWEEN, we exit the BETWEEN clause (BETWEEN x AND y is complete)
+      in_between_clause = false
+      between_value_count = 0
+      pending_between_stacked_indent_newline = false
+    end
+
+    -- Reset BETWEEN tracking on boolean operators (OR, new AND outside BETWEEN context)
+    -- or on clause boundaries (WHERE, AND, OR at paren_depth 0 outside BETWEEN)
+    if not in_between_clause then
+      -- Already not in BETWEEN, nothing to reset
+    elseif token.type == "keyword" then
+      local upper = string.upper(token.text)
+      -- These keywords end a BETWEEN clause context
+      if upper == "OR" or upper == "WHERE" or upper == "FROM" or upper == "GROUP" or
+         upper == "ORDER" or upper == "HAVING" or upper == "UNION" or upper == "EXCEPT" or
+         upper == "INTERSECT" or upper == "JOIN" or upper == "ON" or upper == "SET" then
+        in_between_clause = false
+        between_value_count = 0
+        pending_between_stacked_indent_newline = false
+      end
     end
 
     -- Phase 4: function_arg_style - track function calls
