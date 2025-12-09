@@ -700,6 +700,16 @@ function Output.generate(tokens, config)
           end
           current_line = {}
         end
+
+        -- Phase 3: blank_line_before_comment - add blank line before standalone comments
+        if config.blank_line_before_comment then
+          -- Only add blank line if there's content before this comment
+          -- and the previous line isn't already blank
+          if #result > 0 and result[#result]:match("%S") then
+            table.insert(result, "")
+          end
+        end
+
         -- Add comment with indentation
         local base_indent = token.indent_level or 0
         local indent = get_indent(config, base_indent)

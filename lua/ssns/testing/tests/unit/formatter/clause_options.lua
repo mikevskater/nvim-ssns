@@ -1327,4 +1327,63 @@ return {
             contains = { "as n", "as u" }
         }
     },
+
+    -- =========================================================================
+    -- blank_line_before_comment tests (Phase 3: Blank Lines)
+    -- =========================================================================
+    {
+        id = 8578,
+        type = "formatter",
+        name = "blank_line_before_comment true - adds blank line before standalone comment",
+        input = "SELECT * FROM users\n-- Get active users\nWHERE active = 1",
+        opts = { blank_line_before_comment = true },
+        expected = {
+            -- Blank line should appear before the comment
+            matches = { "users\n\n%s*%-%-" }
+        }
+    },
+    {
+        id = 8579,
+        type = "formatter",
+        name = "blank_line_before_comment false (default) - no extra blank line",
+        input = "SELECT * FROM users\n-- Get active users\nWHERE active = 1",
+        opts = { blank_line_before_comment = false },
+        expected = {
+            -- No blank line before comment
+            not_matches = { "users\n\n%s*%-%-" }
+        }
+    },
+    {
+        id = 8580,
+        type = "formatter",
+        name = "blank_line_before_comment - block comment",
+        input = "SELECT * FROM users\n/* Filter logic */\nWHERE active = 1",
+        opts = { blank_line_before_comment = true },
+        expected = {
+            -- Blank line before block comment
+            matches = { "users\n\n%s*/%*" }
+        }
+    },
+    {
+        id = 8581,
+        type = "formatter",
+        name = "blank_line_before_comment - inline comment stays inline",
+        input = "SELECT * FROM users -- all users",
+        opts = { blank_line_before_comment = true },
+        expected = {
+            -- Inline comment should stay on same line, no blank line
+            contains = { "users -- all users" }
+        }
+    },
+    {
+        id = 8582,
+        type = "formatter",
+        name = "blank_line_before_comment - no double blank lines",
+        input = "SELECT * FROM users\n\n-- Already has blank line\nWHERE active = 1",
+        opts = { blank_line_before_comment = true },
+        expected = {
+            -- Should not add extra blank line if one already exists
+            not_matches = { "\n\n\n%s*%-%-" }
+        }
+    },
 }

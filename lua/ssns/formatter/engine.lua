@@ -289,6 +289,7 @@ local DEFAULT_CONFIG = {
   blank_line_after_go = 1,
   collapse_blank_lines = true,
   max_consecutive_blank_lines = 2,
+  blank_line_before_comment = false,
   -- Phase 4: Expressions
   case_style = "stacked",
   case_then_position = "same_line",
