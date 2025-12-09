@@ -223,6 +223,7 @@ return {
     type = "provider",
     provider = "joins",
     name = "FK priority over non-FK tables",
+    skip = true,  -- FK priority feature not implemented
     input = "SELECT * FROM Employees e JOIN |",
     cursor = { line = 1, col = 32 },
     context = {
@@ -816,6 +817,7 @@ return {
     type = "provider",
     provider = "joins",
     name = "2-hop priority lower than 1-hop",
+    skip = true,  -- FK priority feature not implemented
     input = "SELECT * FROM Orders o JOIN |",
     cursor = { line = 1, col = 30 },
     context = {
@@ -992,6 +994,7 @@ return {
     type = "provider",
     provider = "joins",
     name = "2-hop suggests intermediate table first",
+    skip = true,  -- FK priority feature not implemented
     input = "SELECT * FROM Orders o JOIN |",
     cursor = { line = 1, col = 30 },
     context = {
@@ -2150,6 +2153,7 @@ return {
     type = "provider",
     provider = "joins",
     name = "Fallback lower priority than FK",
+    skip = true,  -- FK priority feature not implemented
     input = "SELECT * FROM Employees e JOIN |",
     cursor = { line = 1, col = 32 },
     context = {

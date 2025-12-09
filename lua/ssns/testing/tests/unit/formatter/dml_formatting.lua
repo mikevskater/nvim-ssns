@@ -35,10 +35,11 @@ return {
     {
         id = 8104,
         type = "formatter",
-        name = "INSERT multiple VALUES",
+        name = "INSERT multiple VALUES (default stacked)",
         input = "INSERT INTO users (name) VALUES ('John'), ('Jane'), ('Bob')",
         expected = {
-            contains = { "VALUES ('John'), ('Jane'), ('Bob')" }
+            -- Default insert_multi_row_style is "stacked"
+            contains = { "VALUES ('John'),", "('Jane'),", "('Bob')" }
         }
     },
     {

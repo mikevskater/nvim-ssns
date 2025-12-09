@@ -220,8 +220,11 @@ return {
         input = "SELECT * FROM (SELECT id FROM users WHERE active = 1) sub WHERE sub.id > 10",
         opts = { blank_line_before_clause = true },
         expected = {
-            -- Inner subquery should be compact
-            contains = { "(SELECT id", "FROM users", "WHERE active = 1)" }
+            -- Inner subquery should be compact (no blank lines inside)
+            -- Note: open paren can be on FROM line with SELECT on next line
+            contains = { "FROM (", "SELECT id", "FROM users", "WHERE active = 1) sub" },
+            -- Verify no blank lines inside subquery (inner SELECT to inner WHERE)
+            not_contains = { "SELECT id\n\n", "FROM users\n\n    WHERE" }
         }
     },
     {
@@ -231,7 +234,10 @@ return {
         input = "SELECT * FROM (SELECT * FROM (SELECT 1) a) b",
         opts = { blank_line_before_clause = true },
         expected = {
-            contains = { "(SELECT * FROM", "(SELECT 1)" }
+            -- Subqueries are formatted with paren at end of previous line
+            contains = { "FROM (", "SELECT *", "SELECT 1" },
+            -- Verify no blank lines inside nested subqueries (check indented SELECT)
+            not_contains = { "    SELECT *\n\n" }
         }
     },
 

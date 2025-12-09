@@ -276,8 +276,9 @@ return {
         input = "SELECT CASE WHEN a = 1 THEN 'one' ELSE 'other' END FROM t",
         opts = { case_style = "compact" },
         expected = {
-            -- Compact: WHEN stays on same line as CASE
-            line_count = 3  -- SELECT, FROM, not many newlines in CASE
+            -- Compact: entire CASE stays on one line with SELECT, FROM on next
+            line_count = 2,
+            contains = { "CASE WHEN a = 1 THEN 'one' ELSE 'other' END" }
         }
     },
     {

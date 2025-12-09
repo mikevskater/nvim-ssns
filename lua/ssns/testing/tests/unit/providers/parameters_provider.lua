@@ -23,7 +23,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       parameter_position = 0,
     },
     expected = {
@@ -42,7 +42,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       parameter_position = 1,
     },
     expected = {
@@ -61,7 +61,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       parameter_position = 2,
     },
     expected = {
@@ -80,7 +80,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       parameter_position = 3,
     },
     expected = {
@@ -99,7 +99,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_UpdateEmployee",
+      procedure = "sp_UpdateEmployee",
       parameter_position = 0,
     },
     expected = {
@@ -125,7 +125,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       parameter_position = 1,
     },
     expected = {
@@ -151,7 +151,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_GetRecentOrders",
+      procedure = "sp_GetRecentOrders",
       parameter_position = 0,
     },
     expected = {
@@ -177,7 +177,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_CreateOrder",
+      procedure = "sp_CreateOrder",
       parameter_position = 0,
     },
     expected = {
@@ -199,7 +199,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_GetEmployeeDetails",
+      procedure = "sp_GetEmployeeDetails",
       parameter_position = 1,
     },
     expected = {
@@ -225,7 +225,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_GetEmployeeCount",
+      procedure = "sp_GetEmployeeCount",
       parameter_position = 0,
     },
     expected = {
@@ -251,7 +251,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_ComplexProc",
+      procedure = "sp_ComplexProc",
       parameter_position = 2,
     },
     expected = {
@@ -273,7 +273,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       parameter_position = 1,
       suggest_comma = true,
     },
@@ -295,7 +295,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_RefreshCache",
+      procedure = "sp_RefreshCache",
       parameter_position = 0,
     },
     expected = {
@@ -314,7 +314,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_ComplexReport",
+      procedure = "sp_ComplexReport",
       parameter_position = 2,
     },
     expected = {
@@ -336,7 +336,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       parameter_position = 1,
     },
     expected = {
@@ -359,7 +359,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       named_parameter_mode = true,
     },
     expected = {
@@ -380,7 +380,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       named_parameter_mode = true,
       partial_param = "@Search",
     },
@@ -403,7 +403,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       named_parameter_mode = true,
       partial_param = "@Sear",
     },
@@ -425,7 +425,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       named_parameter_mode = true,
       used_parameters = { "@DepartmentID" },
     },
@@ -448,7 +448,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       named_parameter_mode = true,
       parameter_position = 1,
     },
@@ -471,7 +471,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_UpdateEmployee",
+      procedure = "sp_UpdateEmployee",
       named_parameter_mode = true,
       used_parameters = { "@EmployeeID" },
     },
@@ -494,7 +494,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       named_parameter_mode = true,
       duplicate_warning = "@SearchTerm",
     },
@@ -515,7 +515,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_GetEmployeeCount",
+      procedure = "sp_GetEmployeeCount",
       named_parameter_mode = true,
     },
     expected = {
@@ -542,7 +542,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_GetRecentOrders",
+      procedure = "sp_GetRecentOrders",
       named_parameter_mode = true,
     },
     expected = {
@@ -568,7 +568,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       named_parameter_mode = true,
       partial_param = "@searcht",
     },
@@ -590,7 +590,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       parameter_name = "@SearchTerm",
     },
     expected = {
@@ -611,7 +611,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       named_parameter_mode = true,
       parameter_position = 2,
     },
@@ -634,7 +634,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       named_parameter_mode = true,
       used_parameters = { "@SearchTerm", "@DepartmentID" },
     },
@@ -657,7 +657,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       named_parameter_mode = true,
     },
     expected = {
@@ -683,7 +683,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_UpdateEmployee",
+      procedure = "sp_UpdateEmployee",
       parameter_name = "@EmployeeID",
       parameter_type = "INT",
     },
@@ -710,7 +710,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_UpdateEmployee",
+      procedure = "sp_UpdateEmployee",
       parameter_name = "@EmployeeID",
       parameter_type = "INT",
     },
@@ -733,7 +733,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       parameter_name = "@SearchTerm",
       parameter_type = "NVARCHAR(100)",
     },
@@ -756,7 +756,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_GetOrdersByDate",
+      procedure = "sp_GetOrdersByDate",
       parameter_name = "@OrderDate",
       parameter_type = "DATE",
     },
@@ -779,7 +779,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_UpdatePrice",
+      procedure = "sp_UpdatePrice",
       parameter_name = "@Price",
       parameter_type = "DECIMAL(18,2)",
     },
@@ -802,7 +802,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       parameter_name = "@IncludeInactive",
       parameter_type = "BIT",
     },
@@ -825,7 +825,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_UpdateEmployee",
+      procedure = "sp_UpdateEmployee",
       parameter_name = "@MiddleName",
       parameter_type = "NVARCHAR(50)",
       nullable = true,
@@ -848,7 +848,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_GetRecentOrders",
+      procedure = "sp_GetRecentOrders",
       parameter_name = "@DaysBack",
       parameter_type = "INT",
       has_default = true,
@@ -872,7 +872,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_UpdateEmployee",
+      procedure = "sp_UpdateEmployee",
       parameter_name = "@Salary",
       parameter_type = "MONEY",
     },
@@ -895,7 +895,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SearchEmployees",
+      procedure = "sp_SearchEmployees",
       parameter_name = "@SearchTerm",
       parameter_type = "NVARCHAR(100)",
     },
@@ -923,7 +923,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_GetOrdersByDate",
+      procedure = "sp_GetOrdersByDate",
       parameter_name = "@StartDate",
       parameter_type = "DATETIME",
     },
@@ -945,7 +945,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_CalculateTotal",
+      procedure = "sp_CalculateTotal",
       parameter_name = "@TaxRate",
       parameter_type = "DECIMAL(5,4)",
     },
@@ -968,7 +968,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_BulkInsert",
+      procedure = "sp_BulkInsert",
       parameter_name = "@Items",
       parameter_type = "ItemTableType",
       is_table_valued = true,
@@ -992,7 +992,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_ProcessXml",
+      procedure = "sp_ProcessXml",
       parameter_name = "@XmlData",
       parameter_type = "XML",
     },
@@ -1015,7 +1015,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_ProcessJson",
+      procedure = "sp_ProcessJson",
       parameter_name = "@JsonData",
       parameter_type = "NVARCHAR(MAX)",
       is_json = true,
@@ -1039,7 +1039,7 @@ return {
     context = {
       mode = "parameter_value",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_ProcessBinary",
+      procedure = "sp_ProcessBinary",
       parameter_name = "@BinaryData",
       parameter_type = "VARBINARY(MAX)",
     },
@@ -1083,7 +1083,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_NonExistentProc",
+      procedure = "sp_NonExistentProc",
       parameter_position = 0,
     },
     expected = {
@@ -1103,7 +1103,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_GetCursorData",
+      procedure = "sp_GetCursorData",
       named_parameter_mode = true,
     },
     expected = {
@@ -1129,7 +1129,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_WithLongParams",
+      procedure = "sp_WithLongParams",
       named_parameter_mode = true,
     },
     expected = {
@@ -1156,7 +1156,7 @@ return {
     context = {
       mode = "parameter",
       connection = { database = "vim_dadbod_test", schema = "dbo" },
-      procedure_name = "sp_SpecialParams",
+      procedure = "sp_SpecialParams",
       named_parameter_mode = true,
     },
     expected = {

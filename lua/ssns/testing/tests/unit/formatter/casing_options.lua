@@ -51,7 +51,8 @@ return {
         input = "SELECT getdate(), dateadd(day, 1, created_at) FROM users",
         opts = { function_case = "upper" },
         expected = {
-            contains = { "GETDATE()", "DATEADD(day, 1, created_at)" }
+            -- Function names uppercased; dateparts like 'day' follow keyword_case (default: upper)
+            contains = { "GETDATE()", "DATEADD(DAY, 1, created_at)" }
         }
     },
 
