@@ -6,6 +6,7 @@
 ---  from_alias_align: true      - Align table aliases in FROM/JOIN clauses
 ---  update_set_align: true      - Align equals signs in SET clause
 ---  inline_comment_align: true  - Align inline comments (-- style) to same column
+---  select_column_align: "keyword" - Align SELECT columns to keyword position
 ---
 ---Annotations added:
 ---  token.align_padding      - Number of spaces to add before token for alignment
@@ -196,6 +197,41 @@ local function is_line_comment(token)
   return token.type == "line_comment"
 end
 
+---Find SELECT list column tokens that start on a new line
+---These are tokens in the SELECT list that have newline_before = true
+---@param tokens table[] Array of tokens
+---@param config table Formatter config
+---@return table[] Array of {idx, base_indent} - token index and base indent level
+local function find_select_columns(tokens, config)
+  local columns = {}
+  local select_list_style = config.select_list_style or "inline"
+
+  -- Only applies to stacked or stacked_indent styles
+  if select_list_style == "inline" then
+    return columns
+  end
+
+  for i, token in ipairs(tokens) do
+    -- Look for tokens in SELECT list that start on a new line
+    -- Skip the SELECT keyword itself and modifiers (DISTINCT, TOP, etc.)
+    if token.in_select_list and token.newline_before then
+      local upper = token.type == "keyword" and string.upper(token.text) or ""
+      -- Skip SELECT modifiers
+      if upper ~= "SELECT" and upper ~= "DISTINCT" and upper ~= "TOP" and
+         upper ~= "ALL" and upper ~= "PERCENT" and upper ~= "TIES" and
+         upper ~= "WITH" and upper ~= "INTO" and token.type ~= "number" then
+        table.insert(columns, {
+          idx = i,
+          base_indent = token.base_indent or token.subquery_depth or 0,
+          indent_level = token.indent_level or 0,
+        })
+      end
+    end
+  end
+
+  return columns
+end
+
 ---Find inline line comments and calculate content length before each
 ---An inline comment is a line comment that follows code on the same line.
 ---We detect this by checking if there's no newline_before annotation on the comment.
@@ -265,6 +301,37 @@ end
 ---@param config table Formatter configuration
 ---@return table[] Tokens with alignment annotations
 function AlignPass.run(tokens, config)
+  -- SELECT column alignment to keyword position
+  -- select_column_align: "left" (default) uses standard indent
+  -- select_column_align: "keyword" aligns columns to position after "SELECT "
+  if config.select_column_align == "keyword" then
+    local columns = find_select_columns(tokens, config)
+    local indent_size = config.indent_size or 4
+    -- "SELECT " is 7 characters, standard indent is indent_size
+    -- We need to add extra padding: 7 - indent_size (if positive)
+    local keyword_offset = 7  -- length of "SELECT "
+
+    for _, info in ipairs(columns) do
+      -- Current indent position = base_indent * indent_size + indent_size (for the +1 level)
+      -- But we actually have indent_level already calculated
+      -- Current position = indent_level * indent_size
+      -- Target position = base_indent * indent_size + keyword_offset
+      -- Padding needed = target - current
+      local current_pos = info.indent_level * indent_size
+      local target_pos = info.base_indent * indent_size + keyword_offset
+      local padding = target_pos - current_pos
+
+      if padding > 0 then
+        tokens[info.idx].align_padding = (tokens[info.idx].align_padding or 0) + padding
+      elseif padding < 0 then
+        -- Need to reduce indent - we can't do that with align_padding
+        -- Instead, we need to set indent_level to 0 and use align_padding for full indent
+        tokens[info.idx].indent_level = 0
+        tokens[info.idx].align_padding = (tokens[info.idx].align_padding or 0) + target_pos
+      end
+    end
+  end
+
   -- FROM alias alignment
   if config.from_alias_align then
     local aliases = find_from_aliases(tokens, config)
@@ -352,7 +419,7 @@ function AlignPass.info()
   return {
     name = "align",
     order = 8,
-    description = "Handle alignment features (from_alias_align, update_set_align, inline_comment_align)",
+    description = "Handle alignment features (select_column_align, from_alias_align, update_set_align, inline_comment_align)",
     annotations = {
       "align_padding",
     },

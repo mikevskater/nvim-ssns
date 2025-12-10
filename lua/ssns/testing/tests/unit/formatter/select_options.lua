@@ -1,6 +1,6 @@
 -- Test file: select_options.lua
--- IDs: 8451-84595
--- Tests: SELECT clause options - DISTINCT, TOP, INTO, list_style
+-- IDs: 8451-84620
+-- Tests: SELECT clause options - DISTINCT, TOP, INTO, list_style, select_column_align
 
 return {
     -- SELECT clause options
@@ -153,6 +153,133 @@ return {
             -- TOP 10 should stay on same line as SELECT, columns on new lines
             contains = { "SELECT TOP 10" },
             matches = { "SELECT TOP 10\n    id,\n    name" }
+        }
+    },
+
+    -- select_column_align tests
+    -- "left" (default): columns use standard indent (4 spaces)
+    -- "keyword": columns align to start at position after "SELECT " (7 chars)
+    {
+        id = 84600,
+        type = "formatter",
+        name = "select_column_align left (default) - standard indent",
+        input = "SELECT id, name, email FROM users",
+        opts = { select_list_style = "stacked", select_column_align = "left" },
+        expected = {
+            -- Default 4-space indent for columns
+            matches = { "SELECT id,\n    name,\n    email" }
+        }
+    },
+    {
+        id = 84601,
+        type = "formatter",
+        name = "select_column_align keyword - columns align to SELECT",
+        input = "SELECT id, name, email FROM users",
+        opts = { select_list_style = "stacked", select_column_align = "keyword" },
+        expected = {
+            -- Columns align to position after "SELECT " (7 spaces)
+            matches = { "SELECT id,\n       name,\n       email" }
+        }
+    },
+    {
+        id = 84602,
+        type = "formatter",
+        name = "select_column_align keyword with stacked_indent",
+        input = "SELECT id, name, email FROM users",
+        opts = { select_list_style = "stacked_indent", select_column_align = "keyword" },
+        expected = {
+            -- First column on new line, all columns align to "SELECT " position
+            matches = { "SELECT\n       id,\n       name,\n       email" }
+        }
+    },
+    {
+        id = 84603,
+        type = "formatter",
+        name = "select_column_align keyword with DISTINCT",
+        input = "SELECT DISTINCT id, name FROM users",
+        opts = { select_list_style = "stacked", select_column_align = "keyword" },
+        expected = {
+            -- Columns align to position after "SELECT " even with DISTINCT
+            -- "SELECT DISTINCT id," - subsequent columns align to position 7
+            matches = { "SELECT DISTINCT id,\n       name" }
+        }
+    },
+    {
+        id = 84604,
+        type = "formatter",
+        name = "select_column_align keyword with longer expressions",
+        input = "SELECT user_id, first_name, last_name FROM users",
+        opts = { select_list_style = "stacked", select_column_align = "keyword" },
+        expected = {
+            -- Columns align to position after "SELECT "
+            matches = { "SELECT user_id,\n       first_name,\n       last_name" }
+        }
+    },
+    {
+        id = 84605,
+        type = "formatter",
+        name = "select_column_align keyword in subquery",
+        input = "SELECT * FROM (SELECT id, name FROM users) AS sub",
+        opts = { select_list_style = "stacked", select_column_align = "keyword" },
+        expected = {
+            -- Subquery columns should also align to their SELECT keyword
+            -- Base indent for subquery is 4, so SELECT at 4, columns at 4+7=11 (but relative)
+            matches = { "SELECT id,\n           name" }
+        }
+    },
+    {
+        id = 84606,
+        type = "formatter",
+        name = "select_column_align left in subquery - standard indent",
+        input = "SELECT * FROM (SELECT id, name FROM users) AS sub",
+        opts = { select_list_style = "stacked", select_column_align = "left" },
+        expected = {
+            -- Subquery columns use standard indent (base+1)
+            matches = { "SELECT id,\n        name" }  -- 8 spaces = base(4) + indent(4)
+        }
+    },
+    {
+        id = 84607,
+        type = "formatter",
+        name = "select_column_align left with inline style - no effect",
+        input = "SELECT id, name, email FROM users",
+        opts = { select_list_style = "inline", select_column_align = "left" },
+        expected = {
+            -- inline style keeps all columns on one line, align has no effect
+            contains = { "SELECT id, name, email" }
+        }
+    },
+    {
+        id = 84608,
+        type = "formatter",
+        name = "select_column_align keyword with inline style - no effect",
+        input = "SELECT id, name, email FROM users",
+        opts = { select_list_style = "inline", select_column_align = "keyword" },
+        expected = {
+            -- inline style keeps all columns on one line, align has no effect
+            contains = { "SELECT id, name, email" }
+        }
+    },
+    {
+        id = 84609,
+        type = "formatter",
+        name = "select_column_align keyword with aliases",
+        input = "SELECT u.id AS user_id, u.name AS user_name FROM users u",
+        opts = { select_list_style = "stacked", select_column_align = "keyword" },
+        expected = {
+            -- Columns with aliases align to position after "SELECT "
+            matches = { "SELECT u.id AS user_id,\n       u.name AS user_name" }
+        }
+    },
+    {
+        id = 84610,
+        type = "formatter",
+        name = "select_column_align keyword with functions",
+        input = "SELECT COUNT(*), SUM(amount), MAX(created) FROM orders",
+        opts = { select_list_style = "stacked", select_column_align = "keyword" },
+        expected = {
+            -- Function columns align to position after "SELECT "
+            matches = { "SELECT COUNT%(%*%),\n       SUM%(amount%),\n       MAX%(created%)" }
         }
     },
 }
