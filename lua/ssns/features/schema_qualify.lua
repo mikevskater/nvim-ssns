@@ -338,3 +338,4 @@ function SchemaQualify.qualify_tables_in_range(bufnr, start_line, end_line)
 end
 
 return SchemaQualify
+

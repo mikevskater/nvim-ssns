@@ -4,7 +4,7 @@
 ---@module ssns.features.view_type_compatibility
 local ViewTypeCompatibility = {}
 
-local UiFloat = require('ssns.ui.float')
+local UiFloat = require('ssns.ui.core.float')
 local JsonUtils = require('ssns.utils.json')
 local TypeCompatibility = require('ssns.completion.type_compatibility')
 
@@ -191,3 +191,4 @@ function ViewTypeCompatibility.view_compatibility()
 end
 
 return ViewTypeCompatibility
+

@@ -4,7 +4,7 @@
 ---@module ssns.features.view_debug_log
 local ViewDebugLog = {}
 
-local UiFloat = require('ssns.ui.float')
+local UiFloat = require('ssns.ui.core.float')
 local Debug = require('ssns.debug')
 
 -- Store reference to current floating window for cleanup
@@ -202,3 +202,4 @@ function ViewDebugLog.view_log(filter)
 end
 
 return ViewDebugLog
+

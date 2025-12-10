@@ -4,7 +4,7 @@
 ---@module ssns.features.view_fuzzy_matcher
 local ViewFuzzyMatcher = {}
 
-local UiFloat = require('ssns.ui.float')
+local UiFloat = require('ssns.ui.core.float')
 local JsonUtils = require('ssns.utils.json')
 local FuzzyMatcher = require('ssns.completion.fuzzy_matcher')
 
@@ -173,3 +173,4 @@ function ViewFuzzyMatcher.view_matcher()
 end
 
 return ViewFuzzyMatcher
+

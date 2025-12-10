@@ -4,7 +4,7 @@
 local ViewMetadata = {}
 
 local GoTo = require('ssns.features.go_to')
-local UiFloat = require('ssns.ui.float')
+local UiFloat = require('ssns.ui.core.float')
 
 -- Store reference to current floating window for cleanup
 local current_float = nil
@@ -210,3 +210,4 @@ function ViewMetadata.view_metadata_at_cursor()
 end
 
 return ViewMetadata
+

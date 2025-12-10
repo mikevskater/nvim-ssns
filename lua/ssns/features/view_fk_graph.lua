@@ -4,7 +4,7 @@
 ---@module ssns.features.view_fk_graph
 local ViewFKGraph = {}
 
-local UiFloat = require('ssns.ui.float')
+local UiFloat = require('ssns.ui.core.float')
 local JsonUtils = require('ssns.utils.json')
 local FKGraph = require('ssns.completion.fk_graph')
 local StatementContext = require('ssns.completion.statement_context')
@@ -307,3 +307,4 @@ function ViewFKGraph.view_graph()
 end
 
 return ViewFKGraph
+

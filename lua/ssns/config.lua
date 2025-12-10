@@ -123,6 +123,9 @@
 ---@field view_metadata string View object metadata (default: "M")
 ---@field new_query string New query buffer (default: "<C-n>")
 ---@field show_history string Show query history (default: "<Leader>@")
+---@field attach_connection string Attach buffer to connection (default: "<Leader>a")
+---@field change_connection string Change connection (hierarchical picker) (default: "<Leader>A")
+---@field change_database string Change database only (default: "<Leader>d")
 
 ---@class HistoryKeymaps History UI specific keymaps
 ---@field switch_panel string Switch between panels (default: "<Tab>")
@@ -590,6 +593,9 @@ local default_config = {
       view_metadata = "M",   -- View object metadata
       new_query = "<C-n>",   -- New query buffer
       show_history = "<Leader>@", -- Show query history
+      attach_connection = "<Leader>a", -- Attach buffer to connection
+      change_connection = "<Leader>A", -- Change connection (hierarchical picker)
+      change_database = "<Leader>d", -- Change database only
     },
 
     -- History UI keymaps

@@ -4,7 +4,7 @@
 ---@module ssns.features.view_query_cache
 local ViewQueryCache = {}
 
-local UiFloat = require('ssns.ui.float')
+local UiFloat = require('ssns.ui.core.float')
 local JsonUtils = require('ssns.utils.json')
 local QueryCache = require('ssns.query_cache')
 
@@ -172,3 +172,4 @@ function ViewQueryCache.view_cache()
 end
 
 return ViewQueryCache
+

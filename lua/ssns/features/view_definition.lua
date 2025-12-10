@@ -4,7 +4,7 @@
 local ViewDefinition = {}
 
 local GoTo = require('ssns.features.go_to')
-local UiFloat = require('ssns.ui.float')
+local UiFloat = require('ssns.ui.core.float')
 
 -- Store reference to current floating window for cleanup
 local current_float = nil
@@ -81,7 +81,7 @@ function ViewDefinition.edit_definition()
   end
 
   -- Create query buffer with definition (same as ALTER action)
-  local Query = require('ssns.ui.query')
+  local Query = require('ssns.ui.core.query')
   local obj_name = get_object_display_name(target_object)
   Query.create_query_buffer(server, database, definition, obj_name)
 end
@@ -140,7 +140,7 @@ function ViewDefinition.show_definition_float(definition, target_object, identif
     local database = target_object:get_database()
 
     -- Register buffer with UiQuery for connection context
-    local UiQuery = require('ssns.ui.query')
+    local UiQuery = require('ssns.ui.core.query')
     UiQuery.query_buffers[bufnr] = {
       server = server,
       database = database,
@@ -201,3 +201,4 @@ function ViewDefinition.view_definition_at_cursor()
 end
 
 return ViewDefinition
+

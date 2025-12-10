@@ -193,7 +193,7 @@ end
 -- @return: String - Formatted database connection info
 function M.ssns()
   -- Check if we're in an SSNS query buffer
-  local UiQuery = require('ssns.ui.query')
+  local UiQuery = require('ssns.ui.core.query')
   local bufnr = vim.api.nvim_get_current_buf()
 
   if not UiQuery.is_query_buffer(bufnr) then
@@ -264,7 +264,7 @@ end
 -- Uses server name for server-level connections, database name for database-level connections
 -- @return: Table - Color spec or nil for default
 function M.ssns_color()
-  local UiQuery = require('ssns.ui.query')
+  local UiQuery = require('ssns.ui.core.query')
   local bufnr = vim.api.nvim_get_current_buf()
 
   if not UiQuery.is_query_buffer(bufnr) then

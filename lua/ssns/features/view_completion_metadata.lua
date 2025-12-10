@@ -4,7 +4,7 @@
 ---@module ssns.features.view_completion_metadata
 local ViewCompletionMetadata = {}
 
-local UiFloat = require('ssns.ui.float')
+local UiFloat = require('ssns.ui.core.float')
 local JsonUtils = require('ssns.utils.json')
 local StatementContext = require('ssns.completion.statement_context')
 local StatementCache = require('ssns.completion.statement_cache')
@@ -412,3 +412,4 @@ function ViewCompletionMetadata.view_metadata()
 end
 
 return ViewCompletionMetadata
+

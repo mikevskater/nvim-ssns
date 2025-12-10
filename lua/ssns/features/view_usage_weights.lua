@@ -4,7 +4,7 @@
 ---@module ssns.features.view_usage_weights
 local ViewUsageWeights = {}
 
-local UiFloat = require('ssns.ui.float')
+local UiFloat = require('ssns.ui.core.float')
 local JsonUtils = require('ssns.utils.json')
 local UsageTracker = require('ssns.completion.usage_tracker')
 
@@ -257,3 +257,4 @@ function ViewUsageWeights.view_weights()
 end
 
 return ViewUsageWeights
+

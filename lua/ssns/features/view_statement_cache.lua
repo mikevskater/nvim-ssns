@@ -4,7 +4,7 @@
 ---@module ssns.features.view_statement_cache
 local ViewStatementCache = {}
 
-local UiFloat = require('ssns.ui.float')
+local UiFloat = require('ssns.ui.core.float')
 local JsonUtils = require('ssns.utils.json')
 local StatementCache = require('ssns.completion.statement_cache')
 
@@ -238,3 +238,4 @@ function ViewStatementCache.view_cache()
 end
 
 return ViewStatementCache
+

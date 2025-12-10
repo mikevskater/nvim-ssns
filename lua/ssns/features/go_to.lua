@@ -289,8 +289,9 @@ function GoTo.go_to_object_at_cursor()
   Ssns.open()
 
   -- Navigate to object
-  local UiTree = require('ssns.ui.tree')
+  local UiTree = require('ssns.ui.core.tree')
   UiTree.navigate_to_object(target_object)
 end
 
 return GoTo
+

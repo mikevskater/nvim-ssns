@@ -4,7 +4,7 @@
 ---@module ssns.features.view_tokens
 local ViewTokens = {}
 
-local UiFloat = require('ssns.ui.float')
+local UiFloat = require('ssns.ui.core.float')
 local JsonUtils = require('ssns.utils.json')
 local Tokenizer = require('ssns.completion.tokenizer')
 local StatementCache = require('ssns.completion.statement_cache')
@@ -162,3 +162,4 @@ function ViewTokens.view_tokens()
 end
 
 return ViewTokens
+

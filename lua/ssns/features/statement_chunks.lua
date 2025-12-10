@@ -4,7 +4,7 @@
 ---@module ssns.features.statement_chunks
 local StatementChunksViewer = {}
 
-local UiFloat = require('ssns.ui.float')
+local UiFloat = require('ssns.ui.core.float')
 local JsonUtils = require('ssns.utils.json')
 local StatementParser = require('ssns.completion.statement_parser')
 local StatementCache = require('ssns.completion.statement_cache')
@@ -214,3 +214,4 @@ function StatementChunksViewer.view_statement_chunks()
 end
 
 return StatementChunksViewer
+

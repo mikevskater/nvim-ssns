@@ -83,7 +83,7 @@ function Ssns.setup(user_config)
   end
 
   -- Setup UI highlights
-  local Highlights = require('ssns.ui.highlights')
+  local Highlights = require('ssns.ui.core.highlights')
   Highlights.setup()
   Highlights.setup_filetype()
 
@@ -160,6 +160,33 @@ function Ssns.setup(user_config)
           desc = 'SSNS: View object metadata'
         })
       end
+
+      -- Connection picker keymaps (attach/change connection for SQL files)
+      local query_keymaps = keymaps.query or {}
+
+      -- Attach connection keymap
+      local attach_key = query_keymaps.attach_connection or "<Leader>a"
+      vim.keymap.set('n', attach_key, function()
+        local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+        ConnectionPicker.show(bufnr)
+      end, {
+        buffer = bufnr,
+        noremap = true,
+        silent = true,
+        desc = 'SSNS: Attach buffer to connection'
+      })
+
+      -- Change connection keymap (hierarchical picker)
+      local change_key = query_keymaps.change_connection or "<Leader>A"
+      vim.keymap.set('n', change_key, function()
+        local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+        ConnectionPicker.show_hierarchical(bufnr)
+      end, {
+        buffer = bufnr,
+        noremap = true,
+        silent = true,
+        desc = 'SSNS: Change connection (pick server then database)'
+      })
 
       -- Enable semantic highlighting for SQL files
       local sh_config = Config.get_semantic_highlighting()
@@ -514,11 +541,61 @@ function Ssns._register_commands()
 
   -- :SSNSAddServer - Open add server UI
   vim.api.nvim_create_user_command("SSNSAddServer", function()
-    local AddServerUI = require('ssns.ui.add_server')
+    local AddServerUI = require('ssns.ui.dialogs.add_server')
     AddServerUI.open()
   end, {
     nargs = 0,
     desc = "Add a new server connection",
+  })
+
+  -- :SSNSAttach - Attach current SQL buffer to a connection
+  vim.api.nvim_create_user_command("SSNSAttach", function()
+    local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+    ConnectionPicker.show()
+  end, {
+    nargs = 0,
+    desc = "Attach current SQL buffer to a saved connection",
+  })
+
+  -- :SSNSAttachPick - Attach with hierarchical server/database picker
+  vim.api.nvim_create_user_command("SSNSAttachPick", function()
+    local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+    ConnectionPicker.show_hierarchical()
+  end, {
+    nargs = 0,
+    desc = "Attach current SQL buffer to a connection (server then database)",
+  })
+
+  -- :SSNSDetach - Detach connection from current buffer
+  vim.api.nvim_create_user_command("SSNSDetach", function()
+    local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+    ConnectionPicker.detach()
+  end, {
+    nargs = 0,
+    desc = "Detach SSNS connection from current buffer",
+  })
+
+  -- :SSNSConnectionInfo - Show current connection info
+  vim.api.nvim_create_user_command("SSNSConnectionInfo", function()
+    local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+    local db_key = ConnectionPicker.get_current_connection()
+    if db_key then
+      vim.notify(string.format("SSNS: Current connection: %s", db_key), vim.log.levels.INFO)
+    else
+      vim.notify("SSNS: No connection attached to this buffer", vim.log.levels.INFO)
+    end
+  end, {
+    nargs = 0,
+    desc = "Show current SSNS connection for this buffer",
+  })
+
+  -- :SSNSChangeDatabase - Change database for current server connection
+  vim.api.nvim_create_user_command("SSNSChangeDatabase", function()
+    local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+    ConnectionPicker.show_database_picker()
+  end, {
+    nargs = 0,
+    desc = "Change database for current server connection",
   })
 
   -- SQL Formatter Commands
@@ -527,7 +604,7 @@ function Ssns._register_commands()
 
   -- :SSNSManageConnections - Open connection manager (alias for SSNSAddServer)
   vim.api.nvim_create_user_command("SSNSManageConnections", function()
-    local AddServerUI = require('ssns.ui.add_server')
+    local AddServerUI = require('ssns.ui.dialogs.add_server')
     AddServerUI.open()
   end, {
     nargs = 0,
@@ -538,7 +615,7 @@ function Ssns._register_commands()
 
   -- :SSNSTheme - Open theme picker UI
   vim.api.nvim_create_user_command("SSNSTheme", function()
-    local ThemePicker = require('ssns.ui.theme_picker')
+    local ThemePicker = require('ssns.ui.panels.theme_picker')
     ThemePicker.show()
   end, {
     nargs = 0,
@@ -547,7 +624,7 @@ function Ssns._register_commands()
 
   -- :SSNSThemeClear - Clear theme and use defaults
   vim.api.nvim_create_user_command("SSNSThemeClear", function()
-    local ThemeManager = require('ssns.ui.theme_manager')
+    local ThemeManager = require('ssns.ui.themes.theme_manager')
     ThemeManager.clear_theme()
   end, {
     nargs = 0,
@@ -636,8 +713,8 @@ end
 
 ---Toggle the tree UI
 function Ssns.toggle()
-  local Buffer = require('ssns.ui.buffer')
-  local Tree = require('ssns.ui.tree')
+  local Buffer = require('ssns.ui.core.buffer')
+  local Tree = require('ssns.ui.core.tree')
 
   Buffer.toggle()
 
@@ -650,8 +727,8 @@ end
 ---Open the tree UI
 ---@param mode_override string? Optional mode override: "float" or "docked"
 function Ssns.open(mode_override)
-  local Buffer = require('ssns.ui.buffer')
-  local Tree = require('ssns.ui.tree')
+  local Buffer = require('ssns.ui.core.buffer')
+  local Tree = require('ssns.ui.core.tree')
 
   Buffer.open(mode_override)
   Tree.render()
@@ -669,7 +746,7 @@ end
 
 ---Close the tree UI
 function Ssns.close()
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
   Buffer.close()
 end
 
@@ -741,7 +818,7 @@ end
 
 ---Open a new query buffer
 function Ssns.new_query()
-  local Query = require('ssns.ui.query')
+  local Query = require('ssns.ui.core.query')
   local Cache = require('ssns.cache')
 
   -- Get all servers
@@ -771,6 +848,38 @@ function Ssns.new_query()
       Query.create_query_buffer(servers[idx], nil, nil)
     end
   end)
+end
+
+---Attach current buffer to a connection (flat picker)
+function Ssns.attach()
+  local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+  ConnectionPicker.show()
+end
+
+---Attach current buffer to a connection (hierarchical picker)
+function Ssns.attach_pick()
+  local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+  ConnectionPicker.show_hierarchical()
+end
+
+---Detach connection from current buffer
+function Ssns.detach()
+  local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+  ConnectionPicker.detach()
+end
+
+---Get current connection info for buffer
+---@param bufnr number? Buffer number (defaults to current)
+---@return string? db_key The connection key or nil
+function Ssns.get_connection(bufnr)
+  local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+  return ConnectionPicker.get_current_connection(bufnr)
+end
+
+---Change database for current server connection
+function Ssns.change_database()
+  local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+  ConnectionPicker.show_database_picker()
 end
 
 ---Show cache statistics
@@ -831,7 +940,7 @@ end
 
 ---Show query history
 function Ssns.show_history()
-  local UiHistory = require('ssns.ui.history')
+  local UiHistory = require('ssns.ui.panels.history')
   UiHistory.show_history()
 end
 

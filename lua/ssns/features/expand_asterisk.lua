@@ -791,3 +791,4 @@ function ExpandAsterisk.expand_asterisk_at_cursor(bufnr)
 end
 
 return ExpandAsterisk
+
