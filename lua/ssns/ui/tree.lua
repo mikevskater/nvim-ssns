@@ -963,17 +963,43 @@ function UiTree.toggle_node()
     local db = obj.parent
     local adapter = db:get_adapter()
     
-    -- Load the appropriate object type - each get_* method handles schema loading internally
+    -- Ensure schemas are loaded first (for schema-based servers)
+    if adapter.features.schemas then
+      db:_ensure_schemas_loaded()
+    end
+    
+    -- Load the appropriate object type using BULK loading for all schemas
+    -- This is different from completion which may use lazy loading
     if obj.object_type == "tables_group" then
-      db:get_tables()  -- Triggers bulk load (and schema load if needed)
+      if adapter.features.schemas then
+        db:load_all_tables_bulk()  -- Force bulk load all schemas for tree view
+      else
+        db:get_tables()  -- Non-schema servers load directly
+      end
     elseif obj.object_type == "views_group" and adapter.features.views then
-      db:get_views()  -- Triggers bulk load (and schema load if needed)
+      if adapter.features.schemas then
+        db:load_all_views_bulk()  -- Force bulk load all schemas for tree view
+      else
+        db:get_views()  -- Non-schema servers load directly
+      end
     elseif obj.object_type == "procedures_group" and adapter.features.procedures then
-      db:get_procedures()  -- Triggers bulk load (and schema load if needed)
+      if adapter.features.schemas then
+        db:load_all_procedures_bulk()  -- Force bulk load all schemas for tree view
+      else
+        db:get_procedures()  -- Non-schema servers load directly
+      end
     elseif obj.object_type == "functions_group" and adapter.features.functions then
-      db:get_functions()  -- Triggers bulk load (and schema load if needed)
+      if adapter.features.schemas then
+        db:load_all_functions_bulk()  -- Force bulk load all schemas for tree view
+      else
+        db:get_functions()  -- Non-schema servers load directly
+      end
     elseif obj.object_type == "synonyms_group" and adapter.features.synonyms then
-      db:get_synonyms()  -- Triggers bulk load (and schema load if needed)
+      if adapter.features.schemas then
+        db:load_all_synonyms_bulk()  -- Force bulk load all schemas for tree view
+      else
+        db:get_synonyms()  -- Non-schema servers load directly
+      end
     elseif obj.object_type == "schemas_group" and adapter.features.schemas then
       db:get_schemas()  -- Load schema names only
     end
