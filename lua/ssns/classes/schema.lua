@@ -54,14 +54,31 @@ function SchemaClass:load()
 end
 
 ---Set tables from pre-loaded bulk data
+---Preserves existing table objects to maintain loaded column data
 ---@param table_data_list table[] Array of parsed table data from adapter
 function SchemaClass:set_tables(table_data_list)
   local adapter = self:get_adapter()
-  
+
+  -- If tables already exist, preserve them and their loaded data
+  local existing_tables = {}
+  if self.tables then
+    for _, existing_table in ipairs(self.tables) do
+      existing_tables[existing_table.name] = existing_table
+    end
+  end
+
   self.tables = {}
   for _, table_data in ipairs(table_data_list) do
-    local table_obj = adapter:create_table(self, table_data)
-    table.insert(self.tables, table_obj)
+    -- Check if this table already exists
+    local existing = existing_tables[table_data.name]
+    if existing then
+      -- Reuse existing table object to preserve loaded column data
+      table.insert(self.tables, existing)
+    else
+      -- Create new table object
+      local table_obj = adapter:create_table(self, table_data)
+      table.insert(self.tables, table_obj)
+    end
   end
 end
 
@@ -87,14 +104,31 @@ function SchemaClass:load_tables()
 end
 
 ---Set views from pre-loaded bulk data
+---Preserves existing view objects to maintain loaded column data
 ---@param view_data_list table[] Array of parsed view data from adapter
 function SchemaClass:set_views(view_data_list)
   local adapter = self:get_adapter()
-  
+
+  -- If views already exist, preserve them and their loaded data
+  local existing_views = {}
+  if self.views then
+    for _, existing_view in ipairs(self.views) do
+      existing_views[existing_view.name] = existing_view
+    end
+  end
+
   self.views = {}
   for _, view_data in ipairs(view_data_list) do
-    local view_obj = adapter:create_view(self, view_data)
-    table.insert(self.views, view_obj)
+    -- Check if this view already exists
+    local existing = existing_views[view_data.name]
+    if existing then
+      -- Reuse existing view object to preserve loaded column data
+      table.insert(self.views, existing)
+    else
+      -- Create new view object
+      local view_obj = adapter:create_view(self, view_data)
+      table.insert(self.views, view_obj)
+    end
   end
 end
 
@@ -125,18 +159,35 @@ function SchemaClass:load_views()
 end
 
 ---Set procedures from pre-loaded bulk data
+---Preserves existing procedure objects to maintain loaded parameter data
 ---@param proc_data_list table[] Array of parsed procedure data from adapter
 function SchemaClass:set_procedures(proc_data_list)
   local ProcedureClass = require('ssns.classes.procedure')
-  
+
+  -- If procedures already exist, preserve them and their loaded data
+  local existing_procs = {}
+  if self.procedures then
+    for _, existing_proc in ipairs(self.procedures) do
+      existing_procs[existing_proc.name] = existing_proc
+    end
+  end
+
   self.procedures = {}
   for _, proc_data in ipairs(proc_data_list) do
-    local proc_obj = ProcedureClass.new({
-      name = proc_data.name,
-      schema_name = proc_data.schema,
-      parent = self,
-    })
-    table.insert(self.procedures, proc_obj)
+    -- Check if this procedure already exists
+    local existing = existing_procs[proc_data.name]
+    if existing then
+      -- Reuse existing procedure object to preserve loaded parameter data
+      table.insert(self.procedures, existing)
+    else
+      -- Create new procedure object
+      local proc_obj = ProcedureClass.new({
+        name = proc_data.name,
+        schema_name = proc_data.schema,
+        parent = self,
+      })
+      table.insert(self.procedures, proc_obj)
+    end
   end
 end
 
@@ -168,19 +219,36 @@ function SchemaClass:load_procedures()
 end
 
 ---Set functions from pre-loaded bulk data
+---Preserves existing function objects to maintain loaded parameter data
 ---@param func_data_list table[] Array of parsed function data from adapter
 function SchemaClass:set_functions(func_data_list)
   local FunctionClass = require('ssns.classes.function')
-  
+
+  -- If functions already exist, preserve them and their loaded data
+  local existing_funcs = {}
+  if self.functions then
+    for _, existing_func in ipairs(self.functions) do
+      existing_funcs[existing_func.name] = existing_func
+    end
+  end
+
   self.functions = {}
   for _, func_data in ipairs(func_data_list) do
-    local func_obj = FunctionClass.new({
-      name = func_data.name,
-      schema_name = func_data.schema,
-      function_type = func_data.type,
-      parent = self,
-    })
-    table.insert(self.functions, func_obj)
+    -- Check if this function already exists
+    local existing = existing_funcs[func_data.name]
+    if existing then
+      -- Reuse existing function object to preserve loaded parameter data
+      table.insert(self.functions, existing)
+    else
+      -- Create new function object
+      local func_obj = FunctionClass.new({
+        name = func_data.name,
+        schema_name = func_data.schema,
+        function_type = func_data.type,
+        parent = self,
+      })
+      table.insert(self.functions, func_obj)
+    end
   end
 end
 
@@ -212,20 +280,37 @@ function SchemaClass:load_functions()
 end
 
 ---Set synonyms from pre-loaded bulk data
+---Preserves existing synonym objects to maintain any cached resolution data
 ---@param syn_data_list table[] Array of parsed synonym data from adapter
 function SchemaClass:set_synonyms(syn_data_list)
   local SynonymClass = require('ssns.classes.synonym')
-  
+
+  -- If synonyms already exist, preserve them and their loaded data
+  local existing_syns = {}
+  if self.synonyms then
+    for _, existing_syn in ipairs(self.synonyms) do
+      existing_syns[existing_syn.name] = existing_syn
+    end
+  end
+
   self.synonyms = {}
   for _, syn_data in ipairs(syn_data_list) do
-    local syn_obj = SynonymClass.new({
-      name = syn_data.name,
-      schema_name = syn_data.schema,
-      base_object_name = syn_data.base_object_name,
-      base_object_type = syn_data.base_object_type,
-      parent = self,
-    })
-    table.insert(self.synonyms, syn_obj)
+    -- Check if this synonym already exists
+    local existing = existing_syns[syn_data.name]
+    if existing then
+      -- Reuse existing synonym object to preserve any cached resolution data
+      table.insert(self.synonyms, existing)
+    else
+      -- Create new synonym object
+      local syn_obj = SynonymClass.new({
+        name = syn_data.name,
+        schema_name = syn_data.schema,
+        base_object_name = syn_data.base_object_name,
+        base_object_type = syn_data.base_object_type,
+        parent = self,
+      })
+      table.insert(self.synonyms, syn_obj)
+    end
   end
 end
 
@@ -255,6 +340,115 @@ function SchemaClass:load_synonyms()
   return true
 end
 
+---Bulk load all columns for all tables and views in this schema
+---This is more efficient than loading columns individually
+---@return boolean success
+function SchemaClass:load_all_columns_bulk()
+  -- Check if already done
+  if self._columns_bulk_loaded then
+    return true
+  end
+
+  -- Ensure tables and views are loaded
+  if not self.tables then
+    self:load_tables()
+  end
+  if not self.views then
+    self:load_views()
+  end
+
+  -- Check if any object already has columns loaded (skip if so)
+  local already_loaded = false
+  for _, table_obj in ipairs(self.tables or {}) do
+    if table_obj.columns_loaded then
+      already_loaded = true
+      break
+    end
+  end
+  if not already_loaded then
+    for _, view_obj in ipairs(self.views or {}) do
+      if view_obj.columns_loaded then
+        already_loaded = true
+        break
+      end
+    end
+  end
+
+  if already_loaded then
+    self._columns_bulk_loaded = true
+    return true
+  end
+
+  -- Check if adapter supports bulk column loading
+  local adapter = self:get_adapter()
+  if not adapter.get_columns_bulk_query then
+    -- Fallback: load columns individually
+    for _, table_obj in ipairs(self.tables or {}) do
+      if not table_obj.columns_loaded then
+        table_obj:load_columns()
+      end
+    end
+    for _, view_obj in ipairs(self.views or {}) do
+      if not view_obj.columns_loaded then
+        view_obj:load_columns()
+      end
+    end
+    self._columns_bulk_loaded = true
+    return true
+  end
+
+  -- Execute bulk query
+  local db = self.parent
+  local query = adapter:get_columns_bulk_query(db.db_name, self.schema_name)
+  local results = adapter:execute(db:_get_db_connection_config(), query)
+
+  if not results or not results.rows then
+    self._columns_bulk_loaded = true
+    return false
+  end
+
+  -- Group columns by table name
+  local columns_by_table = {}
+  for _, row in ipairs(results.rows) do
+    local table_name = row.table_name
+    columns_by_table[table_name] = columns_by_table[table_name] or {}
+    table.insert(columns_by_table[table_name], row)
+  end
+
+  -- Distribute to table objects
+  for _, table_obj in ipairs(self.tables or {}) do
+    if not table_obj.columns_loaded then
+      local table_columns = columns_by_table[table_obj.table_name] or {}
+      local parsed_columns = adapter:parse_columns({ rows = table_columns })
+
+      table_obj.columns = {}
+      for _, col_data in ipairs(parsed_columns) do
+        local col_obj = adapter:create_column(table_obj, col_data)
+        table.insert(table_obj.columns, col_obj)
+      end
+      table_obj.columns_loaded = true
+    end
+  end
+
+  -- Distribute to view objects
+  for _, view_obj in ipairs(self.views or {}) do
+    if not view_obj.columns_loaded then
+      local view_columns = columns_by_table[view_obj.view_name] or {}
+      local parsed_columns = adapter:parse_columns({ rows = view_columns })
+
+      view_obj.columns = {}
+      for _, col_data in ipairs(parsed_columns) do
+        local col_obj = adapter:create_column(view_obj, col_data)
+        table.insert(view_obj.columns, col_obj)
+      end
+      view_obj.columns_loaded = true
+    end
+  end
+
+  self._columns_bulk_loaded = true
+  return true
+end
+
 ---Reload all objects in this schema
 ---@return boolean success
 function SchemaClass:reload()
@@ -271,6 +465,7 @@ function SchemaClass:reload()
   self.procedures = nil
   self.functions = nil
   self.synonyms = nil
+  self._columns_bulk_loaded = false
   self.is_loaded = false
   return self:load()
 end
