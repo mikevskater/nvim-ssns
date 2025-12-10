@@ -232,6 +232,157 @@ local function find_select_columns(tokens, config)
   return columns
 end
 
+-- Keywords that should be right-aligned for river style
+local RIVER_KEYWORDS = {
+  SELECT = true,
+  FROM = true,
+  WHERE = true,
+  JOIN = true,
+  ON = true,
+  SET = true,
+  VALUES = true,
+  OUTPUT = true,
+  HAVING = true,
+  UNION = true,
+  EXCEPT = true,
+  INTERSECT = true,
+  -- Multi-word keywords tracked by first word
+  INNER = true,
+  LEFT = true,
+  RIGHT = true,
+  FULL = true,
+  CROSS = true,
+  OUTER = true,
+  GROUP = true,
+  ORDER = true,
+  INSERT = true,
+  UPDATE = true,
+  DELETE = true,
+  MERGE = true,
+}
+
+---Get the full keyword text for multi-word keywords (e.g., "INNER JOIN", "ORDER BY")
+---@param tokens table[] Array of tokens
+---@param idx number Starting token index
+---@return string Full keyword text
+---@return number End index of the keyword
+local function get_full_keyword(tokens, idx)
+  local token = tokens[idx]
+  local upper = string.upper(token.text)
+  local text = token.text
+  local end_idx = idx
+
+  -- Check for multi-word keywords
+  -- Look ahead for next keyword/identifier
+  local next_idx = idx + 1
+  while next_idx <= #tokens and tokens[next_idx].type == "whitespace" do
+    next_idx = next_idx + 1
+  end
+
+  if next_idx <= #tokens and tokens[next_idx].type == "keyword" then
+    local next_upper = string.upper(tokens[next_idx].text)
+
+    -- JOIN modifiers: INNER JOIN, LEFT JOIN, RIGHT JOIN, FULL JOIN, CROSS JOIN
+    -- Also: LEFT OUTER JOIN, RIGHT OUTER JOIN, FULL OUTER JOIN
+    if upper == "INNER" or upper == "LEFT" or upper == "RIGHT" or upper == "FULL" or upper == "CROSS" then
+      if next_upper == "JOIN" then
+        text = text .. " " .. tokens[next_idx].text
+        end_idx = next_idx
+      elseif next_upper == "OUTER" then
+        -- Look for JOIN after OUTER
+        local join_idx = next_idx + 1
+        while join_idx <= #tokens and tokens[join_idx].type == "whitespace" do
+          join_idx = join_idx + 1
+        end
+        if join_idx <= #tokens and tokens[join_idx].type == "keyword" and
+           string.upper(tokens[join_idx].text) == "JOIN" then
+          text = text .. " " .. tokens[next_idx].text .. " " .. tokens[join_idx].text
+          end_idx = join_idx
+        else
+          text = text .. " " .. tokens[next_idx].text
+          end_idx = next_idx
+        end
+      end
+    -- GROUP BY, ORDER BY
+    elseif upper == "GROUP" or upper == "ORDER" then
+      if next_upper == "BY" then
+        text = text .. " " .. tokens[next_idx].text
+        end_idx = next_idx
+      end
+    -- INSERT INTO
+    elseif upper == "INSERT" then
+      if next_upper == "INTO" then
+        text = text .. " " .. tokens[next_idx].text
+        end_idx = next_idx
+      end
+    -- DELETE FROM (when FROM follows DELETE)
+    elseif upper == "DELETE" then
+      if next_upper == "FROM" then
+        text = text .. " " .. tokens[next_idx].text
+        end_idx = next_idx
+      end
+    -- CROSS APPLY, OUTER APPLY
+    elseif upper == "CROSS" or upper == "OUTER" then
+      if next_upper == "APPLY" then
+        text = text .. " " .. tokens[next_idx].text
+        end_idx = next_idx
+      end
+    end
+  end
+
+  return text, end_idx
+end
+
+---Find keywords at line starts that should be right-aligned
+---@param tokens table[] Array of tokens
+---@param config table Formatter config
+---@return table[] Array of {idx, keyword_text, keyword_len, indent_level}
+local function find_river_keywords(tokens, config)
+  local keywords = {}
+  local is_first_significant = true  -- Track if we're looking at first keyword of statement
+
+  for i, token in ipairs(tokens) do
+    -- Skip whitespace for first-token detection
+    if token.type == "whitespace" or token.type == "newline" then
+      goto continue
+    end
+
+    -- Consider keywords that either:
+    -- 1. Start a new line (newline_before = true)
+    -- 2. Are the first significant token in the statement
+    if token.type == "keyword" then
+      local upper = string.upper(token.text)
+
+      -- Check if this is a keyword we want to right-align
+      if RIVER_KEYWORDS[upper] then
+        local starts_line = token.newline_before or is_first_significant
+
+        if starts_line then
+          local full_text, end_idx = get_full_keyword(tokens, i)
+          table.insert(keywords, {
+            idx = i,
+            end_idx = end_idx,
+            keyword_text = full_text,
+            keyword_len = #full_text,
+            indent_level = token.indent_level or 0,
+          })
+        end
+      end
+    end
+
+    -- Reset first_significant after semicolon or GO (start of new statement)
+    if token.type == "semicolon" or token.type == "go" then
+      is_first_significant = true
+    else
+      is_first_significant = false
+    end
+
+    ::continue::
+  end
+
+  return keywords
+end
+
 ---Find inline line comments and calculate content length before each
 ---An inline comment is a line comment that follows code on the same line.
 ---We detect this by checking if there's no newline_before annotation on the comment.
@@ -410,6 +561,64 @@ function AlignPass.run(tokens, config)
     end
   end
 
+  -- Keyword right alignment (river style)
+  -- Right-aligns SQL keywords like SELECT, FROM, WHERE, JOIN, etc.
+  -- to create a "river" of whitespace down the left side
+  if config.keyword_right_align then
+    local keywords = find_river_keywords(tokens, config)
+
+    if #keywords > 0 then
+      -- Find the global max keyword length at the base indent level (level 0)
+      -- This becomes the alignment target for all keywords at base level
+      local base_max_len = 0
+      for _, info in ipairs(keywords) do
+        if info.indent_level == 0 and info.keyword_len > base_max_len then
+          base_max_len = info.keyword_len
+        end
+      end
+
+      -- Apply right-alignment padding to all keywords at base level
+      for _, info in ipairs(keywords) do
+        if info.indent_level == 0 then
+          local padding = base_max_len - info.keyword_len
+          if padding > 0 then
+            -- Add padding before the first token of the keyword
+            tokens[info.idx].align_padding = (tokens[info.idx].align_padding or 0) + padding
+          end
+        end
+      end
+
+      -- For keywords at deeper indent levels (subqueries, etc.),
+      -- align within their own group
+      local by_indent = {}
+      for _, info in ipairs(keywords) do
+        if info.indent_level > 0 then
+          local level = info.indent_level
+          if not by_indent[level] then
+            by_indent[level] = {}
+          end
+          table.insert(by_indent[level], info)
+        end
+      end
+
+      for _, group in pairs(by_indent) do
+        local max_len = 0
+        for _, info in ipairs(group) do
+          if info.keyword_len > max_len then
+            max_len = info.keyword_len
+          end
+        end
+
+        for _, info in ipairs(group) do
+          local padding = max_len - info.keyword_len
+          if padding > 0 then
+            tokens[info.idx].align_padding = (tokens[info.idx].align_padding or 0) + padding
+          end
+        end
+      end
+    end
+  end
+
   return tokens
 end
 
@@ -419,7 +628,7 @@ function AlignPass.info()
   return {
     name = "align",
     order = 8,
-    description = "Handle alignment features (select_column_align, from_alias_align, update_set_align, inline_comment_align)",
+    description = "Handle alignment features (select_column_align, from_alias_align, update_set_align, inline_comment_align, keyword_right_align)",
     annotations = {
       "align_padding",
     },

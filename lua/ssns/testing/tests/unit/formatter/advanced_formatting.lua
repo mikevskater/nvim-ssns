@@ -367,4 +367,306 @@ return {
             contains = { "COALESCE(NULLIF(LTRIM(RTRIM(name)), ''), default_name)" }
         }
     },
+
+    -- batch_separator_style tests (IDs: 9200-9210)
+    -- Options: "go" (default), "semicolon"
+    -- Controls whether statements are terminated with GO or semicolon
+    {
+        id = 9200,
+        type = "formatter",
+        name = "batch_separator_style go (default) - preserves GO",
+        input = "SELECT 1\nGO\nSELECT 2",
+        opts = { batch_separator_style = "go" },
+        expected = {
+            contains = { "GO" }
+        }
+    },
+    {
+        id = 9201,
+        type = "formatter",
+        name = "batch_separator_style go - preserves semicolons",
+        input = "SELECT 1; SELECT 2;",
+        opts = { batch_separator_style = "go" },
+        expected = {
+            -- In go mode, semicolons are preserved (not converted to GO)
+            contains = { ";" }
+        }
+    },
+    {
+        id = 9202,
+        type = "formatter",
+        name = "batch_separator_style semicolon - converts GO to semicolon",
+        input = "SELECT 1\nGO\nSELECT 2",
+        opts = { batch_separator_style = "semicolon" },
+        expected = {
+            -- GO should be replaced with semicolon
+            contains = { ";" },
+            excludes = { "GO" }
+        }
+    },
+    {
+        id = 9203,
+        type = "formatter",
+        name = "batch_separator_style semicolon - preserves existing semicolons",
+        input = "SELECT 1; SELECT 2;",
+        opts = { batch_separator_style = "semicolon" },
+        expected = {
+            contains = { ";" }
+        }
+    },
+    {
+        id = 9204,
+        type = "formatter",
+        name = "batch_separator_style semicolon - multiple GOs",
+        input = "SELECT 1\nGO\nSELECT 2\nGO\nSELECT 3\nGO",
+        opts = { batch_separator_style = "semicolon" },
+        expected = {
+            -- All GOs should be replaced with semicolons
+            excludes = { "GO" }
+        }
+    },
+    {
+        id = 9205,
+        type = "formatter",
+        name = "batch_separator_style go - GO casing preserved",
+        input = "SELECT 1\ngo\nSELECT 2",
+        opts = { batch_separator_style = "go", keyword_case = "preserve" },
+        expected = {
+            -- GO casing should be preserved when keyword_case = preserve
+            contains = { "go" }
+        }
+    },
+    {
+        id = 9206,
+        type = "formatter",
+        name = "batch_separator_style go - GO casing uppercased",
+        input = "SELECT 1\ngo\nSELECT 2",
+        opts = { batch_separator_style = "go", keyword_case = "upper" },
+        expected = {
+            -- GO should be uppercased
+            contains = { "GO" }
+        }
+    },
+    {
+        id = 9207,
+        type = "formatter",
+        name = "batch_separator_style semicolon - handles GO with count",
+        input = "SELECT 1\nGO 5\nSELECT 2",
+        opts = { batch_separator_style = "semicolon" },
+        expected = {
+            -- GO 5 means "execute 5 times", can't be converted to semicolon
+            -- GO is preserved (not converted to semicolon)
+            -- Note: formatter may put GO and count on separate lines
+            contains = { "GO" },
+            excludes = { ";" }
+        }
+    },
+    {
+        id = 9208,
+        type = "formatter",
+        name = "batch_separator_style go - complex batch",
+        input = "CREATE TABLE t1 (id INT)\nGO\nINSERT INTO t1 VALUES (1)\nGO\nSELECT * FROM t1\nGO",
+        opts = { batch_separator_style = "go" },
+        expected = {
+            contains = { "GO" }
+        }
+    },
+    {
+        id = 9209,
+        type = "formatter",
+        name = "batch_separator_style semicolon - DDL statements",
+        input = "CREATE TABLE t1 (id INT)\nGO\nDROP TABLE t1\nGO",
+        opts = { batch_separator_style = "semicolon" },
+        expected = {
+            -- DDL statements with GO converted to semicolons
+            contains = { ";" },
+            excludes = { "GO" }
+        }
+    },
+
+    -- keyword_right_align tests (IDs: 9210-9225)
+    -- Right-aligns SQL keywords to create "river" style formatting
+    -- Keywords are right-aligned within a fixed width
+    {
+        id = 9210,
+        type = "formatter",
+        name = "keyword_right_align false (default) - left-aligned",
+        input = "SELECT id, name FROM users WHERE status = 1",
+        opts = { keyword_right_align = false },
+        expected = {
+            -- Keywords at start of line (left-aligned)
+            matches = { "^SELECT" }
+        }
+    },
+    {
+        id = 9211,
+        type = "formatter",
+        name = "keyword_right_align true - simple SELECT",
+        input = "SELECT id, name FROM users WHERE status = 1",
+        opts = { keyword_right_align = true },
+        expected = {
+            -- Keywords right-aligned: SELECT, FROM, WHERE should align on right edge
+            -- "SELECT" (6 chars) -> "SELECT" (no padding needed, widest keyword)
+            -- "FROM" (4 chars) -> "  FROM" (padded to match SELECT width)
+            -- "WHERE" (5 chars) -> " WHERE" (padded to match SELECT width)
+            matches = { " +FROM", " +WHERE" }
+        }
+    },
+    {
+        id = 9212,
+        type = "formatter",
+        name = "keyword_right_align true - with JOIN",
+        input = "SELECT u.id FROM users u INNER JOIN orders o ON u.id = o.user_id WHERE o.status = 1",
+        opts = { keyword_right_align = true },
+        expected = {
+            -- Keywords right-aligned to longest (INNER JOIN = 10 chars)
+            -- SELECT (6) gets 4 padding, FROM (4) gets 6 padding, WHERE (5) gets 5 padding
+            -- INNER JOIN is longest, gets no padding (starts at column 0)
+            matches = { " +SELECT", " +FROM", "INNER JOIN", " +ON", " +WHERE" }
+        }
+    },
+    {
+        id = 9213,
+        type = "formatter",
+        name = "keyword_right_align true - GROUP BY and ORDER BY",
+        input = "SELECT category, COUNT(*) FROM products GROUP BY category ORDER BY COUNT(*) DESC",
+        opts = { keyword_right_align = true },
+        expected = {
+            -- GROUP BY and ORDER BY are 8 chars (longest), SELECT is 6, FROM is 4
+            -- GROUP BY/ORDER BY get no padding, SELECT/FROM get padding
+            matches = { " +SELECT", " +FROM", "GROUP BY", "ORDER BY" }
+        }
+    },
+    {
+        id = 9214,
+        type = "formatter",
+        name = "keyword_right_align true - INSERT",
+        input = "INSERT INTO users (id, name) VALUES (1, 'test')",
+        opts = { keyword_right_align = true },
+        expected = {
+            -- INSERT INTO should be right-aligned
+            matches = { "INSERT INTO", " +VALUES" }
+        }
+    },
+    {
+        id = 9215,
+        type = "formatter",
+        name = "keyword_right_align true - UPDATE SET WHERE",
+        input = "UPDATE users SET name = 'new' WHERE id = 1",
+        opts = { keyword_right_align = true },
+        expected = {
+            matches = { "UPDATE", " +SET", " +WHERE" }
+        }
+    },
+    {
+        id = 9216,
+        type = "formatter",
+        name = "keyword_right_align true - DELETE",
+        input = "DELETE FROM users WHERE id = 1",
+        opts = { keyword_right_align = true },
+        expected = {
+            matches = { "DELETE", " +FROM", " +WHERE" }
+        }
+    },
+    {
+        id = 9217,
+        type = "formatter",
+        name = "keyword_right_align true - multiple JOINs",
+        input = "SELECT * FROM t1 LEFT JOIN t2 ON t1.id = t2.id RIGHT JOIN t3 ON t2.id = t3.id",
+        opts = { keyword_right_align = true },
+        expected = {
+            -- LEFT JOIN and RIGHT JOIN are 10 chars (longest), SELECT is 6, FROM is 4, ON is 2
+            -- JOINs get no padding, SELECT/FROM/ON get padding
+            matches = { " +SELECT", " +FROM", "LEFT JOIN", " +ON", "RIGHT JOIN" }
+        }
+    },
+    {
+        id = 9218,
+        type = "formatter",
+        name = "keyword_right_align true - HAVING clause",
+        input = "SELECT category, COUNT(*) cnt FROM products GROUP BY category HAVING COUNT(*) > 5",
+        opts = { keyword_right_align = true },
+        expected = {
+            -- GROUP BY is 8 chars (longest), SELECT is 6, FROM is 4, HAVING is 6
+            -- GROUP BY gets no padding, others get padding
+            matches = { " +SELECT", " +FROM", "GROUP BY", " +HAVING" }
+        }
+    },
+    {
+        id = 9219,
+        type = "formatter",
+        name = "keyword_right_align true - CTE WITH",
+        input = "WITH cte AS (SELECT * FROM t1) SELECT * FROM cte",
+        opts = { keyword_right_align = true },
+        expected = {
+            -- WITH at top level should be left-most
+            contains = { "WITH cte AS" }
+        }
+    },
+    {
+        id = 9220,
+        type = "formatter",
+        name = "keyword_right_align true - UNION",
+        input = "SELECT id FROM t1 UNION SELECT id FROM t2",
+        opts = { keyword_right_align = true },
+        expected = {
+            matches = { " +FROM", "UNION" }
+        }
+    },
+    {
+        id = 9221,
+        type = "formatter",
+        name = "keyword_right_align false - subquery preserved",
+        input = "SELECT * FROM (SELECT id FROM t1) AS sub WHERE id > 0",
+        opts = { keyword_right_align = false },
+        expected = {
+            -- Normal left-aligned
+            matches = { "^SELECT", "FROM %(" }
+        }
+    },
+    {
+        id = 9222,
+        type = "formatter",
+        name = "keyword_right_align true - subquery inner keywords",
+        input = "SELECT * FROM (SELECT id FROM t1) AS sub WHERE id > 0",
+        opts = { keyword_right_align = true },
+        expected = {
+            -- Inner SELECT/FROM in subquery should also be right-aligned relative to context
+            contains = { "SELECT id", "FROM t1" }
+        }
+    },
+    {
+        id = 9223,
+        type = "formatter",
+        name = "keyword_right_align true - OUTPUT clause",
+        input = "DELETE FROM users OUTPUT DELETED.* WHERE id = 1",
+        opts = { keyword_right_align = true },
+        expected = {
+            matches = { " +FROM", " +OUTPUT", " +WHERE" }
+        }
+    },
+    {
+        id = 9224,
+        type = "formatter",
+        name = "keyword_right_align true - long keyword alignment",
+        input = "SELECT id FROM users CROSS APPLY fn(id) WHERE active = 1",
+        opts = { keyword_right_align = true, cross_apply_newline = true },
+        expected = {
+            -- CROSS APPLY is longer than SELECT, alignment should accommodate
+            matches = { " +FROM", "CROSS APPLY", " +WHERE" }
+        }
+    },
+    {
+        id = 9225,
+        type = "formatter",
+        name = "keyword_right_align true - river style example",
+        input = "SELECT a, b, c FROM t1 INNER JOIN t2 ON t1.id = t2.id WHERE x = 1 AND y = 2 GROUP BY a, b HAVING COUNT(*) > 1 ORDER BY a",
+        opts = { keyword_right_align = true },
+        expected = {
+            -- INNER JOIN is 10 chars (longest), all shorter keywords get padding
+            -- GROUP BY, ORDER BY (8 chars) get 2 padding
+            -- SELECT (6) gets 4, FROM (4) gets 6, ON (2) gets 8, WHERE (5) gets 5, HAVING (6) gets 4
+            matches = { " +SELECT", " +FROM", "INNER JOIN", " +ON", " +WHERE", " +GROUP BY", " +HAVING", " +ORDER BY" }
+        }
+    },
 }

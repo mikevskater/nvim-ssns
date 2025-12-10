@@ -500,6 +500,60 @@ local function transform_schema_qualify(tokens, config)
 end
 
 -- =============================================================================
+-- Batch Separator Style Transformation
+-- =============================================================================
+
+---Check if a GO token has a count parameter (e.g., GO 5)
+---@param tokens table[] Array of tokens
+---@param go_pos number Position of GO token
+---@return boolean has_count True if GO is followed by a number
+local function go_has_count(tokens, go_pos)
+  local j = go_pos + 1
+  -- Skip whitespace (but not newlines - GO count must be on same line)
+  while j <= #tokens and tokens[j].type == "whitespace" do
+    j = j + 1
+  end
+  -- Check if next token is a number
+  if j <= #tokens and tokens[j].type == "number" then
+    return true
+  end
+  return false
+end
+
+---Apply batch_separator_style transformation
+---Converts GO to semicolon when batch_separator_style = "semicolon"
+---@param tokens table[] Array of tokens
+---@param config table Formatter configuration
+local function transform_batch_separator(tokens, config)
+  local style = config.batch_separator_style
+  if not style or style == "go" then
+    -- Default: preserve GO tokens as-is
+    return
+  end
+
+  if style ~= "semicolon" then
+    return
+  end
+
+  -- "semicolon" mode: convert GO to semicolon
+  for i, token in ipairs(tokens) do
+    if token.type == "go" then
+      -- Check if GO has a count parameter (GO 5 = execute 5 times)
+      -- Can't convert these to semicolons - preserve as-is
+      if go_has_count(tokens, i) then
+        -- Preserve GO N pattern
+      else
+        -- Convert GO to semicolon
+        -- Mark the GO token for removal and insert semicolon before it
+        token.type = "semicolon"
+        token.text = ";"
+        token.converted_from_go = true
+      end
+    end
+  end
+end
+
+-- =============================================================================
 -- Main Pass
 -- =============================================================================
 
@@ -516,6 +570,7 @@ function TransformPass.run(tokens, config)
   transform_delete_from(tokens, config)
   transform_use_as_keyword(tokens, config)
   transform_schema_qualify(tokens, config)
+  transform_batch_separator(tokens, config)
 
   return tokens
 end
