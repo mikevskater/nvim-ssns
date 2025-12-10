@@ -481,4 +481,140 @@ return {
             matches = { "FROM users u\nCROSS APPLY fn" }
         }
     },
+
+    -- nested_join_indent tests (IDs: 9120-9135)
+    -- Formula: indent_level = base_indent + join_indent + (nested_join_indent * subquery_depth)
+    {
+        id = 9120,
+        type = "formatter",
+        name = "nested_join_indent - main query JOIN not affected",
+        input = "SELECT * FROM users u INNER JOIN orders o ON u.id = o.user_id",
+        config = { nested_join_indent = 1, join_indent_style = "indent" },
+        expected = {
+            -- Main query: base(0) + join(1) + nested(1*0) = 1 level = 4 spaces
+            matches = { "FROM users u\n    INNER JOIN orders o" }
+        }
+    },
+    {
+        id = 9121,
+        type = "formatter",
+        name = "nested_join_indent 1 - JOIN in subquery gets extra indent",
+        input = "SELECT * FROM orders WHERE customer_id IN (SELECT c.id FROM customers c INNER JOIN addresses a ON c.id = a.customer_id)",
+        config = { nested_join_indent = 1, join_indent_style = "indent" },
+        expected = {
+            -- Subquery depth 1: base(1) + join(1) + nested(1*1) = 3 levels = 12 spaces
+            matches = { "FROM customers c\n            INNER JOIN addresses a" }
+        }
+    },
+    {
+        id = 9122,
+        type = "formatter",
+        name = "nested_join_indent 0 - no extra indent for nested JOINs",
+        input = "SELECT * FROM orders WHERE customer_id IN (SELECT c.id FROM customers c INNER JOIN addresses a ON c.id = a.customer_id)",
+        config = { nested_join_indent = 0, join_indent_style = "indent" },
+        expected = {
+            -- Subquery depth 1: base(1) + join(1) + nested(0*1) = 2 levels = 8 spaces
+            matches = { "FROM customers c\n        INNER JOIN addresses a" }
+        }
+    },
+    {
+        id = 9123,
+        type = "formatter",
+        name = "nested_join_indent 2 - double extra indent for nested JOINs",
+        input = "SELECT * FROM orders WHERE customer_id IN (SELECT c.id FROM customers c INNER JOIN addresses a ON c.id = a.customer_id)",
+        config = { nested_join_indent = 2, join_indent_style = "indent" },
+        expected = {
+            -- Subquery depth 1: base(1) + join(1) + nested(2*1) = 4 levels = 16 spaces
+            matches = { "FROM customers c\n                INNER JOIN addresses a" }
+        }
+    },
+    {
+        id = 9124,
+        type = "formatter",
+        name = "nested_join_indent - multiple JOINs in subquery",
+        input = "SELECT * FROM orders WHERE customer_id IN (SELECT c.id FROM customers c INNER JOIN addresses a ON c.id = a.customer_id LEFT JOIN phones p ON c.id = p.customer_id)",
+        config = { nested_join_indent = 1, join_indent_style = "indent" },
+        expected = {
+            -- Both JOINs in subquery should get extra indent (12 spaces each)
+            matches = { "            INNER JOIN addresses a", "            LEFT JOIN phones p" }
+        }
+    },
+    {
+        id = 9125,
+        type = "formatter",
+        name = "nested_join_indent - derived table JOIN",
+        input = "SELECT * FROM (SELECT c.* FROM customers c INNER JOIN orders o ON c.id = o.customer_id) AS customer_orders",
+        config = { nested_join_indent = 1, join_indent_style = "indent" },
+        expected = {
+            -- Subquery depth 1: base(1) + join(1) + nested(1*1) = 3 levels = 12 spaces
+            matches = { "FROM customers c\n            INNER JOIN orders o" }
+        }
+    },
+    {
+        id = 9126,
+        type = "formatter",
+        name = "nested_join_indent - deeply nested subquery",
+        input = "SELECT * FROM a WHERE x IN (SELECT b.id FROM b WHERE y IN (SELECT c.id FROM c INNER JOIN d ON c.id = d.c_id))",
+        config = { nested_join_indent = 1, join_indent_style = "indent" },
+        expected = {
+            -- Subquery depth 2: base(2) + join(1) + nested(1*2) = 5 levels = 20 spaces
+            matches = { "FROM c\n                    INNER JOIN d" }
+        }
+    },
+    {
+        id = 9127,
+        type = "formatter",
+        name = "nested_join_indent with join_indent_style align",
+        input = "SELECT * FROM orders WHERE customer_id IN (SELECT c.id FROM customers c INNER JOIN addresses a ON c.id = a.customer_id)",
+        config = { nested_join_indent = 1, join_indent_style = "align" },
+        expected = {
+            -- Subquery depth 1: base(1) + join(0) + nested(1*1) = 2 levels = 8 spaces
+            matches = { "FROM customers c\n        INNER JOIN addresses a" }
+        }
+    },
+    {
+        id = 9128,
+        type = "formatter",
+        name = "nested_join_indent - ON clause also indented",
+        input = "SELECT * FROM orders WHERE customer_id IN (SELECT c.id FROM customers c INNER JOIN addresses a ON c.id = a.customer_id)",
+        config = { nested_join_indent = 1, join_indent_style = "indent", join_on_same_line = false },
+        expected = {
+            -- ON: base(1) + join(1) + nested(1*1) + 1 = 4 levels = 16 spaces
+            matches = { "INNER JOIN addresses a\n                ON c.id = a.customer_id" }
+        }
+    },
+    {
+        id = 9129,
+        type = "formatter",
+        name = "nested_join_indent - main and nested JOINs together",
+        input = "SELECT * FROM orders o INNER JOIN (SELECT c.id, c.name FROM customers c INNER JOIN addresses a ON c.id = a.customer_id) AS cust ON o.customer_id = cust.id",
+        config = { nested_join_indent = 1, join_indent_style = "indent" },
+        expected = {
+            -- Main query JOIN: 4 spaces (1 level)
+            -- Subquery JOIN: 12 spaces (3 levels)
+            contains = { "    INNER JOIN (", "            INNER JOIN addresses a" }
+        }
+    },
+    {
+        id = 9130,
+        type = "formatter",
+        name = "nested_join_indent - EXISTS subquery",
+        input = "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers c INNER JOIN addresses a ON c.id = a.customer_id WHERE c.id = o.customer_id)",
+        config = { nested_join_indent = 1, join_indent_style = "indent" },
+        expected = {
+            -- Subquery depth 1: base(1) + join(1) + nested(1*1) = 3 levels = 12 spaces
+            matches = { "FROM customers c\n            INNER JOIN addresses a" }
+        }
+    },
+    {
+        id = 9131,
+        type = "formatter",
+        name = "nested_join_indent - CROSS APPLY in subquery",
+        input = "SELECT * FROM orders WHERE customer_id IN (SELECT c.id FROM customers c CROSS APPLY fn_GetAddresses(c.id) a)",
+        config = { nested_join_indent = 1, join_indent_style = "indent", cross_apply_newline = true },
+        expected = {
+            -- Subquery depth 1: base(1) + join(1) + nested(1*1) = 3 levels = 12 spaces
+            matches = { "FROM customers c\n            CROSS APPLY fn_GetAddresses" }
+        }
+    },
 }

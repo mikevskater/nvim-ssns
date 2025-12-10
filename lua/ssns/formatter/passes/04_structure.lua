@@ -448,7 +448,9 @@ function StructurePass.run(tokens, config)
           token.newline_before = true
           -- join_indent_style: "indent" adds +1 level, "align" stays at base
           local join_indent = config.join_indent_style == "indent" and 1 or 0
-          token.indent_level = state.base_indent + join_indent
+          -- nested_join_indent: extra indent for JOINs inside subqueries
+          local nested_indent = (config.nested_join_indent or 0) * (token.subquery_depth or 0)
+          token.indent_level = state.base_indent + join_indent + nested_indent
         end
 
         state.pending_join_modifier = true
@@ -467,7 +469,9 @@ function StructurePass.run(tokens, config)
             token.newline_before = true
             -- join_indent_style: "indent" adds +1 level, "align" stays at base
             local join_indent = config.join_indent_style == "indent" and 1 or 0
-            token.indent_level = state.base_indent + join_indent
+            -- nested_join_indent: extra indent for JOINs inside subqueries
+            local nested_indent = (config.nested_join_indent or 0) * (token.subquery_depth or 0)
+            token.indent_level = state.base_indent + join_indent + nested_indent
           end
         end
         state.pending_join_modifier = false
@@ -538,7 +542,9 @@ function StructurePass.run(tokens, config)
           token.newline_before = true
           -- ON indented from JOIN: +1 for join_indent_style, +1 for ON offset
           local join_indent = config.join_indent_style == "indent" and 1 or 0
-          token.indent_level = state.base_indent + join_indent + 1
+          -- nested_join_indent: extra indent for ON inside subqueries
+          local nested_indent = (config.nested_join_indent or 0) * (token.subquery_depth or 0)
+          token.indent_level = state.base_indent + join_indent + nested_indent + 1
         end
 
         -- Check for stacked_indent - first condition should be on new line (skip in CTE/MERGE compact mode)
@@ -628,7 +634,9 @@ function StructurePass.run(tokens, config)
           if style == "stacked" or style == "stacked_indent" then
             -- ON conditions: +1 for join_indent_style, +1 for ON offset, same level for AND/OR
             local join_indent = config.join_indent_style == "indent" and 1 or 0
-            local on_indent = state.base_indent + join_indent + 2
+            -- nested_join_indent: extra indent for ON conditions inside subqueries
+            local nested_indent = (config.nested_join_indent or 0) * (token.subquery_depth or 0)
+            local on_indent = state.base_indent + join_indent + nested_indent + 2
             if position == "leading" then
               token.newline_before = true
               token.indent_level = on_indent
@@ -893,7 +901,9 @@ function StructurePass.run(tokens, config)
           token.newline_before = true
           -- +1 for join_indent_style, +1 for ON offset
           local join_indent = config.join_indent_style == "indent" and 1 or 0
-          token.indent_level = state.base_indent + join_indent + 2
+          -- nested_join_indent: extra indent for ON first condition inside subqueries
+          local nested_indent = (config.nested_join_indent or 0) * (token.subquery_depth or 0)
+          token.indent_level = state.base_indent + join_indent + nested_indent + 2
         end
         state.pending_on_first = false
       end
