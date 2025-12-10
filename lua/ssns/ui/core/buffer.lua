@@ -328,7 +328,7 @@ end
 ---@param force boolean? If true, quit Neovim if this is the last window
 function UiBuffer.close(force)
   -- Save cursor position before closing
-  local Tree = require('ssns.ui.tree')
+  local Tree = require('ssns.ui.core.tree')
   Tree.save_cursor_position()
 
   if UiBuffer.is_open() then
@@ -401,122 +401,122 @@ function UiBuffer.setup_keymaps()
     -- Close window
     {
       lhs = km.close or KeymapManager.get("common", "close", "q"),
-      rhs = "<Cmd>lua require('ssns.ui.buffer').close()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.buffer').close()<CR>",
       desc = "Close SSNS",
     },
     -- Expand/collapse node
     {
       lhs = km.toggle or "<CR>",
-      rhs = "<Cmd>lua require('ssns.ui.tree').toggle_node()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').toggle_node()<CR>",
       desc = "Expand/collapse node",
     },
     {
       lhs = km.toggle_alt or "o",
-      rhs = "<Cmd>lua require('ssns.ui.tree').toggle_node()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').toggle_node()<CR>",
       desc = "Expand/collapse node (alt)",
     },
     -- Refresh
     {
       lhs = km.refresh or "r",
-      rhs = "<Cmd>lua require('ssns.ui.tree').refresh_node()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').refresh_node()<CR>",
       desc = "Refresh node",
     },
     {
       lhs = km.refresh_all or "R",
-      rhs = "<Cmd>lua require('ssns.ui.tree').refresh_all()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').refresh_all()<CR>",
       desc = "Refresh all",
     },
     -- Filter
     {
       lhs = km.filter or "f",
-      rhs = "<Cmd>lua require('ssns.ui.tree').open_filter()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').open_filter()<CR>",
       desc = "Filter group",
     },
     {
       lhs = km.filter_clear or "F",
-      rhs = "<Cmd>lua require('ssns.ui.tree').clear_filter()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').clear_filter()<CR>",
       desc = "Clear filter",
     },
     -- Connect/disconnect
     {
       lhs = km.toggle_connection or "d",
-      rhs = "<Cmd>lua require('ssns.ui.tree').toggle_connection()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').toggle_connection()<CR>",
       desc = "Toggle connection",
     },
     -- Set lualine color
     {
       lhs = km.set_lualine_color or "<Leader>c",
-      rhs = "<Cmd>lua require('ssns.ui.tree').set_lualine_color()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').set_lualine_color()<CR>",
       desc = "Set lualine color",
     },
     -- Help
     {
       lhs = km.help or "?",
-      rhs = "<Cmd>lua require('ssns.ui.buffer').show_help()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.buffer').show_help()<CR>",
       desc = "Show help",
     },
     -- New query buffer
     {
       lhs = km.new_query or "<C-n>",
-      rhs = "<Cmd>lua require('ssns.ui.tree').new_query_from_context()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').new_query_from_context()<CR>",
       desc = "New query buffer with USE statement",
     },
     -- Go to first/last child
     {
       lhs = km.goto_first_child or "<C-[>",
-      rhs = "<Cmd>lua require('ssns.ui.tree').goto_first_child()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').goto_first_child()<CR>",
       desc = "Go to first child in group",
     },
     {
       lhs = km.goto_last_child or "<C-]>",
-      rhs = "<Cmd>lua require('ssns.ui.tree').goto_last_child()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').goto_last_child()<CR>",
       desc = "Go to last child in group",
     },
     -- Toggle parent group
     {
       lhs = km.toggle_group or "g",
-      rhs = "<Cmd>lua require('ssns.ui.tree').toggle_group()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').toggle_group()<CR>",
       desc = "Toggle parent group",
     },
     -- Add server
     {
       lhs = km.add_server or "a",
-      rhs = "<Cmd>lua require('ssns.ui.add_server').open()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.dialogs.add_server').open()<CR>",
       desc = "Add server connection",
     },
     -- Toggle favorite
     {
       lhs = km.toggle_favorite or "*",
-      rhs = "<Cmd>lua require('ssns.ui.tree').toggle_favorite()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').toggle_favorite()<CR>",
       desc = "Toggle server favorite",
     },
     -- Show history
     {
       lhs = km.show_history or "<Leader>@",
-      rhs = "<Cmd>lua require('ssns.ui.tree').show_history_from_context()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').show_history_from_context()<CR>",
       desc = "Show query history for server",
     },
     -- View definition (ALTER script)
     {
       lhs = km.view_definition or "K",
-      rhs = "<Cmd>lua require('ssns.ui.tree').view_definition()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').view_definition()<CR>",
       desc = "View object definition",
     },
     -- View metadata
     {
       lhs = km.view_metadata or "M",
-      rhs = "<Cmd>lua require('ssns.ui.tree').view_metadata()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').view_metadata()<CR>",
       desc = "View object metadata",
     },
     -- Mouse support
     {
       lhs = "<LeftMouse>",
-      rhs = "<Cmd>lua require('ssns.ui.tree').handle_mouse_click()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').handle_mouse_click()<CR>",
       desc = "Select node with mouse",
     },
     {
       lhs = "<2-LeftMouse>",
-      rhs = "<Cmd>lua require('ssns.ui.tree').handle_double_click()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').handle_double_click()<CR>",
       desc = "Toggle expand with double-click",
     },
   }
@@ -525,7 +525,7 @@ function UiBuffer.setup_keymaps()
   if UiBuffer._is_float then
     table.insert(keymaps, {
       lhs = KeymapManager.get("common", "cancel", "<Esc>"),
-      rhs = "<Cmd>lua require('ssns.ui.buffer').close()<CR>",
+      rhs = "<Cmd>lua require('ssns.ui.core.buffer').close()<CR>",
       desc = "Close SSNS float",
     })
   end
@@ -546,7 +546,7 @@ function UiBuffer.setup_keymaps()
 
     vim.keymap.set("n", common.nav_down or "j", function()
       local count = vim.v.count1
-      require('ssns.ui.buffer').move_cursor_down(count)
+      require('ssns.ui.core.buffer').move_cursor_down(count)
     end, {
       buffer = bufnr,
       noremap = true,
@@ -556,7 +556,7 @@ function UiBuffer.setup_keymaps()
 
     vim.keymap.set("n", common.nav_up or "k", function()
       local count = vim.v.count1
-      require('ssns.ui.buffer').move_cursor_up(count)
+      require('ssns.ui.core.buffer').move_cursor_up(count)
     end, {
       buffer = bufnr,
       noremap = true,
@@ -693,7 +693,7 @@ end
 
 ---Show help in floating window
 function UiBuffer.show_help()
-  local UiFloat = require('ssns.ui.float')
+  local UiFloat = require('ssns.ui.core.float')
 
   local help_lines = {
     "SSNS - SQL Server NeoVim Studio",

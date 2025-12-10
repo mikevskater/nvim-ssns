@@ -68,7 +68,7 @@ end
 ---Find or create a window for query buffers (not the SSNS tree window)
 ---@return number winid
 function UiQuery.focus_query_window()
-  local ssns_buffer = require('ssns.ui.buffer')
+  local ssns_buffer = require('ssns.ui.core.buffer')
 
   -- Look for an existing query buffer window (not SSNS tree, not special buffers)
   for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -211,7 +211,7 @@ function UiQuery.setup_query_keymaps(bufnr)
 
     -- Show query history
     { mode = "n", lhs = km.show_history or "<Leader>@", rhs = function()
-      local UiHistory = require('ssns.ui.history')
+      local UiHistory = require('ssns.ui.panels.history')
       UiHistory.show_history()
     end, desc = "Show query history" },
 
@@ -237,6 +237,24 @@ function UiQuery.setup_query_keymaps(bufnr)
     { mode = "n", lhs = km.toggle_results or "<C-r>", rhs = function()
       UiQuery.toggle_results()
     end, desc = "Toggle results window" },
+
+    -- Attach connection (flat list)
+    { mode = "n", lhs = km.attach_connection or "<Leader>a", rhs = function()
+      local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+      ConnectionPicker.show(bufnr)
+    end, desc = "Attach buffer to connection" },
+
+    -- Change connection (hierarchical picker)
+    { mode = "n", lhs = km.change_connection or "<Leader>A", rhs = function()
+      local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+      ConnectionPicker.show_hierarchical(bufnr)
+    end, desc = "Change connection (server then database)" },
+
+    -- Change database only
+    { mode = "n", lhs = km.change_database or "<Leader>d", rhs = function()
+      local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+      ConnectionPicker.show_database_picker(bufnr)
+    end, desc = "Change database" },
   }
 
   KeymapManager.set_multiple(bufnr, keymaps, true)
@@ -553,7 +571,7 @@ function UiQuery.display_error(error, sql, query_bufnr)
   local query_km = KeymapManager.get_group("query")
   vim.api.nvim_buf_set_keymap(result_buf, 'n', common.close or 'q', ':close<CR>', { noremap = true, silent = true })
   vim.api.nvim_buf_set_keymap(result_buf, 'n', query_km.toggle_results or '<C-r>',
-    "<Cmd>lua require('ssns.ui.query').toggle_results()<CR>",
+    "<Cmd>lua require('ssns.ui.core.query').toggle_results()<CR>",
     { noremap = true, silent = true, desc = "Toggle results window" })
 end
 
@@ -614,7 +632,7 @@ function UiQuery.display_results(result, sql, execution_time_ms)
   local query_km = KeymapManager.get_group("query")
   vim.api.nvim_buf_set_keymap(result_buf, 'n', common.close or 'q', ':close<CR>', { noremap = true, silent = true })
   vim.api.nvim_buf_set_keymap(result_buf, 'n', query_km.toggle_results or '<C-r>',
-    "<Cmd>lua require('ssns.ui.query').toggle_results()<CR>",
+    "<Cmd>lua require('ssns.ui.core.query').toggle_results()<CR>",
     { noremap = true, silent = true, desc = "Toggle results window" })
 end
 
@@ -662,7 +680,7 @@ function UiQuery.toggle_results()
     local query_km = KeymapManager.get_group("query")
     vim.api.nvim_buf_set_keymap(result_buf, 'n', common.close or 'q', ':close<CR>', { noremap = true, silent = true })
     vim.api.nvim_buf_set_keymap(result_buf, 'n', query_km.toggle_results or '<C-r>',
-      "<Cmd>lua require('ssns.ui.query').toggle_results()<CR>",
+      "<Cmd>lua require('ssns.ui.core.query').toggle_results()<CR>",
       { noremap = true, silent = true, desc = "Toggle results window" })
   end
 end
@@ -1142,7 +1160,7 @@ function UiQuery.execute_with_params(bufnr, sql, server, database_name)
   end
 
   -- Show parameter input UI
-  local UiParamInput = require('ssns.ui.param_input')
+  local UiParamInput = require('ssns.ui.dialogs.param_input')
   UiParamInput.show_input(
     (schema_name and schema_name .. "." or "") .. bare_proc_name,
     server.name,

@@ -6,14 +6,14 @@ local UiHighlights = {}
 ---Now delegates to ThemeManager for actual highlight setup
 function UiHighlights.setup()
   -- Initialize and apply theme manager
-  local ThemeManager = require('ssns.ui.theme_manager')
+  local ThemeManager = require('ssns.ui.themes.theme_manager')
   ThemeManager.setup()
 end
 
 ---Apply highlights to buffer
 ---@param line_map table<number, BaseDbObject>? Optional line map from tree
 function UiHighlights.apply(line_map)
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
 
   if not Buffer.exists() then
     return
@@ -27,7 +27,7 @@ function UiHighlights.apply(line_map)
 
   -- If no line_map provided, try to get it from tree
   if not line_map then
-    local Tree = require('ssns.ui.tree')
+    local Tree = require('ssns.ui.core.tree')
     line_map = Tree.line_map
   end
 

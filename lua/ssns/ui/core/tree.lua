@@ -137,7 +137,7 @@ end
 ---Render the entire tree
 function UiTree.render()
   local Cache = require('ssns').get_cache()
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
   local Config = require('ssns.config')
   local icons = Config.get_ui().icons
 
@@ -212,7 +212,7 @@ function UiTree.render()
   Buffer.set_lines(lines)
 
   -- Apply syntax highlighting
-  local Highlights = require('ssns.ui.highlights')
+  local Highlights = require('ssns.ui.core.highlights')
   Highlights.apply(UiTree.line_map)
 
   -- Restore cursor position if we have a saved object
@@ -474,7 +474,7 @@ end
 ---@param indent_level number
 function UiTree.render_schema(schema, lines, indent_level)
   local Config = require('ssns.config')
-  local UiFilters = require('ssns.ui.filters')
+  local UiFilters = require('ssns.ui.core.filters')
   local icons = Config.get_ui().icons
 
   local indent = string.rep("  ", indent_level)
@@ -526,7 +526,7 @@ end
 ---@param lines string[]
 ---@param indent_level number
 function UiTree.render_object_group(group, lines, indent_level)
-  local UiFilters = require('ssns.ui.filters')
+  local UiFilters = require('ssns.ui.core.filters')
   local indent = string.rep("  ", indent_level)
   local icon = group.ui_state.expanded and "▾ " or "▸ "
 
@@ -686,7 +686,7 @@ function UiTree.render_object(obj, lines, indent_level)
     local base_name = obj.name:gsub("%s*%([%d/]+%)$", "")
     display_name = base_name
     if obj:has_children() or obj._total_items then
-      local UiFilters = require('ssns.ui.filters')
+      local UiFilters = require('ssns.ui.core.filters')
       local filters = UiFilters.get(obj)
       local all_children = obj:get_children()
       local filtered_children = UiFilters.apply(all_children, filters)
@@ -745,7 +745,7 @@ function UiTree.render_object(obj, lines, indent_level)
                                 obj.object_type == "system_schemas_group"
 
         if is_schema_node or is_object_group then
-          local UiFilters = require('ssns.ui.filters')
+          local UiFilters = require('ssns.ui.core.filters')
           local filters = UiFilters.get(obj)
           local filtered_children, total_count, filter_error = UiFilters.apply(all_children, filters)
 
@@ -930,7 +930,7 @@ end
 
 ---Toggle node expansion at current cursor
 function UiTree.toggle_node()
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
   local line_number = Buffer.get_current_line()
 
   -- Get object at current line
@@ -941,7 +941,7 @@ function UiTree.toggle_node()
 
   -- Handle "+ Add Server" action
   if obj.object_type == "add_server_action" then
-    local AddServerUI = require('ssns.ui.add_server')
+    local AddServerUI = require('ssns.ui.dialogs.add_server')
     AddServerUI.open()
     return
   end
@@ -1065,7 +1065,7 @@ end
 ---@param obj BaseDbObject
 ---@param line_number number
 function UiTree.load_node_async(obj, line_number)
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
   local Config = require('ssns.config')
   local smart_positioning = Config.get_ui().smart_cursor_positioning
 
@@ -1136,8 +1136,8 @@ end
 ---Execute an action node
 ---@param action BaseDbObject
 function UiTree.execute_action(action)
-  local Query = require('ssns.ui.query')
-  local UiBuffer = require('ssns.ui.buffer')
+  local Query = require('ssns.ui.core.query')
+  local UiBuffer = require('ssns.ui.core.buffer')
   local parent = action.parent
 
 
@@ -1203,7 +1203,7 @@ function UiTree.execute_action(action)
 
       if #input_params > 0 then
         -- Show parameter input UI BEFORE creating buffer
-        local UiParamInput = require('ssns.ui.param_input')
+        local UiParamInput = require('ssns.ui.dialogs.param_input')
         local proc_name = (parent.schema_name and parent.schema_name .. "." or "") .. parent.procedure_name
 
         UiParamInput.show_input(
@@ -1213,7 +1213,7 @@ function UiTree.execute_action(action)
           input_params,
           function(values)
             -- Build EXEC statement with user-provided values
-            local UiQuery = require('ssns.ui.query')
+            local UiQuery = require('ssns.ui.core.query')
             local sql = UiQuery.build_exec_statement(parent.schema_name, parent.procedure_name, input_params, values)
 
             -- Create buffer with the fully-formed EXEC statement
@@ -1563,7 +1563,7 @@ function UiTree.navigate_to_object(target_object)
   end
 
   -- Position cursor on the target object with smart positioning
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
   local Config = require('ssns.config')
   local smart_positioning = Config.get_ui().smart_cursor_positioning
 
@@ -1585,7 +1585,7 @@ end
 
 ---Refresh node at current cursor
 function UiTree.refresh_node()
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
   local Config = require('ssns.config')
   local smart_positioning = Config.get_ui().smart_cursor_positioning
   local line_number = Buffer.get_current_line()
@@ -1652,7 +1652,7 @@ end
 
 ---Toggle connection for server/database at current cursor
 function UiTree.toggle_connection()
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
   local Config = require('ssns.config')
   local smart_positioning = Config.get_ui().smart_cursor_positioning
   local line_number = Buffer.get_current_line()
@@ -1688,7 +1688,7 @@ end
 
 ---Toggle favorite status for server at current cursor
 function UiTree.toggle_favorite()
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
   local Connections = require('ssns.connections')
   local Config = require('ssns.config')
   local smart_positioning = Config.get_ui().smart_cursor_positioning
@@ -1739,7 +1739,7 @@ end
 
 ---Set lualine color for current server or database
 function UiTree.set_lualine_color()
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
   local line_number = Buffer.get_current_line()
 
   -- Get object at current line
@@ -1797,7 +1797,7 @@ end
 
 ---Open filter editor for the current group
 function UiTree.open_filter()
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
 
   local line = Buffer.get_current_line()
   if not line then
@@ -1832,8 +1832,8 @@ function UiTree.open_filter()
   end
 
   -- Open filter input UI
-  local UiFilterInput = require('ssns.ui.filter_input')
-  local UiFilters = require('ssns.ui.filters')
+  local UiFilterInput = require('ssns.ui.dialogs.filter_input')
+  local UiFilters = require('ssns.ui.core.filters')
   local current_filters = UiFilters.get(obj)
 
   UiFilterInput.show_input(obj, current_filters, function(filter_state)
@@ -1846,7 +1846,7 @@ end
 
 ---Clear filters for the current group
 function UiTree.clear_filter()
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
 
   local line = Buffer.get_current_line()
   if not line then
@@ -1881,7 +1881,7 @@ function UiTree.clear_filter()
   end
 
   -- Clear filters
-  local UiFilters = require('ssns.ui.filters')
+  local UiFilters = require('ssns.ui.core.filters')
   UiFilters.clear(obj)
 
   -- Refresh tree
@@ -1894,7 +1894,7 @@ end
 ---If on a group node, goes to its first child
 ---If on a child within a group, goes to the first sibling
 function UiTree.goto_first_child()
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
   local Config = require('ssns.config')
   local smart_positioning = Config.get_ui().smart_cursor_positioning
 
@@ -1913,7 +1913,7 @@ function UiTree.goto_first_child()
     local children = obj:get_children()
     if #children > 0 then
       -- Apply filters if this is a filterable group
-      local UiFilters = require('ssns.ui.filters')
+      local UiFilters = require('ssns.ui.core.filters')
       local filters = UiFilters.get(obj)
       local filtered_children = UiFilters.apply(children, filters)
       if #filtered_children > 0 then
@@ -1926,7 +1926,7 @@ function UiTree.goto_first_child()
     if parent:has_children() then
       local siblings = parent:get_children()
       -- Apply filters if parent is a filterable group
-      local UiFilters = require('ssns.ui.filters')
+      local UiFilters = require('ssns.ui.core.filters')
       local filters = UiFilters.get(parent)
       local filtered_siblings = UiFilters.apply(siblings, filters)
       if #filtered_siblings > 0 then
@@ -1956,7 +1956,7 @@ end
 ---If on a group node, goes to its last child
 ---If on a child within a group, goes to the last sibling
 function UiTree.goto_last_child()
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
   local Config = require('ssns.config')
   local smart_positioning = Config.get_ui().smart_cursor_positioning
 
@@ -1975,7 +1975,7 @@ function UiTree.goto_last_child()
     local children = obj:get_children()
     if #children > 0 then
       -- Apply filters if this is a filterable group
-      local UiFilters = require('ssns.ui.filters')
+      local UiFilters = require('ssns.ui.core.filters')
       local filters = UiFilters.get(obj)
       local filtered_children = UiFilters.apply(children, filters)
       if #filtered_children > 0 then
@@ -1988,7 +1988,7 @@ function UiTree.goto_last_child()
     if parent:has_children() then
       local siblings = parent:get_children()
       -- Apply filters if parent is a filterable group
-      local UiFilters = require('ssns.ui.filters')
+      local UiFilters = require('ssns.ui.core.filters')
       local filters = UiFilters.get(parent)
       local filtered_siblings = UiFilters.apply(siblings, filters)
       if #filtered_siblings > 0 then
@@ -2018,7 +2018,7 @@ end
 ---If on a group node, toggles that group
 ---If on a child within a group, toggles the parent group and moves cursor to it
 function UiTree.toggle_group()
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
   local Config = require('ssns.config')
   local smart_positioning = Config.get_ui().smart_cursor_positioning
 
@@ -2073,8 +2073,8 @@ end
 
 ---Create a new query buffer using the database context from the current tree node
 function UiTree.new_query_from_context()
-  local Buffer = require('ssns.ui.buffer')
-  local Query = require('ssns.ui.query')
+  local Buffer = require('ssns.ui.core.buffer')
+  local Query = require('ssns.ui.core.query')
   local Cache = require('ssns.cache')
 
   local line_number = Buffer.get_current_line()
@@ -2116,8 +2116,8 @@ end
 
 ---Show history for the server of the current node
 function UiTree.show_history_from_context()
-  local Buffer = require('ssns.ui.buffer')
-  local UiHistory = require('ssns.ui.history')
+  local Buffer = require('ssns.ui.core.buffer')
+  local UiHistory = require('ssns.ui.panels.history')
 
   local line_number = Buffer.get_current_line()
   local obj = UiTree.line_map[line_number]
@@ -2145,8 +2145,8 @@ end
 
 ---View definition (ALTER script) for the object under cursor
 function UiTree.view_definition()
-  local Buffer = require('ssns.ui.buffer')
-  local Query = require('ssns.ui.query')
+  local Buffer = require('ssns.ui.core.buffer')
+  local Query = require('ssns.ui.core.query')
 
   local line_number = Buffer.get_current_line()
   local obj = UiTree.line_map[line_number]
@@ -2195,8 +2195,8 @@ end
 
 ---View metadata for the object under cursor
 function UiTree.view_metadata()
-  local Buffer = require('ssns.ui.buffer')
-  local Float = require('ssns.ui.float')
+  local Buffer = require('ssns.ui.core.buffer')
+  local Float = require('ssns.ui.core.float')
 
   local line_number = Buffer.get_current_line()
   local obj = UiTree.line_map[line_number]
@@ -2276,7 +2276,7 @@ end
 ---Handle mouse click on tree
 ---@param double_click boolean? Whether this is a double-click
 function UiTree.handle_mouse_click(double_click)
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
 
   -- Verify tree is open
   if not Buffer.is_open() then
@@ -2323,7 +2323,7 @@ function UiTree.handle_mouse_click(double_click)
 
     -- Handle "+ Add Server" action
     if obj.object_type == "add_server_action" then
-      local AddServerUI = require('ssns.ui.add_server')
+      local AddServerUI = require('ssns.ui.dialogs.add_server')
       AddServerUI.open()
       return
     end
@@ -2375,7 +2375,7 @@ end
 ---Save current cursor position for later restoration
 ---Called before closing the tree buffer
 function UiTree.save_cursor_position()
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
 
   if not Buffer.is_open() then
     return
@@ -2399,7 +2399,7 @@ end
 ---@param target_object table The object to restore cursor to
 ---@param column number? Optional column position
 function UiTree.restore_cursor_to_object(target_object, column)
-  local Buffer = require('ssns.ui.buffer')
+  local Buffer = require('ssns.ui.core.buffer')
 
   if not Buffer.is_open() or not target_object then
     return
