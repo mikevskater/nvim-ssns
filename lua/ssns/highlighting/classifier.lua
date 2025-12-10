@@ -24,6 +24,7 @@ local TOKEN_TYPES = {
   STAR = "star",
   GO = "go",
   AT = "at",
+  VARIABLE = "variable",
   GLOBAL_VARIABLE = "global_variable",
   SYSTEM_PROCEDURE = "system_procedure",
   TEMP_TABLE = "temp_table",
@@ -621,6 +622,19 @@ function Classifier.classify(tokens, chunks, connection, config)
           token = token,
           semantic_type = "keyword_global_variable",
           highlight_group = HIGHLIGHT_MAP.keyword_global_variable,
+        }
+      end
+      prev_token = token
+      i = i + 1
+
+    elseif token.type == TOKEN_TYPES.VARIABLE then
+      -- @variable user variable/parameter (@UserId, @startCount, etc.)
+      -- These are now tokenized as a single VARIABLE token
+      if config.highlight_parameters then
+        result = {
+          token = token,
+          semantic_type = "parameter",
+          highlight_group = HIGHLIGHT_MAP.parameter,
         }
       end
       prev_token = token
@@ -1824,6 +1838,16 @@ function Classifier._build_context(chunk)
       -- Also add alias if present
       if tbl.alias then
         context.aliases[tbl.alias:lower()] = tbl.name or tbl.table
+      end
+    end
+  end
+
+  -- Extract subquery aliases
+  if chunk.subqueries then
+    for _, subquery in ipairs(chunk.subqueries) do
+      if subquery.alias then
+        -- Subquery aliases map to a placeholder indicating it's a derived table
+        context.aliases[subquery.alias:lower()] = "(subquery)"
       end
     end
   end
