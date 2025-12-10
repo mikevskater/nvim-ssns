@@ -230,7 +230,8 @@ function StructurePass.run(tokens, config)
       end
 
       -- Major clause handling
-      if MAJOR_CLAUSES[upper] then
+      -- Table hint WITH (NOLOCK) is NOT a major clause - skip MAJOR_CLAUSES treatment
+      if MAJOR_CLAUSES[upper] and not token.is_table_hint_with then
         token.is_clause_start = true
 
         -- Check if this clause should start on a new line
@@ -402,6 +403,16 @@ function StructurePass.run(tokens, config)
         state.in_from_clause = true
         -- Reset pending_join_modifier so next OUTER APPLY gets newline
         state.pending_join_modifier = false
+      end
+
+      -- Table hint WITH handling: WITH (NOLOCK), WITH (ROWLOCK), etc.
+      -- Token must have is_table_hint_with annotation from clauses pass
+      if upper == "WITH" and token.is_table_hint_with then
+        local should_newline = config.from_table_hints_newline == true
+        if should_newline then
+          token.newline_before = true
+          token.indent_level = state.base_indent + 1
+        end
       end
 
       -- ON keyword

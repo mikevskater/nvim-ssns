@@ -2376,4 +2376,117 @@ return {
             matches = { "\n.-AND status" }
         }
     },
+
+    -- =========================================================================
+    -- from_table_hints_newline tests (IDs: 8770-8779)
+    -- Table hints (WITH NOLOCK, etc.) formatting
+    -- =========================================================================
+    {
+        id = 8770,
+        type = "formatter",
+        name = "from_table_hints_newline true - basic NOLOCK",
+        input = "SELECT * FROM users WITH (NOLOCK) WHERE id = 1",
+        opts = { from_table_hints_newline = true },
+        expected = {
+            -- WITH should be on new line when from_table_hints_newline = true
+            matches = { "users\n.-WITH %(" }
+        }
+    },
+    {
+        id = 8771,
+        type = "formatter",
+        name = "from_table_hints_newline false - NOLOCK stays inline",
+        input = "SELECT * FROM users WITH (NOLOCK) WHERE id = 1",
+        opts = { from_table_hints_newline = false },
+        expected = {
+            -- WITH stays on same line as table
+            contains = { "users WITH (NOLOCK)" }
+        }
+    },
+    {
+        id = 8772,
+        type = "formatter",
+        name = "from_table_hints_newline true - table with alias",
+        input = "SELECT * FROM users u WITH (NOLOCK) WHERE u.id = 1",
+        opts = { from_table_hints_newline = true },
+        expected = {
+            -- WITH should be on new line after alias
+            matches = { "users u\n.-WITH %(" }
+        }
+    },
+    {
+        id = 8773,
+        type = "formatter",
+        name = "from_table_hints_newline true - JOIN table hint",
+        input = "SELECT * FROM users u JOIN orders o WITH (NOLOCK) ON u.id = o.user_id",
+        opts = { from_table_hints_newline = true },
+        expected = {
+            -- WITH should be on new line after JOIN table alias
+            matches = { "orders o\n.-WITH %(" }
+        }
+    },
+    {
+        id = 8774,
+        type = "formatter",
+        name = "from_table_hints_newline true - multiple hints",
+        input = "SELECT * FROM users WITH (NOLOCK, ROWLOCK) WHERE id = 1",
+        opts = { from_table_hints_newline = true },
+        expected = {
+            -- WITH should be on new line, hints stay together
+            matches = { "users\n.-WITH %(NOLOCK, ROWLOCK%)" }
+        }
+    },
+    {
+        id = 8775,
+        type = "formatter",
+        name = "from_table_hints_newline true - schema qualified table",
+        input = "SELECT * FROM dbo.users WITH (NOLOCK) WHERE id = 1",
+        opts = { from_table_hints_newline = true },
+        expected = {
+            matches = { "dbo.users\n.-WITH %(" }
+        }
+    },
+    {
+        id = 8776,
+        type = "formatter",
+        name = "from_table_hints_newline - doesn't affect CTE WITH",
+        input = "WITH cte AS (SELECT 1) SELECT * FROM cte",
+        opts = { from_table_hints_newline = true },
+        expected = {
+            -- CTE WITH should NOT get newline treatment
+            contains = { "WITH cte AS" }
+        }
+    },
+    {
+        id = 8777,
+        type = "formatter",
+        name = "from_table_hints_newline true - UPDLOCK hint",
+        input = "SELECT * FROM users WITH (UPDLOCK) WHERE id = 1",
+        opts = { from_table_hints_newline = true },
+        expected = {
+            matches = { "users\n.-WITH %(UPDLOCK%)" }
+        }
+    },
+    {
+        id = 8778,
+        type = "formatter",
+        name = "from_table_hints_newline true - multiple tables with hints",
+        input = "SELECT * FROM users u WITH (NOLOCK), orders o WITH (NOLOCK) WHERE u.id = o.user_id",
+        opts = { from_table_hints_newline = true, from_table_style = "stacked" },
+        expected = {
+            -- Both tables should have WITH on new line
+            matches = { "u\n.-WITH", "o\n.-WITH" }
+        }
+    },
+    {
+        id = 8779,
+        type = "formatter",
+        name = "from_table_hints_newline true - proper indentation",
+        input = "SELECT * FROM users WITH (NOLOCK) WHERE id = 1",
+        opts = { from_table_hints_newline = true },
+        expected = {
+            -- WITH should be indented (4 spaces by default)
+            matches = { "users\n    WITH" }
+        }
+    },
 }

@@ -103,6 +103,30 @@ function ClausesPass.run(tokens, config)
     -- Check for clause keywords
     if token.type == "keyword" then
       local upper = string.upper(token.text)
+
+      -- FIRST: Check for table hint WITH (NOLOCK, ROWLOCK, etc.)
+      -- Table hint WITH appears in FROM/JOIN clause, followed by (
+      -- This must be checked BEFORE clause_type handling to avoid
+      -- treating table hint WITH as CTE WITH
+      local is_table_hint_with = false
+      if upper == "WITH" and in_from_clause then
+        -- Look ahead for paren_open to confirm it's a table hint
+        for j = i + 1, #tokens do
+          local next_tok = tokens[j]
+          if next_tok.type == "whitespace" or next_tok.type == "newline" then
+            -- Skip whitespace (though tokenizer usually strips these)
+          elseif next_tok.type == "paren_open" then
+            -- It's a table hint: WITH (NOLOCK)
+            is_table_hint_with = true
+            token.is_table_hint_with = true
+            break
+          else
+            -- Not followed by (, not a table hint
+            break
+          end
+        end
+      end
+
       local clause_type = MAJOR_CLAUSES[upper]
 
       if clause_type then
@@ -179,7 +203,8 @@ function ClausesPass.run(tokens, config)
         elseif clause_type == "merge" then
           in_merge = true
           token.starts_clause = true
-        elseif clause_type == "with" then
+        elseif clause_type == "with" and not is_table_hint_with then
+          -- Only treat as CTE if NOT a table hint WITH (NOLOCK)
           in_cte = true
           in_cte_definition = true  -- Waiting for AS and (
           token.starts_clause = true
