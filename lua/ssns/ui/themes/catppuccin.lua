@@ -62,5 +62,10 @@ return {
     alias = { fg = "#74C7EC", italic = true },            -- Sapphire italic
     unresolved = { fg = "#6C7086" },                      -- Overlay0
     comment = { fg = "#6C7086", italic = true },          -- Overlay0 italic
+    -- UI-specific colors for floating windows
+    ui_border = { fg = "#89B4FA" },                       -- Blue border
+    ui_title = { fg = "#CBA6F7", bold = true },           -- Mauve bold title
+    ui_selected = { fg = "#CDD6F4", bg = "#313244" },    -- Text on surface0 selection
+    ui_hint = { fg = "#6C7086" },                         -- Overlay0 hints
   },
 }

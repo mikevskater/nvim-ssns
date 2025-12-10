@@ -62,5 +62,11 @@ return {
     alias = { fg = "#8FBCBB", italic = true },
     unresolved = { fg = "#4C566A" },
     comment = { fg = "#616E88", italic = true },
+
+    -- UI-specific colors for floating windows
+    ui_border = { fg = "#88C0D0" },                       -- Frost blue border
+    ui_title = { fg = "#B48EAD", bold = true },           -- Aurora purple bold title
+    ui_selected = { fg = "#ECEFF4", bg = "#434C5E" },    -- Snow on polar selection
+    ui_hint = { fg = "#4C566A" },                         -- Polar night hints
   },
 }

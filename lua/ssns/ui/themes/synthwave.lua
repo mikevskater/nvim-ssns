@@ -62,5 +62,11 @@ return {
     alias = { fg = "#72F1B8", italic = true },
     unresolved = { fg = "#848BBD" },
     comment = { fg = "#848BBD", italic = true },
+
+    -- UI-specific colors for floating windows
+    ui_border = { fg = "#FE4450" },                       -- Neon red border
+    ui_title = { fg = "#F97E72", bold = true },           -- Salmon bold title
+    ui_selected = { fg = "#FFFFFF", bg = "#2A2139" },    -- White on dark selection
+    ui_hint = { fg = "#848bbd" },                         -- Gray hints
   },
 }
