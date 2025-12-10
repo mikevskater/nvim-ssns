@@ -166,7 +166,7 @@ local function render_themes_list(mp_state)
       if line:match("───") then
         UiFloatBase.add_highlight(bufnr, ns_id, "Comment", line_idx - 1, 0, -1)
       elseif line:match("▶") then
-        UiFloatBase.add_highlight(bufnr, ns_id, "CursorLine", line_idx - 1, 0, -1)
+        UiFloatBase.add_highlight(bufnr, ns_id, "SsnsFloatSelected", line_idx - 1, 0, -1)
         UiFloatBase.add_highlight(bufnr, ns_id, "Special", line_idx - 1, 1, 4)
       elseif line:match("●") then
         UiFloatBase.add_highlight(bufnr, ns_id, "DiagnosticOk", line_idx - 1, #line - 2, -1)

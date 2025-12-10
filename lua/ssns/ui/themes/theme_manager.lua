@@ -69,7 +69,7 @@ local loaded_themes = {}
 local persistence_file = vim.fn.stdpath("data") .. "/ssns_theme.txt"
 
 -- Themes directory paths
-local themes_dir = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h") .. "/themes"
+local themes_dir = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h")
 local user_themes_dir = themes_dir .. "/user_themes"
 
 -- ============================================================================
@@ -377,6 +377,12 @@ function ThemeManager.apply_colors(colors)
   vim.api.nvim_set_hl(0, "SsnsAlias", colors.alias or { fg = "#4EC9B0", italic = true })
   vim.api.nvim_set_hl(0, "SsnsUnresolved", colors.unresolved or { fg = "#808080" })
   vim.api.nvim_set_hl(0, "SsnsComment", colors.comment or { fg = "#6A9955", italic = true })
+
+  -- UI-specific highlights for floating windows
+  vim.api.nvim_set_hl(0, "SsnsFloatBorder", colors.ui_border or { link = "FloatBorder" })
+  vim.api.nvim_set_hl(0, "SsnsFloatTitle", colors.ui_title or { link = "FloatTitle" })
+  vim.api.nvim_set_hl(0, "SsnsFloatSelected", colors.ui_selected or { link = "PmenuSel" })
+  vim.api.nvim_set_hl(0, "SsnsFloatHint", colors.ui_hint or { link = "Comment" })
 
   -- UI-specific highlights (optional, for theme picker preview)
   if colors.ui_border then

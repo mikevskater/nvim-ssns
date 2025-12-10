@@ -214,7 +214,7 @@ function UiConnectionPicker.show(bufnr)
             elseif line:match("Current:") then
               vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "Title", line_idx - 1, 0, 9)
             elseif line:match("▶") then
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "CursorLine", line_idx - 1, 0, -1)
+              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "SsnsFloatSelected", line_idx - 1, 0, -1)
               vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "Special", line_idx - 1, 1, 4)
             end
           end
@@ -316,7 +316,7 @@ function UiConnectionPicker.show_hierarchical(bufnr)
             if line:match("─────") or line:match("● =") or line:match("Server:") then
               vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "Comment", line_idx - 1, 0, -1)
             elseif line:match("▶") then
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "CursorLine", line_idx - 1, 0, -1)
+              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "SsnsFloatSelected", line_idx - 1, 0, -1)
               vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "Special", line_idx - 1, 1, 4)
             end
           end
@@ -529,7 +529,7 @@ function UiConnectionPicker.show_database_picker(bufnr)
             if line:match("─────") or line:match("Server:") then
               vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "Comment", line_idx - 1, 0, -1)
             elseif line:match("▶") then
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "CursorLine", line_idx - 1, 0, -1)
+              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "SsnsFloatSelected", line_idx - 1, 0, -1)
               vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "Special", line_idx - 1, 1, 4)
             end
             if line:match("●") then
