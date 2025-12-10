@@ -41,6 +41,21 @@ function Formatter.format_range(start_line, end_line)
     end
   end
 
+  -- Pre-processing: Add schema prefixes if from_schema_qualify = "always"
+  -- This modifies the buffer in-place before formatting
+  -- Note: "never" mode is handled in the transform pass (07_transform.lua)
+  if config.from_schema_qualify == "always" then
+    local ok, SchemaQualify = pcall(require, 'ssns.features.schema_qualify')
+    if ok then
+      local qualify_result = SchemaQualify.qualify_tables_in_range(0, start_line, end_line)
+      if qualify_result.qualified_count > 0 then
+        -- Re-fetch line count in case modifications changed it
+        local line_count = vim.api.nvim_buf_line_count(0)
+        end_line = math.min(end_line, line_count)
+      end
+    end
+  end
+
   local lines = vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, false)
   local sql = table.concat(lines, "\n")
 
