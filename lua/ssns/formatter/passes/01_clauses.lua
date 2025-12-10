@@ -44,6 +44,8 @@ local MAJOR_CLAUSES = {
   OUTPUT = "output",
   CREATE = "create",
   TABLE = "table",
+  INDEX = "index",
+  INCLUDE = "include",
 }
 
 -- Join modifiers
@@ -80,6 +82,11 @@ function ClausesPass.run(tokens, config)
   local in_create_table = false  -- Track CREATE TABLE statement
   local in_create_table_columns = false  -- Track inside ( ... ) of CREATE TABLE
   local create_table_paren_depth = 0  -- Track paren depth for CREATE TABLE columns
+  local in_create_index = false  -- Track CREATE INDEX statement
+  local in_index_columns = false  -- Track inside ( ... ) of CREATE INDEX or inline INDEX
+  local index_columns_paren_depth = 0  -- Track paren depth for index columns
+  local in_include_clause = false  -- Track INCLUDE ( ... ) clause
+  local include_paren_depth = 0  -- Track paren depth for INCLUDE columns
   local paren_depth = 0
   local select_paren_depth = 0  -- Track paren depth when SELECT started
   local cte_paren_depth = 0  -- Track when we enter CTE subquery
@@ -223,6 +230,22 @@ function ClausesPass.run(tokens, config)
           if in_create then
             in_create_table = true
           end
+        elseif clause_type == "index" then
+          -- INDEX keyword can appear in:
+          -- 1. CREATE INDEX ... ON table (columns)
+          -- 2. CREATE TABLE ... (... INDEX name (columns) ...)
+          -- Both cases should track index columns
+          if in_create then
+            in_create_index = true
+          elseif in_create_table_columns then
+            -- Inline INDEX in CREATE TABLE - start tracking for index columns
+            in_create_index = true
+          end
+        elseif clause_type == "include" then
+          -- INCLUDE clause in CREATE INDEX
+          if in_create_index then
+            in_include_clause = true
+          end
         end
 
         current_clause = clause_type
@@ -346,6 +369,47 @@ function ClausesPass.run(tokens, config)
       token.is_values_row_separator = true
     end
 
+    -- Track CREATE INDEX column definitions paren
+    -- Pattern: CREATE INDEX name ON table (col1, col2, ...) or INDEX name (col1, col2) in CREATE TABLE
+    if in_create_index and token.type == "paren_open" then
+      if in_include_clause then
+        -- This is the opening paren for INCLUDE columns
+        if include_paren_depth == 0 then
+          token.is_index_include_open = true
+          include_paren_depth = paren_depth
+        end
+      elseif not in_index_columns then
+        -- This is the opening paren for index key columns
+        token.is_index_columns_open = true
+        in_index_columns = true
+        index_columns_paren_depth = paren_depth
+      end
+    elseif in_index_columns and token.type == "paren_close" then
+      if paren_depth == index_columns_paren_depth - 1 then
+        -- End of index key columns
+        token.is_index_columns_close = true
+        in_index_columns = false
+        -- Don't reset in_create_index yet - there might be INCLUDE or WHERE clause
+      end
+    elseif in_include_clause and include_paren_depth > 0 and token.type == "paren_close" then
+      if paren_depth == include_paren_depth - 1 then
+        -- End of INCLUDE columns
+        token.is_index_include_close = true
+        in_include_clause = false
+        include_paren_depth = 0
+      end
+    end
+
+    -- Mark commas inside index column list (at the top level only)
+    if in_index_columns and token.type == "comma" and paren_depth == index_columns_paren_depth then
+      token.is_index_column_separator = true
+    end
+
+    -- Mark commas inside INCLUDE column list
+    if in_include_clause and include_paren_depth > 0 and token.type == "comma" and paren_depth == include_paren_depth then
+      token.is_index_include_separator = true
+    end
+
     -- Apply clause context to token
     token.in_select_list = in_select_list
     token.in_from_clause = in_from_clause
@@ -386,6 +450,11 @@ function ClausesPass.run(tokens, config)
       in_create_table = false
       in_create_table_columns = false
       create_table_paren_depth = 0
+      in_create_index = false
+      in_index_columns = false
+      index_columns_paren_depth = 0
+      in_include_clause = false
+      include_paren_depth = 0
       paren_depth = 0
       cte_paren_depth = 0
       in_cte_definition = false

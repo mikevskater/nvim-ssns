@@ -119,6 +119,8 @@ function StructurePass.run(tokens, config)
     pending_cte_columns_first = false,
     pending_between_first = false,
     pending_function_first = false,
+    pending_index_columns_first = false,
+    pending_index_include_first = false,
 
     -- Track statement boundaries to avoid extra newline at statement start
     at_statement_start = true,
@@ -200,6 +202,22 @@ function StructurePass.run(tokens, config)
       end
       if state.in_over_clause and state.over_paren_depth == 0 then
         state.over_paren_depth = state.paren_depth
+      end
+
+      -- Index columns paren - check for stacked_indent
+      if token.is_index_columns_open then
+        local style = config.index_column_style or "inline"
+        if style == "stacked_indent" then
+          state.pending_index_columns_first = true
+        end
+      end
+
+      -- Index INCLUDE columns paren - check for stacked_indent
+      if token.is_index_include_open then
+        local style = config.index_column_style or "inline"
+        if style == "stacked_indent" then
+          state.pending_index_include_first = true
+        end
       end
     elseif token.type == "paren_close" then
       -- Exit paren contexts before decrementing
@@ -657,6 +675,16 @@ function StructurePass.run(tokens, config)
         end
       end
 
+      -- INDEX column list - each column on new line if configured
+      -- Applies to both CREATE INDEX ... (columns) and INCLUDE (columns)
+      if token.is_index_column_separator or token.is_index_include_separator then
+        local style = config.index_column_style or "inline"
+        if style == "stacked" or style == "stacked_indent" then
+          add_newline = true
+          next_indent = state.base_indent + 1
+        end
+      end
+
       if add_newline then
         token.trailing_newline = true
         state.pending_stacked_newline = true
@@ -757,6 +785,20 @@ function StructurePass.run(tokens, config)
         token.newline_before = true
         token.indent_level = state.base_indent + 1
         state.pending_function_first = false
+      end
+
+      -- Index columns stacked_indent: first column after (
+      if state.pending_index_columns_first then
+        token.newline_before = true
+        token.indent_level = state.base_indent + 1
+        state.pending_index_columns_first = false
+      end
+
+      -- Index INCLUDE columns stacked_indent: first column after (
+      if state.pending_index_include_first then
+        token.newline_before = true
+        token.indent_level = state.base_indent + 1
+        state.pending_index_include_first = false
       end
     end
 

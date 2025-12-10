@@ -233,4 +233,180 @@ return {
             matches = { ",\n%s+CONSTRAINT uq_user_role UNIQUE %(user_id, role_id%)" }
         }
     },
+
+    -- ==========================================================================
+    -- index_column_style tests (IDs: 8936-8949)
+    -- ==========================================================================
+
+    -- CREATE INDEX basic tests
+    {
+        id = 8936,
+        type = "formatter",
+        name = "index_column_style inline (default) - single column",
+        input = "CREATE INDEX ix_users_name ON users (name)",
+        opts = { index_column_style = "inline" },
+        expected = {
+            -- ON gets newline as major clause, column list stays inline
+            contains = { "CREATE INDEX ix_users_name", "ON users(name)" }
+        }
+    },
+    {
+        id = 8937,
+        type = "formatter",
+        name = "index_column_style inline - multiple columns",
+        input = "CREATE INDEX ix_users_name_email ON users (name, email, created_at)",
+        opts = { index_column_style = "inline" },
+        expected = {
+            contains = { "(name, email, created_at)" }
+        }
+    },
+    {
+        id = 8938,
+        type = "formatter",
+        name = "index_column_style stacked - multiple columns",
+        input = "CREATE INDEX ix_users_name_email ON users (name, email, created_at)",
+        opts = { index_column_style = "stacked" },
+        expected = {
+            -- Each column on new line after first
+            matches = { "%(name,\n%s+email,\n%s+created_at%)" }
+        }
+    },
+    {
+        id = 8939,
+        type = "formatter",
+        name = "index_column_style stacked_indent - multiple columns",
+        input = "CREATE INDEX ix_users_name_email ON users (name, email, created_at)",
+        opts = { index_column_style = "stacked_indent" },
+        expected = {
+            -- First column on new line after paren
+            matches = { "%(\n%s+name,\n%s+email,\n%s+created_at\n?%s*%)" }
+        }
+    },
+
+    -- CREATE UNIQUE INDEX
+    {
+        id = 8940,
+        type = "formatter",
+        name = "index_column_style stacked - UNIQUE INDEX",
+        input = "CREATE UNIQUE INDEX uix_users_email ON users (email, tenant_id)",
+        opts = { index_column_style = "stacked" },
+        expected = {
+            matches = { "%(email,\n%s+tenant_id%)" }
+        }
+    },
+
+    -- CREATE NONCLUSTERED INDEX (SQL Server)
+    {
+        id = 8941,
+        type = "formatter",
+        name = "index_column_style stacked - NONCLUSTERED INDEX",
+        input = "CREATE NONCLUSTERED INDEX ix_orders_date ON orders (order_date, customer_id)",
+        opts = { index_column_style = "stacked" },
+        expected = {
+            matches = { "%(order_date,\n%s+customer_id%)" }
+        }
+    },
+
+    -- CREATE CLUSTERED INDEX
+    {
+        id = 8942,
+        type = "formatter",
+        name = "index_column_style stacked - CLUSTERED INDEX",
+        input = "CREATE CLUSTERED INDEX cix_orders ON orders (id)",
+        opts = { index_column_style = "stacked" },
+        expected = {
+            -- Single column stays inline even with stacked style
+            contains = { "(id)" }
+        }
+    },
+
+    -- Index with INCLUDE clause
+    {
+        id = 8943,
+        type = "formatter",
+        name = "index_column_style stacked - with INCLUDE clause",
+        input = "CREATE INDEX ix_users ON users (name, email) INCLUDE (created_at, updated_at)",
+        opts = { index_column_style = "stacked" },
+        expected = {
+            -- Both key columns and include columns should be stacked
+            matches = { "%(name,\n%s+email%)", "INCLUDE %(created_at,\n%s+updated_at%)" }
+        }
+    },
+
+    -- Index with ASC/DESC
+    {
+        id = 8944,
+        type = "formatter",
+        name = "index_column_style stacked - with ASC/DESC",
+        input = "CREATE INDEX ix_orders ON orders (order_date DESC, customer_id ASC)",
+        opts = { index_column_style = "stacked" },
+        expected = {
+            matches = { "%(order_date DESC,\n%s+customer_id ASC%)" }
+        }
+    },
+
+    -- Index with WHERE clause (filtered index)
+    {
+        id = 8945,
+        type = "formatter",
+        name = "index_column_style stacked - filtered index with WHERE",
+        input = "CREATE INDEX ix_active_users ON users (name, email) WHERE active = 1",
+        opts = { index_column_style = "stacked" },
+        expected = {
+            matches = { "%(name,\n%s+email%)" },
+            contains = { "WHERE active = 1" }
+        }
+    },
+
+    -- DROP INDEX (no columns - just verify it doesn't break)
+    {
+        id = 8946,
+        type = "formatter",
+        name = "DROP INDEX basic formatting",
+        input = "DROP INDEX ix_users_name ON users",
+        opts = { index_column_style = "stacked" },
+        expected = {
+            -- ON gets newline as major clause
+            contains = { "DROP INDEX ix_users_name", "ON users" }
+        }
+    },
+
+    -- ALTER INDEX (no columns in basic form)
+    {
+        id = 8947,
+        type = "formatter",
+        name = "ALTER INDEX REBUILD",
+        input = "ALTER INDEX ix_users_name ON users REBUILD",
+        opts = { index_column_style = "stacked" },
+        expected = {
+            -- ON gets newline as major clause
+            contains = { "ALTER INDEX ix_users_name", "ON users REBUILD" }
+        }
+    },
+
+    -- Inline index in CREATE TABLE
+    {
+        id = 8948,
+        type = "formatter",
+        name = "index_column_style stacked - INDEX in CREATE TABLE",
+        input = "CREATE TABLE users (id INT, name VARCHAR(100), INDEX ix_name (name, id))",
+        opts = { index_column_style = "stacked", create_table_constraint_newline = true },
+        expected = {
+            -- INDEX columns should be stacked (no space before paren)
+            matches = { "INDEX ix_name%(name,\n%s+id%)" }
+        }
+    },
+
+    -- Multiple indexes - ensure each gets the style
+    {
+        id = 8949,
+        type = "formatter",
+        name = "index_column_style stacked - multiple CREATE INDEX statements",
+        input = "CREATE INDEX ix1 ON t1 (a, b); CREATE INDEX ix2 ON t2 (c, d)",
+        opts = { index_column_style = "stacked" },
+        expected = {
+            -- ON is on new line, columns are stacked
+            matches = { "ON t1%(a,\n%s+b%)", "ON t2%(c,\n%s+d%)" }
+        }
+    },
 }
