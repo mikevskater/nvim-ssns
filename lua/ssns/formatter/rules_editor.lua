@@ -201,40 +201,208 @@ local RULE_DEFINITIONS = {
   { key = "batch_separator_style", name = "Batch Separator", description = "Batch separator preference", type = "enum", options = {"go", "semicolon"}, category = "Advanced" },
 }
 
--- Sample SQL for live preview
+-- Sample SQL for live preview (covers ALL formatter rules)
 local PREVIEW_SQL = [[
--- Formatter Preview
-WITH ActiveUsers AS (
-    SELECT id, username, email, status
+/*
+ * Formatter Preview - Comprehensive SQL Sample
+ * Tests all formatting rules
+ */
+
+-- CTE with multiple expressions (cte_style, cte_as_position, cte_columns_style, cte_separator_newline)
+WITH ActiveUsers (id, username, email) AS (
+    SELECT id, username, email
     FROM dbo.Users
     WHERE status = 'active'
-        AND created_at > '2024-01-01'
+),
+RecentOrders AS (
+    SELECT user_id, SUM(amount) AS total, COUNT(*) AS cnt
+    FROM sales.Orders
+    WHERE order_date BETWEEN '2024-01-01' AND '2024-12-31'
+    GROUP BY user_id
 )
-SELECT
-    u.id,
-    u.username,
+
+-- SELECT with DISTINCT, TOP, INTO, aliases (select_* rules, use_as_keyword)
+SELECT DISTINCT TOP 100
+    u.id AS user_id,
+    u.username AS [User Name], -- inline comment alignment
     u.email,
+    COALESCE(r.total, 0) AS total_spent,
     COUNT(o.id) AS order_count,
-    SUM(o.amount) AS total_spent,
-    CASE
-        WHEN SUM(o.amount) > 1000 THEN 'VIP'
-        WHEN SUM(o.amount) > 500 THEN 'Regular'
+    AVG(o.amount) AS avg_order,
+    MAX(o.order_date) AS last_order,
+    u.first_name + ' ' + u.last_name AS full_name, -- concatenation spacing
+    CASE -- case_style, case_when_indent, case_then_position
+        WHEN r.total > 1000 THEN 'VIP'
+        WHEN r.total > 500 THEN 'Regular'
+        WHEN r.total IS NULL THEN 'Inactive'
         ELSE 'New'
     END AS customer_tier
-FROM ActiveUsers u
-LEFT JOIN dbo.Orders o ON u.id = o.user_id
-    AND o.status = 'completed'
+INTO #TempResults
+FROM ActiveUsers u WITH (NOLOCK) -- from_table_hints_newline
+LEFT JOIN RecentOrders r ON u.id = r.user_id -- join_on_same_line, join_keyword_style
 INNER JOIN dbo.Profiles p ON u.id = p.user_id
-WHERE u.email LIKE '%@company.com'
-    AND (o.amount > 100 OR o.is_priority = 1)
-    AND u.id IN (
-        SELECT user_id
-        FROM dbo.Subscriptions
-        WHERE plan = 'premium'
+    AND p.is_verified = 1 -- on_condition_style, on_and_position
+LEFT OUTER JOIN sales.OrderItems oi ON o.id = oi.order_id
+CROSS APPLY ( -- cross_apply_newline, derived_table_style
+    SELECT TOP 1 order_id, amount
+    FROM sales.Orders sub
+    WHERE sub.user_id = u.id
+    ORDER BY order_date DESC
+) AS latest
+WHERE u.email LIKE '%@company.com' -- where_newline, where_condition_style
+    AND u.created_at >= '2024-01-01'
+    AND (o.amount > 100 OR o.is_priority = 1) -- boolean_operator_newline
+    AND u.status IN ('active', 'pending', 'verified') -- where_in_list_style, in_list_style
+    AND o.amount BETWEEN 50 AND 500 -- where_between_style
+    AND EXISTS ( -- where_exists_style, subquery_paren_style
+        SELECT 1
+        FROM dbo.Subscriptions s
+        WHERE s.user_id = u.id
+            AND s.plan = 'premium'
     )
-GROUP BY u.id, u.username, u.email
-HAVING COUNT(o.id) > 0
-ORDER BY total_spent DESC, u.username ASC;
+GROUP BY u.id, u.username, u.email, u.first_name, u.last_name, r.total -- group_by_style
+HAVING COUNT(o.id) > 0 -- having_newline
+    AND SUM(o.amount) >= 100
+ORDER BY total_spent DESC, u.username ASC, u.id; -- order_by_style, order_direction_style
+
+GO -- blank_line_after_go, batch_separator_style
+
+-- UNION example (union_indent)
+SELECT id, name, 'Customer' AS type FROM dbo.Customers
+UNION ALL
+SELECT id, name, 'Vendor' AS type FROM dbo.Vendors
+ORDER BY name;
+
+GO
+
+-- INSERT with columns and multi-row VALUES (insert_* rules)
+INSERT INTO dbo.AuditLog (action, user_id, timestamp, details)
+VALUES
+    ('LOGIN', 1, GETDATE(), 'User logged in'),
+    ('VIEW', 1, GETDATE(), 'Viewed dashboard'),
+    ('LOGOUT', 1, GETDATE(), 'User logged out');
+
+-- UPDATE with SET alignment (update_set_style, update_set_align, equals_spacing)
+UPDATE u
+SET u.last_login = GETDATE(),
+    u.login_count = u.login_count + 1,
+    u.status = 'active',
+    u.modified_by = SYSTEM_USER
+FROM dbo.Users u
+INNER JOIN #TempResults t ON u.id = t.user_id
+WHERE u.is_enabled = 1;
+
+-- DELETE with FROM keyword (delete_from_keyword)
+DELETE FROM dbo.TempRecords
+WHERE created_at < DATEADD(day, -30, GETDATE())
+    AND status = 'expired';
+
+-- OUTPUT clause (output_clause_newline)
+DELETE FROM dbo.ExpiredSessions
+OUTPUT deleted.session_id, deleted.user_id, GETDATE() AS deleted_at
+INTO dbo.SessionArchive
+WHERE expiry_date < GETDATE();
+
+GO
+
+-- MERGE statement (merge_style, merge_when_newline)
+MERGE dbo.Products AS target
+USING dbo.StagingProducts AS source
+ON target.product_id = source.product_id
+WHEN MATCHED AND source.is_deleted = 1 THEN
+    DELETE
+WHEN MATCHED THEN
+    UPDATE SET
+        target.name = source.name,
+        target.price = source.price,
+        target.modified_at = GETDATE()
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT (product_id, name, price, created_at)
+    VALUES (source.product_id, source.name, source.price, GETDATE())
+WHEN NOT MATCHED BY SOURCE THEN
+    DELETE;
+
+GO
+
+-- DDL: CREATE TABLE (create_table_column_newline, create_table_constraint_newline)
+CREATE TABLE dbo.Orders (
+    id INT IDENTITY(1,1) NOT NULL,
+    user_id INT NOT NULL,
+    amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+    status VARCHAR(50) NOT NULL,
+    order_date DATETIME2 NOT NULL DEFAULT GETDATE(),
+    notes NVARCHAR(MAX) NULL,
+    CONSTRAINT PK_Orders PRIMARY KEY CLUSTERED (id),
+    CONSTRAINT FK_Orders_Users FOREIGN KEY (user_id) REFERENCES dbo.Users(id),
+    CONSTRAINT CK_Orders_Amount CHECK (amount >= 0)
+);
+
+-- CREATE INDEX (index_column_style)
+CREATE NONCLUSTERED INDEX IX_Orders_UserDate
+ON dbo.Orders (user_id, order_date DESC)
+INCLUDE (amount, status)
+WHERE status <> 'cancelled';
+
+-- ALTER TABLE (alter_table_style)
+ALTER TABLE dbo.Orders
+ADD priority TINYINT NOT NULL DEFAULT 0,
+    is_expedited BIT NOT NULL DEFAULT 0;
+
+-- DROP IF EXISTS (drop_if_exists_style)
+DROP TABLE IF EXISTS #TempResults;
+DROP PROCEDURE IF EXISTS dbo.usp_OldProc;
+
+GO
+
+-- CREATE VIEW (view_body_indent)
+CREATE VIEW dbo.vw_ActiveOrders
+AS
+    SELECT o.id, o.user_id, u.username, o.amount, o.status
+    FROM dbo.Orders o
+    INNER JOIN dbo.Users u ON o.user_id = u.id
+    WHERE o.status IN ('pending', 'processing', 'shipped');
+
+GO
+
+-- CREATE PROCEDURE (procedure_param_style)
+CREATE PROCEDURE dbo.usp_GetUserOrders
+    @UserId INT,
+    @StartDate DATETIME2 = NULL,
+    @EndDate DATETIME2 = NULL,
+    @Status VARCHAR(50) = 'active'
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT id, amount, status, order_date
+    FROM dbo.Orders
+    WHERE user_id = @UserId
+        AND (@StartDate IS NULL OR order_date >= @StartDate)
+        AND (@EndDate IS NULL OR order_date <= @EndDate)
+        AND status = @Status
+    ORDER BY order_date DESC;
+END;
+
+GO
+
+-- CREATE FUNCTION (function_param_style, function_arg_style)
+CREATE FUNCTION dbo.fn_CalculateDiscount (
+    @Amount DECIMAL(18,2),
+    @CustomerTier VARCHAR(20),
+    @IsMember BIT
+)
+RETURNS DECIMAL(18,2)
+AS
+BEGIN
+    RETURN CASE
+        WHEN @CustomerTier = 'VIP' THEN @Amount * 0.20
+        WHEN @CustomerTier = 'Regular' AND @IsMember = 1 THEN @Amount * 0.10
+        WHEN @IsMember = 1 THEN @Amount * 0.05
+        ELSE 0
+    END;
+END;
+
+GO
 ]]
 
 -- ============================================================================

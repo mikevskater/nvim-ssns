@@ -14,6 +14,27 @@
 local Output = {}
 
 -- =============================================================================
+-- Comment Helpers
+-- =============================================================================
+
+---Check if a comment is a line comment (-- style)
+---@param token table
+---@return boolean
+local function is_line_comment(token)
+  return token.type == "line_comment"
+end
+
+---Check if a block comment ends with a newline (multiline block comment)
+---@param token table
+---@return boolean
+local function is_multiline_block_comment(token)
+  if token.type ~= "comment" then
+    return false
+  end
+  return token.text:find("\n") ~= nil
+end
+
+-- =============================================================================
 -- Helpers
 -- =============================================================================
 
@@ -51,6 +72,8 @@ function Output.generate(tokens, config)
   local result = {}         -- Array of output lines
   local current_line = {}   -- Current line being built
   local line_has_content = false
+  local force_next_newline = false  -- Force newline before next token (after line comment)
+  local force_next_indent = 0       -- Indent level to use after forced newline
 
   ---Flush current line to result
   local function flush_line()
@@ -107,6 +130,19 @@ function Output.generate(tokens, config)
       goto continue
     end
 
+    -- Handle forced newline after line comment or multiline block comment
+    -- This ensures content after comments starts on a new line
+    if force_next_newline then
+      -- Only apply if this token doesn't already have newline_before
+      if not token.newline_before then
+        flush_line()
+        add_indent(token.indent_level or force_next_indent or 0)
+        line_has_content = false
+      end
+      force_next_newline = false
+      force_next_indent = 0
+    end
+
     -- Handle empty line before (e.g., before JOIN with empty_line_before_join)
     if token.empty_line_before then
       flush_line()
@@ -141,6 +177,22 @@ function Output.generate(tokens, config)
     if token.trailing_newline then
       flush_line()
       -- Next token will add its own indent
+    end
+
+    -- Handle line comments - ALWAYS force next token to start on new line
+    -- Line comments consume to end of line, so anything after must be on next line
+    if is_line_comment(token) then
+      flush_line()  -- End current line with the comment
+      force_next_newline = true
+      force_next_indent = token.indent_level or 0
+    end
+
+    -- Handle multiline block comments - next token starts on new line
+    -- Multiline block comments end with */ on a separate line
+    if is_multiline_block_comment(token) then
+      flush_line()
+      force_next_newline = true
+      force_next_indent = token.indent_level or 0
     end
 
     -- Handle semicolon - end of statement
