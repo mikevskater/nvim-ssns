@@ -43,9 +43,15 @@ local MAJOR_CLAUSES = {
   EXCEPT = "except",
   OUTPUT = "output",
   CREATE = "create",
+  ALTER = "alter",
+  DROP = "drop",
   TABLE = "table",
+  VIEW = "view",
   INDEX = "index",
   INCLUDE = "include",
+  PROCEDURE = "procedure",
+  FUNCTION = "function",
+  RETURNS = "returns",
 }
 
 -- Join modifiers
@@ -79,7 +85,13 @@ function ClausesPass.run(tokens, config)
   local in_update = false
   local in_delete = false
   local in_create = false  -- Track CREATE statement
+  local in_alter = false  -- Track ALTER statement (distinct from in_create for ALTER TABLE)
+  local in_drop = false  -- Track DROP statement (for drop_if_exists_style)
+  local drop_saw_object_type = false  -- Track if we've seen TABLE/INDEX/etc after DROP
   local in_create_table = false  -- Track CREATE TABLE statement
+  local in_alter_table = false  -- Track ALTER TABLE statement (for alter_table_style)
+  local alter_table_saw_table_name = false  -- Track if we've seen the table name after ALTER TABLE
+  local in_create_view = false  -- Track CREATE/ALTER VIEW statement (for view_body_indent)
   local in_create_table_columns = false  -- Track inside ( ... ) of CREATE TABLE
   local create_table_paren_depth = 0  -- Track paren depth for CREATE TABLE columns
   local in_create_index = false  -- Track CREATE INDEX statement
@@ -87,6 +99,12 @@ function ClausesPass.run(tokens, config)
   local index_columns_paren_depth = 0  -- Track paren depth for index columns
   local in_include_clause = false  -- Track INCLUDE ( ... ) clause
   local include_paren_depth = 0  -- Track paren depth for INCLUDE columns
+  local in_create_procedure = false  -- Track CREATE PROCEDURE statement
+  local in_procedure_params = false  -- Track procedure parameter list (before AS)
+  local procedure_params_paren_depth = 0  -- Track paren depth for procedure params (if using parens)
+  local in_create_function = false  -- Track CREATE FUNCTION statement
+  local in_function_params = false  -- Track function parameter list (before RETURNS)
+  local function_params_paren_depth = 0  -- Track paren depth for function params
   local paren_depth = 0
   local select_paren_depth = 0  -- Track paren depth when SELECT started
   local cte_paren_depth = 0  -- Track when we enter CTE subquery
@@ -225,10 +243,33 @@ function ClausesPass.run(tokens, config)
           token.starts_clause = true
         elseif clause_type == "create" then
           in_create = true
+          in_alter = false
+          token.starts_clause = true
+        elseif clause_type == "alter" then
+          -- ALTER behaves like CREATE for PROCEDURE/FUNCTION/INDEX/TABLE
+          in_create = true
+          in_alter = true  -- Track that this is ALTER specifically
+          token.starts_clause = true
+        elseif clause_type == "drop" then
+          -- DROP statement tracking for drop_if_exists_style
+          in_drop = true
+          drop_saw_object_type = false
           token.starts_clause = true
         elseif clause_type == "table" then
           if in_create then
-            in_create_table = true
+            if in_alter then
+              -- ALTER TABLE - track separately for alter_table_style
+              in_alter_table = true
+              alter_table_saw_table_name = false
+            else
+              -- CREATE TABLE
+              in_create_table = true
+            end
+          end
+        elseif clause_type == "view" then
+          -- VIEW keyword in CREATE/ALTER VIEW
+          if in_create then
+            in_create_view = true
           end
         elseif clause_type == "index" then
           -- INDEX keyword can appear in:
@@ -245,6 +286,23 @@ function ClausesPass.run(tokens, config)
           -- INCLUDE clause in CREATE INDEX
           if in_create_index then
             in_include_clause = true
+          end
+        elseif clause_type == "procedure" then
+          -- PROCEDURE keyword in CREATE/ALTER PROCEDURE
+          if in_create then
+            in_create_procedure = true
+            in_procedure_params = true  -- Parameters start after procedure name
+          end
+        elseif clause_type == "function" then
+          -- FUNCTION keyword in CREATE/ALTER FUNCTION
+          if in_create then
+            in_create_function = true
+            in_function_params = true  -- Parameters start after function name
+          end
+        elseif clause_type == "returns" then
+          -- RETURNS keyword ends function parameters
+          if in_create_function then
+            in_function_params = false
           end
         end
 
@@ -263,6 +321,130 @@ function ClausesPass.run(tokens, config)
         token.is_cte_as = true
         saw_cte_as = true
         in_cte_columns = false  -- End of column list
+      end
+
+      -- Check for AS in procedure - ends parameter list
+      if in_procedure_params and upper == "AS" then
+        in_procedure_params = false
+      end
+
+      -- Check for AS in VIEW - starts view body
+      if in_create_view and upper == "AS" then
+        token.is_view_body_as = true
+        -- Reset in_create_view since we're now in the view body
+        in_create_view = false
+        in_create = false
+      end
+
+      -- Check for ALTER TABLE action keywords (ADD, DROP, ALTER, NOCHECK, CHECK)
+      -- These keywords start a new action in ALTER TABLE and should get newlines in "expanded" style
+      if in_alter_table and alter_table_saw_table_name then
+        if upper == "ADD" or upper == "DROP" or upper == "ALTER" or
+           upper == "NOCHECK" or upper == "CHECK" or upper == "ENABLE" or upper == "DISABLE" then
+          token.is_alter_table_action = true
+        end
+      end
+
+      -- Track DROP statement object types and IF EXISTS
+      -- Pattern: DROP TABLE|PROCEDURE|FUNCTION|VIEW|INDEX|TRIGGER|DATABASE|SCHEMA [IF EXISTS] name
+      if in_drop then
+        -- Object type keywords after DROP
+        if not drop_saw_object_type then
+          if upper == "TABLE" or upper == "PROCEDURE" or upper == "FUNCTION" or
+             upper == "VIEW" or upper == "INDEX" or upper == "TRIGGER" or
+             upper == "DATABASE" or upper == "SCHEMA" then
+            drop_saw_object_type = true
+            token.is_drop_object_type = true
+          end
+        elseif upper == "IF" then
+          -- IF keyword in DROP context - mark it for drop_if_exists_style
+          -- Look ahead to confirm it's followed by EXISTS
+          for j = i + 1, #tokens do
+            local next_tok = tokens[j]
+            if next_tok.type == "whitespace" or next_tok.type == "newline" then
+              -- Skip whitespace
+            elseif next_tok.type == "keyword" and string.upper(next_tok.text) == "EXISTS" then
+              token.is_drop_if_exists = true
+              break
+            else
+              break
+            end
+          end
+        end
+      end
+    end
+
+    -- Track when we've seen the table name after ALTER TABLE
+    -- The table name is the identifier(s) immediately after TABLE keyword
+    if in_alter_table and not alter_table_saw_table_name then
+      if token.type == "identifier" or token.type == "quoted_identifier" then
+        -- This is (part of) the table name - we may need to see more (schema.table)
+        -- We consider the table name "seen" when we see a keyword that isn't part of the name
+      elseif token.type == "keyword" then
+        local upper = string.upper(token.text)
+        -- These keywords indicate we're past the table name
+        if upper == "ADD" or upper == "DROP" or upper == "ALTER" or
+           upper == "NOCHECK" or upper == "CHECK" or upper == "ENABLE" or upper == "DISABLE" or
+           upper == "WITH" or upper == "SET" or upper == "SWITCH" or upper == "REBUILD" then
+          alter_table_saw_table_name = true
+          -- Re-mark this keyword as action
+          token.is_alter_table_action = true
+        end
+      elseif token.type ~= "whitespace" and token.type ~= "newline" and token.type ~= "operator" then
+        -- For other non-whitespace tokens (except dot operator for schema.table), assume table name is done
+        if token.text ~= "." then
+          alter_table_saw_table_name = true
+        end
+      end
+    end
+
+    -- Track procedure parameters (with or without parentheses)
+    -- Pattern: CREATE PROCEDURE name @p1 INT, @p2 VARCHAR(100) AS ...
+    -- Or:      CREATE PROCEDURE name (@p1 INT, @p2 VARCHAR(100)) AS ...
+    if in_procedure_params and token.type == "paren_open" then
+      if procedure_params_paren_depth == 0 then
+        -- This is the opening paren for procedure params (if using parens)
+        token.is_procedure_params_open = true
+        procedure_params_paren_depth = paren_depth
+      end
+    elseif in_procedure_params and procedure_params_paren_depth > 0 and token.type == "paren_close" then
+      if paren_depth == procedure_params_paren_depth - 1 then
+        -- End of procedure params paren
+        token.is_procedure_params_close = true
+        procedure_params_paren_depth = 0
+      end
+    end
+
+    -- Mark commas in procedure parameter list
+    if in_procedure_params and token.type == "comma" then
+      -- If using parens, only mark at the correct depth
+      -- If not using parens, mark all commas (they're at paren_depth 0)
+      if procedure_params_paren_depth == 0 or paren_depth == procedure_params_paren_depth then
+        token.is_procedure_param_separator = true
+      end
+    end
+
+    -- Track function parameters (always with parentheses)
+    -- Pattern: CREATE FUNCTION name (@p1 INT, @p2 VARCHAR(100)) RETURNS ...
+    if in_function_params and token.type == "paren_open" then
+      if function_params_paren_depth == 0 then
+        -- This is the opening paren for function params
+        token.is_function_params_open = true
+        function_params_paren_depth = paren_depth
+      end
+    elseif in_function_params and function_params_paren_depth > 0 and token.type == "paren_close" then
+      if paren_depth == function_params_paren_depth - 1 then
+        -- End of function params paren
+        token.is_function_params_close = true
+        function_params_paren_depth = 0
+        in_function_params = false  -- Params end at closing paren
+      end
+    end
+
+    -- Mark commas in function parameter list
+    if in_function_params and function_params_paren_depth > 0 and token.type == "comma" then
+      if paren_depth == function_params_paren_depth then
+        token.is_function_param_separator = true
       end
     end
 
@@ -369,6 +551,12 @@ function ClausesPass.run(tokens, config)
       token.is_values_row_separator = true
     end
 
+    -- Mark commas that separate ALTER TABLE operations (at paren depth 0)
+    -- Pattern: ALTER TABLE t ADD col1 INT, ADD col2 VARCHAR(100)
+    if in_alter_table and alter_table_saw_table_name and token.type == "comma" and paren_depth == 0 then
+      token.is_alter_table_separator = true
+    end
+
     -- Track CREATE INDEX column definitions paren
     -- Pattern: CREATE INDEX name ON table (col1, col2, ...) or INDEX name (col1, col2) in CREATE TABLE
     if in_create_index and token.type == "paren_open" then
@@ -447,7 +635,13 @@ function ClausesPass.run(tokens, config)
       in_update = false
       in_delete = false
       in_create = false
+      in_alter = false
+      in_drop = false
+      drop_saw_object_type = false
       in_create_table = false
+      in_alter_table = false
+      alter_table_saw_table_name = false
+      in_create_view = false
       in_create_table_columns = false
       create_table_paren_depth = 0
       in_create_index = false
@@ -455,6 +649,12 @@ function ClausesPass.run(tokens, config)
       index_columns_paren_depth = 0
       in_include_clause = false
       include_paren_depth = 0
+      in_create_procedure = false
+      in_procedure_params = false
+      procedure_params_paren_depth = 0
+      in_create_function = false
+      in_function_params = false
+      function_params_paren_depth = 0
       paren_depth = 0
       cte_paren_depth = 0
       in_cte_definition = false

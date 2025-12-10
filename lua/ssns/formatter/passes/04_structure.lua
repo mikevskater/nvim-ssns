@@ -121,15 +121,27 @@ function StructurePass.run(tokens, config)
     pending_function_first = false,
     pending_index_columns_first = false,
     pending_index_include_first = false,
+    pending_procedure_params_first = false,
+    pending_function_params_first = false,
 
     -- Track statement boundaries to avoid extra newline at statement start
     at_statement_start = true,
+
+    -- View body tracking for view_body_indent
+    in_view_body = false,
+    view_body_indent = 0,
   }
 
   -- Process each token
   for i, token in ipairs(tokens) do
-    -- Get base indent from subquery pass
-    state.base_indent = token.base_indent or token.subquery_depth or 0
+    -- Get base indent from subquery pass, but preserve view body indent
+    local token_base_indent = token.base_indent or token.subquery_depth or 0
+    if state.in_view_body then
+      -- In view body: add view_body_indent to base
+      state.base_indent = token_base_indent + state.view_body_indent
+    else
+      state.base_indent = token_base_indent
+    end
 
     -- Initialize annotations
     token.newline_before = false
@@ -219,6 +231,22 @@ function StructurePass.run(tokens, config)
           state.pending_index_include_first = true
         end
       end
+
+      -- Procedure params paren - check for stacked_indent
+      if token.is_procedure_params_open then
+        local style = config.procedure_param_style or "stacked"
+        if style == "stacked_indent" then
+          state.pending_procedure_params_first = true
+        end
+      end
+
+      -- Function params paren - check for stacked_indent
+      if token.is_function_params_open then
+        local style = config.function_param_style or "stacked"
+        if style == "stacked_indent" then
+          state.pending_function_params_first = true
+        end
+      end
     elseif token.type == "paren_close" then
       -- Exit paren contexts before decrementing
       if state.in_list_paren_depth > 0 and state.paren_depth == state.in_list_paren_depth then
@@ -277,7 +305,8 @@ function StructurePass.run(tokens, config)
 
         -- Don't add newline for the first major clause of a statement
         -- (the semicolon/output.lua already adds blank lines between statements)
-        if should_newline and i > 1 and not state.at_statement_start then
+        -- EXCEPT: If we're in a view body, always add newline for the first clause
+        if should_newline and i > 1 and (not state.at_statement_start or state.in_view_body) then
           token.newline_before = true
           token.indent_level = state.base_indent
         end
@@ -431,6 +460,36 @@ function StructurePass.run(tokens, config)
           token.newline_before = true
           token.indent_level = state.base_indent + 1
         end
+      end
+
+      -- ALTER TABLE action keywords (ADD, DROP, ALTER, NOCHECK, CHECK, etc.)
+      -- These keywords start a new action in ALTER TABLE statements
+      if token.is_alter_table_action then
+        local style = config.alter_table_style or "expanded"
+        if style == "expanded" then
+          token.newline_before = true
+          token.indent_level = state.base_indent
+        end
+      end
+
+      -- DROP IF EXISTS - put IF EXISTS on new line if configured
+      -- Pattern: DROP TABLE IF EXISTS name -> DROP TABLE\nIF EXISTS name
+      if token.is_drop_if_exists then
+        local style = config.drop_if_exists_style or "inline"
+        if style == "separate" then
+          token.newline_before = true
+          token.indent_level = state.base_indent
+        end
+      end
+
+      -- VIEW body AS - set base_indent for view body
+      -- Pattern: CREATE VIEW name AS SELECT ... -> view body indented
+      if token.is_view_body_as then
+        local indent = config.view_body_indent
+        if indent == nil then indent = 1 end
+        -- Set view_body_indent for all subsequent tokens in the view body
+        state.view_body_indent = indent
+        state.in_view_body = true
       end
 
       -- ON keyword
@@ -685,6 +744,33 @@ function StructurePass.run(tokens, config)
         end
       end
 
+      -- Procedure parameter list - each param on new line if configured
+      if token.is_procedure_param_separator then
+        local style = config.procedure_param_style or "stacked"
+        if style == "stacked" or style == "stacked_indent" then
+          add_newline = true
+          next_indent = state.base_indent + 1
+        end
+      end
+
+      -- Function parameter list - each param on new line if configured
+      if token.is_function_param_separator then
+        local style = config.function_param_style or "stacked"
+        if style == "stacked" or style == "stacked_indent" then
+          add_newline = true
+          next_indent = state.base_indent + 1
+        end
+      end
+
+      -- ALTER TABLE operation separator - each operation on new line if expanded style
+      if token.is_alter_table_separator then
+        local style = config.alter_table_style or "expanded"
+        if style == "expanded" then
+          add_newline = true
+          next_indent = state.base_indent
+        end
+      end
+
       if add_newline then
         token.trailing_newline = true
         state.pending_stacked_newline = true
@@ -800,6 +886,20 @@ function StructurePass.run(tokens, config)
         token.indent_level = state.base_indent + 1
         state.pending_index_include_first = false
       end
+
+      -- Procedure params stacked_indent: first param after (
+      if state.pending_procedure_params_first then
+        token.newline_before = true
+        token.indent_level = state.base_indent + 1
+        state.pending_procedure_params_first = false
+      end
+
+      -- Function params stacked_indent: first param after (
+      if state.pending_function_params_first then
+        token.newline_before = true
+        token.indent_level = state.base_indent + 1
+        state.pending_function_params_first = false
+      end
     end
 
     -- GO batch separator - should be on its own line
@@ -829,6 +929,9 @@ function StructurePass.run(tokens, config)
       state.paren_depth = 0
       state.pending_stacked_newline = false
       state.pending_join_modifier = false
+      -- Reset view body state
+      state.in_view_body = false
+      state.view_body_indent = 0
       -- Next major clause is start of new statement
       state.at_statement_start = true
     end
