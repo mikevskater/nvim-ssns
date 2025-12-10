@@ -512,6 +512,215 @@ local function get_buffer_connection(bufnr)
   return nil
 end
 
+---Find all expandable asterisks in a buffer range using token cache
+---Uses the StatementCache to properly identify asterisks in SELECT lists
+---@param bufnr number Buffer number
+---@param start_line number Start line (1-indexed)
+---@param end_line number End line (1-indexed)
+---@return table[] Array of {line: number, col: number, table_prefix: string?} for each expandable asterisk
+local function find_expandable_asterisks_via_tokens(bufnr, start_line, end_line)
+  local asterisks = {}
+
+  -- Get the statement cache
+  local cache = StatementCache.get_or_build_cache(bufnr)
+  if not cache or not cache.chunks then
+    debug_log("No statement cache available")
+    return asterisks
+  end
+
+  -- Find chunks that overlap with our line range
+  for _, chunk in ipairs(cache.chunks) do
+    -- Check if chunk overlaps with our range
+    if chunk.end_line >= start_line and chunk.start_line <= end_line then
+      -- Check if this chunk has star columns
+      if chunk.columns then
+        local star_count = 0
+        for _, col in ipairs(chunk.columns) do
+          if col.is_star then
+            star_count = star_count + 1
+          end
+        end
+
+        if star_count > 0 then
+          debug_log(string.format("Chunk has %d star columns, getting tokens", star_count))
+
+          -- Get tokens for this chunk
+          local tokens = StatementCache.get_chunk_tokens(bufnr, chunk)
+          if tokens and #tokens > 0 then
+            -- Walk through tokens to find asterisks in SELECT list context
+            local in_select_list = false
+            local paren_depth = 0
+            local prev_identifier = nil  -- Track for alias.* pattern
+
+            for i, token in ipairs(tokens) do
+              local upper_text = token.text:upper()
+
+              -- Track SELECT list context
+              if token.type == "keyword" then
+                if upper_text == "SELECT" then
+                  in_select_list = true
+                  paren_depth = 0  -- Reset paren depth for this SELECT
+                elseif upper_text == "FROM" or upper_text == "INTO" or upper_text == "WHERE" then
+                  if paren_depth == 0 then
+                    in_select_list = false
+                  end
+                end
+              end
+
+              -- Track parentheses
+              if token.type == "paren_open" or token.text == "(" then
+                paren_depth = paren_depth + 1
+              elseif token.type == "paren_close" or token.text == ")" then
+                paren_depth = math.max(0, paren_depth - 1)
+              end
+
+              -- Track identifier before dot for alias.* pattern
+              if token.type == "identifier" or token.type == "bracket_id" then
+                prev_identifier = token.text:gsub("%[", ""):gsub("%]", "")
+              elseif token.type ~= "dot" and token.type ~= "whitespace" and token.type ~= "newline" then
+                -- Reset on non-dot, non-whitespace tokens (except asterisk which we handle)
+                if token.text ~= "*" then
+                  prev_identifier = nil
+                end
+              end
+
+              -- Check for expandable asterisk
+              if token.text == "*" and token.type == "operator" then
+                if in_select_list and paren_depth == 0 then
+                  -- Check if within our line range
+                  if token.line >= start_line and token.line <= end_line then
+                    -- Check previous token for dot (alias.* pattern)
+                    local table_prefix = nil
+                    if i > 1 then
+                      local prev_token = tokens[i - 1]
+                      if prev_token.type == "dot" and prev_identifier then
+                        table_prefix = prev_identifier
+                      end
+                    end
+
+                    table.insert(asterisks, {
+                      line = token.line,
+                      col = token.col - 1,  -- Convert to 0-indexed for consistency
+                      table_prefix = table_prefix,
+                    })
+                    debug_log(string.format("Found expandable asterisk at line %d, col %d, prefix: %s",
+                      token.line, token.col, table_prefix or "none"))
+                  end
+                end
+                prev_identifier = nil  -- Reset after asterisk
+              end
+            end
+          end
+        end
+      end
+
+      -- Also check subqueries recursively
+      if chunk.subqueries then
+        for _, subquery in ipairs(chunk.subqueries) do
+          if subquery.columns then
+            for _, col in ipairs(subquery.columns) do
+              if col.is_star then
+                -- Subqueries have start_pos and end_pos
+                if subquery.start_pos and subquery.end_pos then
+                  if subquery.end_pos.line >= start_line and subquery.start_pos.line <= end_line then
+                    -- We need tokens for this subquery - use chunk tokens and filter by position
+                    -- For now, log that we found one (the main SELECT expansion should handle nested)
+                    debug_log(string.format("Found star in subquery at lines %d-%d",
+                      subquery.start_pos.line, subquery.end_pos.line))
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  return asterisks
+end
+
+---Expand all asterisks in a buffer range
+---Used by formatter when select_star_expand is enabled
+---@param bufnr number Buffer number
+---@param start_line number Start line (1-indexed)
+---@param end_line number End line (1-indexed)
+---@return table result {success: boolean, expanded_count: number, error: string?}
+function ExpandAsterisk.expand_all_asterisks_in_range(bufnr, start_line, end_line)
+  debug_log(string.format("expand_all_asterisks_in_range: bufnr=%d, lines %d-%d", bufnr, start_line, end_line))
+
+  -- Get connection context
+  local connection = get_buffer_connection(bufnr)
+  if not connection then
+    return {
+      success = false,
+      expanded_count = 0,
+      error = "No database connection available"
+    }
+  end
+
+  -- Find all expandable asterisks using the token cache
+  local all_asterisks = find_expandable_asterisks_via_tokens(bufnr, start_line, end_line)
+
+  if #all_asterisks == 0 then
+    debug_log("No expandable asterisks found in range")
+    return {
+      success = true,
+      expanded_count = 0,
+    }
+  end
+
+  debug_log(string.format("Found %d expandable asterisks", #all_asterisks))
+
+  -- Sort by line (descending), then by column (descending)
+  -- This ensures we process from end to start, preserving positions
+  table.sort(all_asterisks, function(a, b)
+    if a.line ~= b.line then
+      return a.line > b.line
+    end
+    return a.col > b.col
+  end)
+
+  -- Expand each asterisk
+  local expanded_count = 0
+  local errors = {}
+
+  for _, ast in ipairs(all_asterisks) do
+    local cursor_pos = { ast.line, ast.col }
+    local result = ExpandAsterisk.expand_asterisk_in_context(bufnr, connection, cursor_pos, nil)
+
+    if result.success and result.replacement_text then
+      -- Get current line (may have been modified by previous expansions)
+      local line = vim.api.nvim_buf_get_lines(bufnr, ast.line - 1, ast.line, false)[1]
+      if line then
+        -- Build new line with replacement
+        local new_line = line:sub(1, result.start_col) .. result.replacement_text .. line:sub(result.end_col + 1)
+        vim.api.nvim_buf_set_lines(bufnr, ast.line - 1, ast.line, false, { new_line })
+        expanded_count = expanded_count + 1
+        debug_log(string.format("Expanded asterisk at line %d col %d: %d columns",
+          ast.line, ast.col, #result.columns))
+      end
+    else
+      -- Log error but continue with other asterisks
+      local err_msg = result.error or "Unknown error"
+      debug_log(string.format("Failed to expand asterisk at line %d col %d: %s",
+        ast.line, ast.col, err_msg))
+      table.insert(errors, string.format("Line %d: %s", ast.line, err_msg))
+    end
+  end
+
+  local success = expanded_count > 0 or #errors == 0
+  local error_msg = #errors > 0 and table.concat(errors, "; ") or nil
+
+  debug_log(string.format("Expansion complete: %d expanded, %d errors", expanded_count, #errors))
+
+  return {
+    success = success,
+    expanded_count = expanded_count,
+    error = error_msg,
+  }
+end
+
 ---Expand asterisk at cursor position in buffer
 ---User-facing function for <leader>ce command
 ---@param bufnr number? Buffer number (defaults to current buffer)

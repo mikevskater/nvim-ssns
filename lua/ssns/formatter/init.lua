@@ -23,6 +23,24 @@ end
 ---@return boolean success
 ---@return string? error
 function Formatter.format_range(start_line, end_line)
+  local config = require('ssns.config').get_formatter()
+
+  -- Pre-processing: Expand asterisks if enabled
+  -- This modifies the buffer in-place before formatting
+  if config.select_star_expand then
+    local ok, ExpandAsterisk = pcall(require, 'ssns.features.expand_asterisk')
+    if ok then
+      local expand_result = ExpandAsterisk.expand_all_asterisks_in_range(0, start_line, end_line)
+      if expand_result.expanded_count > 0 then
+        -- Re-calculate end_line as expansion may have changed line count
+        -- (though current implementation stays on same line)
+        -- For safety, re-fetch the line count
+        local line_count = vim.api.nvim_buf_line_count(0)
+        end_line = math.min(end_line, line_count)
+      end
+    end
+  end
+
   local lines = vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, false)
   local sql = table.concat(lines, "\n")
 
