@@ -886,29 +886,38 @@ end
 function Ssns.show_stats()
   local Cache = require('ssns.cache')
   local UiFloat = require('ssns.ui.core.float')
+  local ContentBuilder = require('ssns.ui.core.content_builder')
   local stats = Cache.get_stats()
 
-  local lines = {
-    "=== SSNS Statistics ===",
-    string.format("Servers: %d", stats.server_count),
-    string.format("Connected Servers: %d", stats.connected_servers),
-    string.format("Total Databases: %d", stats.total_databases),
-    string.format("Connected Databases: %d", stats.connected_databases),
-    "",
-    "Servers:",
-  }
-
+  local cb = ContentBuilder.new()
+  
+  cb:header("SSNS Statistics")
+  cb:separator("=", 50)
+  cb:blank()
+  
+  cb:key_value("Servers", stats.server_count)
+  cb:key_value("Connected Servers", stats.connected_servers)
+  cb:key_value("Total Databases", stats.total_databases)
+  cb:key_value("Connected Databases", stats.connected_databases)
+  cb:blank()
+  
+  cb:section("Servers")
   for _, server_stats in ipairs(stats.servers) do
-    local status = server_stats.connected and "✓" or "✗"
-    table.insert(
-      lines,
-      string.format("  %s %s (%s) - %d databases", status, server_stats.name, server_stats.db_type or "unknown", server_stats.database_count)
-    )
+    local status_style = server_stats.connected and "success" or "error"
+    local status_icon = server_stats.connected and "✓" or "✗"
+    cb:spans({
+      { text = "  " .. status_icon .. " ", style = status_style },
+      { text = server_stats.name, style = "server" },
+      { text = " (" },
+      { text = server_stats.db_type or "unknown", style = "muted" },
+      { text = ") - " },
+      { text = tostring(server_stats.database_count), style = "number" },
+      { text = " databases" },
+    })
   end
+  cb:separator("=", 50)
 
-  table.insert(lines, "======================")
-
-  UiFloat.create(lines, {
+  UiFloat.create_styled(cb, {
     title = "SSNS Statistics",
     min_width = 60,
     footer = "q/Esc: close",
