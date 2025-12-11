@@ -1249,6 +1249,101 @@ function MultiPanelWindow:is_valid()
   return false
 end
 
+-- ============================================================================
+-- Input Field Support for MultiPanelWindow
+-- ============================================================================
+
+---Setup input fields for a panel from a ContentBuilder
+---@param panel_name string Panel name
+---@param content_builder ContentBuilder ContentBuilder instance with inputs
+---@param opts table? Options: { on_value_change = function?, on_input_enter = function?, on_input_exit = function? }
+function MultiPanelWindow:setup_inputs(panel_name, content_builder, opts)
+  if self._closed then return end
+  opts = opts or {}
+
+  local panel = self.panels[panel_name]
+  if not panel then return end
+
+  local inputs = content_builder:get_inputs()
+  local input_order = content_builder:get_input_order()
+
+  -- Skip if no inputs
+  if vim.tbl_isempty(inputs) then return end
+
+  -- Create input manager for this panel
+  local InputManager = require('ssns.ui.core.input_manager')
+  
+  panel.input_manager = InputManager.new({
+    bufnr = panel.bufnr,
+    winid = panel.winid,
+    inputs = inputs,
+    input_order = input_order,
+    on_value_change = opts.on_value_change,
+    on_input_enter = opts.on_input_enter,
+    on_input_exit = opts.on_input_exit,
+  })
+
+  panel.input_manager:setup()
+end
+
+---Get the value of an input field in a panel
+---@param panel_name string Panel name
+---@param input_key string Input key
+---@return string? value
+function MultiPanelWindow:get_input_value(panel_name, input_key)
+  local panel = self.panels[panel_name]
+  if panel and panel.input_manager then
+    return panel.input_manager:get_value(input_key)
+  end
+  return nil
+end
+
+---Get all input values from a panel
+---@param panel_name string Panel name
+---@return table<string, string>? values Map of input key -> value
+function MultiPanelWindow:get_all_input_values(panel_name)
+  local panel = self.panels[panel_name]
+  if panel and panel.input_manager then
+    return panel.input_manager:get_all_values()
+  end
+  return nil
+end
+
+---Set the value of an input field in a panel
+---@param panel_name string Panel name
+---@param input_key string Input key
+---@param value string New value
+function MultiPanelWindow:set_input_value(panel_name, input_key, value)
+  local panel = self.panels[panel_name]
+  if panel and panel.input_manager then
+    panel.input_manager:set_value(input_key, value)
+  end
+end
+
+---Enter input mode for a specific input in a panel
+---@param panel_name string Panel name
+---@param input_key string Input key to activate
+function MultiPanelWindow:enter_input(panel_name, input_key)
+  local panel = self.panels[panel_name]
+  if panel and panel.input_manager then
+    -- Focus the panel first
+    self:focus_panel(panel_name)
+    panel.input_manager:enter_input_mode(input_key)
+  end
+end
+
+---Update input definitions for a panel (after re-render)
+---@param panel_name string Panel name
+---@param content_builder ContentBuilder New ContentBuilder with updated inputs
+function MultiPanelWindow:update_inputs(panel_name, content_builder)
+  local panel = self.panels[panel_name]
+  if panel and panel.input_manager then
+    local inputs = content_builder:get_inputs()
+    local input_order = content_builder:get_input_order()
+    panel.input_manager:update_inputs(inputs, input_order)
+  end
+end
+
 ---Close the multi-panel window
 function MultiPanelWindow:close()
   if self._closed then return end
@@ -1257,6 +1352,13 @@ function MultiPanelWindow:close()
   -- Call on_close callback
   if self.config.on_close then
     pcall(self.config.on_close, self)
+  end
+
+  -- Cleanup input managers
+  for _, panel in pairs(self.panels) do
+    if panel.input_manager then
+      pcall(function() panel.input_manager:destroy() end)
+    end
   end
 
   -- Close all panel windows
