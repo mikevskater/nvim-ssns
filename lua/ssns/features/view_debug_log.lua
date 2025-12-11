@@ -5,6 +5,7 @@
 local ViewDebugLog = {}
 
 local UiFloat = require('ssns.ui.core.float')
+local ContentBuilder = require('ssns.ui.core.content_builder')
 local Debug = require('ssns.debug')
 
 -- Store reference to current floating window for cleanup
@@ -89,32 +90,30 @@ function ViewDebugLog.view_log(filter)
   current_filter = filter
   local log_path = Debug.get_log_path()
 
-  -- Build display content
-  local display_lines = {}
+  -- Build styled content
+  local cb = ContentBuilder.new()
 
-  table.insert(display_lines, "Debug Log Viewer")
-  table.insert(display_lines, string.rep("=", 50))
-  table.insert(display_lines, "")
+  cb:header("Debug Log Viewer")
+  cb:separator()
+  cb:blank()
 
   -- Log file info
-  table.insert(display_lines, "Log File")
-  table.insert(display_lines, string.rep("-", 30))
-  table.insert(display_lines, string.format("  Path: %s", log_path))
+  cb:section("Log File")
+  cb:label_value("  Path", log_path)
 
   -- Check file size
   local f = io.open(log_path, 'r')
   if f then
     local size = f:seek("end")
     f:close()
-    table.insert(display_lines, string.format("  Size: %d bytes", size or 0))
+    cb:label_value("  Size", string.format("%d bytes", size or 0))
   end
-  table.insert(display_lines, "")
+  cb:blank()
 
   -- Component counts
   local counts = count_by_component()
   if next(counts) then
-    table.insert(display_lines, "Log Entries by Component")
-    table.insert(display_lines, string.rep("-", 30))
+    cb:section("Log Entries by Component")
 
     local sorted_components = {}
     for comp in pairs(counts) do
@@ -123,41 +122,62 @@ function ViewDebugLog.view_log(filter)
     table.sort(sorted_components)
 
     for _, comp in ipairs(sorted_components) do
-      table.insert(display_lines, string.format("  [%s]: %d", comp, counts[comp]))
+      cb:spans({
+        { text = "  [", style = "muted" },
+        { text = comp, style = "label" },
+        { text = "]: ", style = "muted" },
+        { text = tostring(counts[comp]), style = "number" },
+      })
     end
-    table.insert(display_lines, "")
+    cb:blank()
   end
 
   -- Filter info
   if filter then
-    table.insert(display_lines, string.format("Filter: \"%s\"", filter))
-    table.insert(display_lines, "")
+    cb:spans({
+      { text = "Filter: ", style = "label" },
+      { text = "\"" .. filter .. "\"", style = "value" },
+    })
+    cb:blank()
   end
 
   -- Log content
-  table.insert(display_lines, "Log Content (Last " .. max_lines .. " lines)")
-  table.insert(display_lines, string.rep("-", 30))
-  table.insert(display_lines, "")
+  cb:section("Log Content (Last " .. max_lines .. " lines)")
+  cb:blank()
 
   local log_lines, total = read_log_file(filter)
   if filter then
-    table.insert(display_lines, string.format("(Showing %d of %d matching lines)", #log_lines, total))
-    table.insert(display_lines, "")
+    cb:spans({
+      { text = "(Showing ", style = "muted" },
+      { text = tostring(#log_lines), style = "number" },
+      { text = " of ", style = "muted" },
+      { text = tostring(total), style = "number" },
+      { text = " matching lines)", style = "muted" },
+    })
+    cb:blank()
   end
 
   for _, line in ipairs(log_lines) do
-    table.insert(display_lines, line)
+    -- Color log lines based on content
+    if line:find("ERROR") or line:find("error") then
+      cb:styled(line, "error")
+    elseif line:find("WARN") or line:find("warn") then
+      cb:styled(line, "warning")
+    elseif line:find("DEBUG") or line:find("debug") then
+      cb:styled(line, "muted")
+    else
+      cb:styled(line, "text")
+    end
   end
 
   if #log_lines == 0 then
-    table.insert(display_lines, "(No log entries" .. (filter and " matching filter" or "") .. ")")
+    cb:styled("(No log entries" .. (filter and " matching filter" or "") .. ")", "muted")
   end
 
-  -- Create floating window
-  current_float = UiFloat.create(display_lines, {
+  -- Create floating window with styled content
+  current_float = UiFloat.create_styled(cb, {
     title = "Debug Log" .. (filter and (" [" .. filter .. "]") or ""),
     border = "rounded",
-    filetype = "log",
     min_width = 80,
     max_width = 140,
     max_height = 45,
