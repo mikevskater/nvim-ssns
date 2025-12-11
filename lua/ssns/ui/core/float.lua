@@ -56,7 +56,14 @@ function UiFloat.create(lines, config)
 
   -- Handle content_builder in config
   local content_builder = config.content_builder
-  if content_builder then
+  if content_builder == true then
+    -- Create a new ContentBuilder if boolean true passed
+    local ContentBuilder = require('ssns.ui.core.content_builder')
+    content_builder = ContentBuilder.new()
+    config.content_builder = content_builder
+  end
+  
+  if content_builder and type(content_builder) == "table" and content_builder.build_lines then
     lines = content_builder:build_lines()
   end
 
@@ -394,6 +401,12 @@ function FloatWindow:set_cursor(row, col)
   end
 end
 
+---Get the content builder associated with this window
+---@return ContentBuilder?
+function FloatWindow:get_content_builder()
+  return self._content_builder
+end
+
 -- ============================================================================
 -- Input Field Support for FloatWindow
 -- ============================================================================
@@ -499,6 +512,14 @@ end
 function FloatWindow:set_input_value(key, value)
   if self._input_manager then
     self._input_manager:set_value(key, value)
+  end
+end
+
+---Set callback for when input is submitted (Enter pressed in input mode)
+---@param callback function Callback function to run on submit
+function FloatWindow:on_input_submit(callback)
+  if self._input_manager then
+    self._input_manager.on_submit = callback
   end
 end
 

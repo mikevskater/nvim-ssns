@@ -334,6 +334,12 @@ function InputManager:_setup_input_keymaps()
   -- Insert mode Enter: confirm/exit input (instead of newline)
   vim.keymap.set('i', '<CR>', function()
     vim.cmd("stopinsert")
+    -- Call on_submit callback if set (after a short delay to let stopinsert complete)
+    vim.schedule(function()
+      if self.on_submit then
+        self.on_submit()
+      end
+    end)
   end, opts)
   
   -- Insert mode Tab/Shift-Tab: move to next/prev input
