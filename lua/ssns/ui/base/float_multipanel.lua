@@ -89,7 +89,7 @@ function UiFloatMultiPanel.create(config)
     local border = UiFloatBase.create_split_border(is_first, is_last)
 
     local layout = layouts[i]
-    local winid = vim.api.nvim_open_win(bufnr, false, {
+    local win_opts = {
       relative = 'editor',
       width = layout.width,
       height = layout.height,
@@ -101,7 +101,15 @@ function UiFloatMultiPanel.create(config)
       title_pos = 'center',
       zindex = 50,
       focusable = not panel.readonly,
-    })
+    }
+
+    -- Add footer to first panel (spans full width visually on bottom border)
+    if is_first and config.footer then
+      win_opts.footer = string.format(" %s ", config.footer)
+      win_opts.footer_pos = 'center'
+    end
+
+    local winid = vim.api.nvim_open_win(bufnr, false, win_opts)
 
     state.windows[panel.name] = winid
 
@@ -116,35 +124,6 @@ function UiFloatMultiPanel.create(config)
       wrap = false,
       signcolumn = 'no',
       winhighlight = 'Normal:Normal,FloatBorder:SsnsFloatBorder,FloatTitle:SsnsFloatTitle,CursorLine:SsnsFloatSelected',
-    })
-  end
-
-  -- Create footer if specified
-  if config.footer then
-    state.footer_buf = UiFloatBase.create_buffer({})
-    local start_row = layouts[1].row
-    local start_col = layouts[1].col
-
-    local text_len = #config.footer
-    local padding = math.floor((total_width - text_len) / 2)
-    local centered_text = string.rep(" ", math.max(0, padding)) .. config.footer
-
-    UiFloatBase.set_buffer_lines(state.footer_buf, {centered_text})
-
-    state.footer_win = vim.api.nvim_open_win(state.footer_buf, false, {
-      relative = "editor",
-      width = total_width,
-      height = 1,
-      row = start_row + total_height + 2,
-      col = start_col,
-      style = "minimal",
-      border = "none",
-      zindex = 52,
-      focusable = false,
-    })
-
-    UiFloatBase.set_window_options(state.footer_win, {
-      winhighlight = 'Normal:SsnsFloatHint',
     })
   end
 
@@ -297,12 +276,6 @@ function UiFloatMultiPanel.close(state)
   -- Call close callback
   if state.config.on_close then
     state.config.on_close(state)
-  end
-
-  -- Close footer
-  if state.footer_win then
-    UiFloatBase.close_window(state.footer_win)
-    UiFloatBase.delete_buffer(state.footer_buf)
   end
 
   -- Close all panels

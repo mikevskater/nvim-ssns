@@ -262,10 +262,10 @@ function FloatWindow:_setup_options()
   vim.api.nvim_set_option_value('winblend', self.config.winblend, { win = winid })
   vim.api.nvim_set_option_value('scrolloff', 0, { win = winid })
 
-  -- Custom highlight groups
-  if self.config.winhighlight then
-    vim.api.nvim_set_option_value('winhighlight', self.config.winhighlight, { win = winid })
-  end
+  -- Apply themed highlight groups (allow override via winhighlight config)
+  local default_winhighlight = 'Normal:Normal,FloatBorder:SsnsFloatBorder,FloatTitle:SsnsFloatTitle,CursorLine:SsnsFloatSelected'
+  local winhighlight = self.config.winhighlight or default_winhighlight
+  vim.api.nvim_set_option_value('winhighlight', winhighlight, { win = winid })
 end
 
 ---Setup keymaps
