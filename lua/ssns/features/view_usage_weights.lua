@@ -5,6 +5,7 @@
 local ViewUsageWeights = {}
 
 local UiFloat = require('ssns.ui.core.float')
+local ContentBuilder = require('ssns.ui.core.content_builder')
 local JsonUtils = require('ssns.utils.json')
 local UsageTracker = require('ssns.completion.usage_tracker')
 
@@ -66,58 +67,82 @@ function ViewUsageWeights.view_weights()
     UsageTracker.init()
   end
 
-  -- Build display content
-  local display_lines = {}
+  -- Build styled content
+  local cb = ContentBuilder.new()
 
-  table.insert(display_lines, "Usage-Based Ranking Weights")
-  table.insert(display_lines, string.rep("=", 50))
-  table.insert(display_lines, "")
+  cb:header("Usage-Based Ranking Weights")
+  cb:separator("=", 50)
+  cb:blank()
 
   -- File info
-  table.insert(display_lines, "Persistence File")
-  table.insert(display_lines, string.rep("-", 30))
-  table.insert(display_lines, string.format("  Path: %s", UsageTracker.persist_file))
-  table.insert(display_lines, string.format("  Dirty: %s", UsageTracker.is_dirty and "Yes (unsaved changes)" or "No"))
+  cb:section("Persistence File")
+  cb:separator("-", 30)
+  cb:spans({
+    { text = "  Path: ", style = "label" },
+    { text = UsageTracker.persist_file, style = "value" },
+  })
+  cb:spans({
+    { text = "  Dirty: ", style = "label" },
+    { text = UsageTracker.is_dirty and "Yes (unsaved changes)" or "No", style = UsageTracker.is_dirty and "warning" or "success" },
+  })
   if UsageTracker.weights.saved_at then
-    table.insert(display_lines, string.format("  Last saved: %s", UsageTracker.weights.saved_at))
+    cb:spans({
+      { text = "  Last saved: ", style = "label" },
+      { text = UsageTracker.weights.saved_at, style = "muted" },
+    })
   end
-  table.insert(display_lines, "")
+  cb:blank()
 
   -- Global statistics
   local stats = UsageTracker.get_stats()
-  table.insert(display_lines, "Global Statistics")
-  table.insert(display_lines, string.rep("-", 30))
-  table.insert(display_lines, string.format("  Total tracked items: %d", stats.total_items))
-  table.insert(display_lines, "")
+  cb:section("Global Statistics")
+  cb:separator("-", 30)
+  cb:spans({
+    { text = "  Total tracked items: ", style = "label" },
+    { text = tostring(stats.total_items), style = "number" },
+  })
+  cb:blank()
 
-  table.insert(display_lines, "  By type:")
+  cb:styled("  By type:", "label")
   local type_order = { "database", "schema", "table", "column", "procedure", "function" }
   for _, type_key in ipairs(type_order) do
     local count = stats.by_type[type_key] or 0
     if count > 0 then
-      table.insert(display_lines, string.format("    %s: %d", type_key, count))
+      local style = type_key == "table" and "table" or type_key == "column" and "column" or
+                    type_key == "database" and "database" or type_key == "schema" and "schema" or
+                    type_key == "procedure" and "procedure" or type_key == "function" and "func" or "value"
+      cb:spans({
+        { text = "    " },
+        { text = type_key, style = style },
+        { text = ": " },
+        { text = tostring(count), style = "number" },
+      })
     end
   end
-  table.insert(display_lines, "")
+  cb:blank()
 
   -- Top tables (from stats)
   if #stats.top_tables > 0 then
-    table.insert(display_lines, "Top 10 Tables (by weight)")
-    table.insert(display_lines, string.rep("-", 30))
+    cb:section("Top 10 Tables (by weight)")
+    cb:separator("-", 30)
     for i, item in ipairs(stats.top_tables) do
-      table.insert(display_lines, string.format("  %2d. [%4d] %s", i, item.weight, item.path))
+      cb:spans({
+        { text = string.format("  %2d. ", i), style = "muted" },
+        { text = string.format("[%4d] ", item.weight), style = "number" },
+        { text = item.path, style = "table" },
+      })
     end
-    table.insert(display_lines, "")
+    cb:blank()
   end
 
   -- Connection breakdown
-  table.insert(display_lines, "Weights by Connection")
-  table.insert(display_lines, string.rep("-", 30))
+  cb:section("Weights by Connection")
+  cb:separator("-", 30)
 
   local connections = UsageTracker.weights.connections
   if not next(connections) then
-    table.insert(display_lines, "  (No usage data recorded)")
-    table.insert(display_lines, "")
+    cb:styled("  (No usage data recorded)", "muted")
+    cb:blank()
   else
     -- Sort connections
     local sorted_conns = {}
@@ -128,8 +153,11 @@ function ViewUsageWeights.view_weights()
 
     for _, conn_key in ipairs(sorted_conns) do
       local conn_data = connections[conn_key]
-      table.insert(display_lines, "")
-      table.insert(display_lines, string.format("  Connection: %s", conn_key))
+      cb:blank()
+      cb:spans({
+        { text = "  Connection: ", style = "label" },
+        { text = conn_key, style = "server" },
+      })
 
       -- Count items per type
       local type_counts = {}
@@ -146,15 +174,27 @@ function ViewUsageWeights.view_weights()
         end
       end
 
-      table.insert(display_lines, string.format("    Total weight: %d", total_weight))
-      table.insert(display_lines, "")
+      cb:spans({
+        { text = "    Total weight: ", style = "label" },
+        { text = tostring(total_weight), style = "number" },
+      })
+      cb:blank()
 
       -- Show each type with top items
       for _, type_key in ipairs(type_order) do
         local type_data = conn_data[type_key]
         local count = type_counts[type_key]
         if type_data and count and count > 0 then
-          table.insert(display_lines, string.format("    %s (%d items):", type_key:upper(), count))
+          local type_style = type_key == "table" and "table" or type_key == "column" and "column" or
+                            type_key == "database" and "database" or type_key == "schema" and "schema" or
+                            type_key == "procedure" and "procedure" or "func"
+          cb:spans({
+            { text = "    " },
+            { text = type_key:upper(), style = type_style },
+            { text = " (" },
+            { text = tostring(count), style = "number" },
+            { text = " items):" },
+          })
 
           local top_items = get_top_items(type_data, 5)
           for _, item in ipairs(top_items) do
@@ -167,23 +207,29 @@ function ViewUsageWeights.view_weights()
             if #display_path > 45 then
               display_path = "..." .. display_path:sub(-42)
             end
-            table.insert(display_lines, string.format("      [%4d] %s%s", item.weight, display_path, extra))
+            cb:spans({
+              { text = "      [" },
+              { text = string.format("%4d", item.weight), style = "number" },
+              { text = "] " },
+              { text = display_path, style = "value" },
+              { text = extra, style = "muted" },
+            })
           end
 
           if count > 5 then
-            table.insert(display_lines, string.format("      ... and %d more", count - 5))
+            cb:styled(string.format("      ... and %d more", count - 5), "muted")
           end
-          table.insert(display_lines, "")
+          cb:blank()
         end
       end
     end
   end
 
   -- JSON output for full data
-  table.insert(display_lines, "")
-  table.insert(display_lines, "Full Data JSON")
-  table.insert(display_lines, string.rep("=", 50))
-  table.insert(display_lines, "")
+  cb:blank()
+  cb:header("Full Data JSON")
+  cb:separator("=", 50)
+  cb:blank()
 
   -- Create a summary structure for JSON
   local json_data = {
@@ -214,17 +260,15 @@ function ViewUsageWeights.view_weights()
 
   local json_lines = JsonUtils.prettify_lines(json_data)
   for _, line in ipairs(json_lines) do
-    table.insert(display_lines, line)
+    cb:line(line)
   end
 
   -- Create floating window
-  current_float = UiFloat.create(display_lines, {
+  current_float = UiFloat.create_styled(cb, {
     title = "Usage Weights",
     border = "rounded",
-    filetype = "json",
     min_width = 70,
     max_width = 120,
-    max_height = 45,
     wrap = false,
     keymaps = {
       ['r'] = function()
