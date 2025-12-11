@@ -27,8 +27,6 @@ local KeymapManager = require('ssns.keymap_manager')
 ---@class FormState
 ---@field main_buf number Main buffer
 ---@field main_win number Main window
----@field footer_buf number Footer buffer
----@field footer_win number Footer window
 ---@field fields FormField[] Form fields
 ---@field selected_field_idx number Currently selected field index
 ---@field edit_mode boolean Whether currently in edit mode
@@ -66,7 +64,10 @@ function UiFloatForm.create(config)
     namespace = UiFloatBase.create_namespace("ssns_form"),
   }
 
-  -- Create main buffer and window
+  -- Footer text for native footer
+  local footer_text = " <Enter>=Submit | <Esc>=Cancel | <Tab>=Next | j/k=Navigate | i=Edit "
+
+  -- Create main buffer and window with native footer
   state.main_buf = UiFloatBase.create_buffer({})
   state.main_win = UiFloatBase.create_window(state.main_buf, {
     width = width,
@@ -75,6 +76,8 @@ function UiFloatForm.create(config)
     border = 'rounded',
     enter = true,
     zindex = 50,
+    footer = { { footer_text, 'SsnsFloatHint' } },
+    footer_pos = 'center',
   })
 
   UiFloatBase.set_window_options(state.main_win, {
@@ -83,32 +86,7 @@ function UiFloatForm.create(config)
     cursorline = false,
     wrap = false,
     signcolumn = 'no',
-  })
-
-  -- Create footer
-  local row, col = UiFloatBase.calculate_centered_position(width, height)
-  state.footer_buf = UiFloatBase.create_buffer({})
-
-  local footer_text = " <Enter>=Submit | <Esc>=Cancel | <Tab>=Next | j/k=Navigate | i=Edit "
-  local padding = math.floor((width - #footer_text) / 2)
-  local centered_footer = string.rep(" ", math.max(0, padding)) .. footer_text
-
-  UiFloatBase.set_buffer_lines(state.footer_buf, {centered_footer})
-
-  state.footer_win = vim.api.nvim_open_win(state.footer_buf, false, {
-    relative = "editor",
-    width = width,
-    height = 1,
-    row = row + height + 2,
-    col = col,
-    style = "minimal",
-    border = "none",
-    zindex = 51,
-    focusable = false,
-  })
-
-  UiFloatBase.set_window_options(state.footer_win, {
-    winhighlight = 'Normal:SsnsFloatHint',
+    winhighlight = 'Normal:Normal,FloatBorder:SsnsFloatBorder,FloatTitle:SsnsFloatTitle,CursorLine:SsnsFloatSelected',
   })
 
   -- Render
@@ -312,10 +290,6 @@ end
 ---@param state FormState
 function UiFloatForm.close(state)
   if not state then return end
-
-  -- Close footer
-  UiFloatBase.close_window(state.footer_win)
-  UiFloatBase.delete_buffer(state.footer_buf)
 
   -- Close main window
   UiFloatBase.close_window(state.main_win)

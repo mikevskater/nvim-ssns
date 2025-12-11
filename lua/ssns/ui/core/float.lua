@@ -10,7 +10,7 @@
 ---@field max_width number? Maximum width (default: vim.o.columns - 4)
 ---@field height number? Fixed height in rows
 ---@field min_height number? Minimum height
----@field max_height number? Maximum height (default: vim.o.lines - 4)
+---@field max_height number? Maximum height (default: vim.o.lines - 6)
 ---@field relative "editor"|"cursor"|"win"? Position relative to (default: "editor")
 ---@field row number? Y position (for non-centered)
 ---@field col number? X position (for non-centered)
@@ -94,7 +94,7 @@ function FloatWindow:_apply_defaults()
   c.footer_pos = c.footer_pos or "center"
   c.border = c.border or "rounded"
   c.max_width = c.max_width or (vim.o.columns - 4)
-  c.max_height = c.max_height or (vim.o.lines - 4)
+  c.max_height = c.max_height or (vim.o.lines - 6)
   c.relative = c.relative or "editor"
   c.centered = c.centered ~= false  -- Default true
   c.enter = c.enter ~= false  -- Default true
@@ -171,7 +171,10 @@ function FloatWindow:_calculate_dimensions()
     height = math.max(height, self.config.min_height)
   end
   if self.config.max_height then
-    height = math.min(height, self.config.max_height)
+    -- Ensure max_height doesn't exceed available screen space (account for borders + cmdline)
+    local screen_max = vim.o.lines - 6
+    local effective_max = math.min(self.config.max_height, screen_max)
+    height = math.min(height, effective_max)
   end
 
   -- Account for title/footer if present
@@ -208,8 +211,8 @@ function FloatWindow:_calculate_position(width, height)
     col = self.config.col or 0
   end
 
-  -- Ensure window stays on screen
-  row = math.max(0, math.min(row, vim.o.lines - height - 2))
+  -- Ensure window stays on screen (account for borders: 2 lines, cmdline: 2 lines)
+  row = math.max(0, math.min(row, vim.o.lines - height - 4))
   col = math.max(0, math.min(col, vim.o.columns - width - 2))
 
   return row, col

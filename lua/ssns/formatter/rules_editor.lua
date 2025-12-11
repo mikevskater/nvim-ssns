@@ -467,7 +467,7 @@ end
 local function calculate_layout(cols, lines)
   -- Overall dimensions: 90% width x 85% height, centered
   local total_width = math.floor(cols * 0.90)
-  local total_height = math.floor(lines * 0.85)
+  local total_height = math.floor(lines * 0.7)
   local start_row = math.floor((lines - total_height) / 2)
   local start_col = math.floor((cols - total_width) / 2)
 
@@ -764,7 +764,8 @@ function RulesEditor._create_layout()
     vim.api.nvim_set_option_value('cursorline', true, { win = winid })
     vim.api.nvim_set_option_value('wrap', false, { win = winid })
     vim.api.nvim_set_option_value('signcolumn', 'no', { win = winid })
-    vim.api.nvim_set_option_value('winhighlight', 'FloatBorder:FloatBorder,FloatTitle:FloatTitle', { win = winid })
+    -- Use themed winhighlight for consistent look
+    vim.api.nvim_set_option_value('winhighlight', 'Normal:Normal,FloatBorder:SsnsFloatBorder,FloatTitle:SsnsFloatTitle,CursorLine:SsnsFloatSelected', { win = winid })
   end
 
   -- Disable cursorline on inactive panels
@@ -792,7 +793,8 @@ function RulesEditor._create_layout()
     focusable = false,
   })
 
-  vim.api.nvim_set_option_value('winhighlight', 'Normal:Comment', { win = state.footer_win })
+  -- Style footer with themed hint color
+  vim.api.nvim_set_option_value('winhighlight', 'Normal:SsnsFloatHint', { win = state.footer_win })
 
   -- Focus presets list
   vim.api.nvim_set_current_win(state.presets_win)

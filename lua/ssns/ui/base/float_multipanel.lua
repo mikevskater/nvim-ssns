@@ -51,7 +51,7 @@ function UiFloatMultiPanel.create(config)
   -- Calculate dimensions
   local ui = vim.api.nvim_list_uis()[1]
   local total_width = config.total_width or math.floor(ui.width * 0.8)
-  local total_height = config.total_height or math.floor(ui.height * 0.85)
+  local total_height = config.total_height or math.floor(ui.height * 0.75)
 
   -- Extract width ratios
   local ratios = {}
