@@ -5,6 +5,7 @@
 local ViewQueryCache = {}
 
 local UiFloat = require('ssns.ui.core.float')
+local ContentBuilder = require('ssns.ui.core.content_builder')
 local JsonUtils = require('ssns.utils.json')
 local QueryCache = require('ssns.query_cache')
 
@@ -42,36 +43,59 @@ function ViewQueryCache.view_cache()
   local stats = QueryCache.get_stats()
   local current_time = os.time()
 
-  -- Build display content
-  local display_lines = {}
+  -- Build styled content
+  local cb = ContentBuilder.new()
 
-  table.insert(display_lines, "Query Cache")
-  table.insert(display_lines, string.rep("=", 50))
-  table.insert(display_lines, "")
+  cb:header("Query Cache")
+  cb:separator("=", 50)
+  cb:blank()
 
   -- Stats summary
-  table.insert(display_lines, "Cache Statistics")
-  table.insert(display_lines, string.rep("-", 30))
-  table.insert(display_lines, string.format("  Total entries: %d", stats.total_entries))
-  table.insert(display_lines, string.format("  Valid entries: %d", stats.valid_entries))
-  table.insert(display_lines, string.format("  Expired entries: %d", stats.expired_entries))
-  table.insert(display_lines, string.format("  Default TTL: %d seconds (%s)", QueryCache.default_ttl, format_duration(QueryCache.default_ttl)))
-  table.insert(display_lines, "")
+  cb:section("Cache Statistics")
+  cb:separator("-", 30)
+  cb:spans({
+    { text = "  Total entries: ", style = "label" },
+    { text = tostring(stats.total_entries), style = "number" },
+  })
+  cb:spans({
+    { text = "  Valid entries: ", style = "label" },
+    { text = tostring(stats.valid_entries), style = "success" },
+  })
+  cb:spans({
+    { text = "  Expired entries: ", style = "label" },
+    { text = tostring(stats.expired_entries), style = stats.expired_entries > 0 and "warning" or "muted" },
+  })
+  cb:spans({
+    { text = "  Default TTL: ", style = "label" },
+    { text = tostring(QueryCache.default_ttl), style = "number" },
+    { text = " seconds (" },
+    { text = format_duration(QueryCache.default_ttl), style = "value" },
+    { text = ")" },
+  })
+  cb:blank()
 
   if stats.oldest_age then
-    table.insert(display_lines, string.format("  Oldest entry: %s ago", format_duration(stats.oldest_age)))
+    cb:spans({
+      { text = "  Oldest entry: ", style = "label" },
+      { text = format_duration(stats.oldest_age), style = "muted" },
+      { text = " ago" },
+    })
   end
   if stats.newest_age then
-    table.insert(display_lines, string.format("  Newest entry: %s ago", format_duration(stats.newest_age)))
+    cb:spans({
+      { text = "  Newest entry: ", style = "label" },
+      { text = format_duration(stats.newest_age), style = "value" },
+      { text = " ago" },
+    })
   end
-  table.insert(display_lines, "")
+  cb:blank()
 
   -- Cache entries by connection
-  table.insert(display_lines, "Cache Entries")
-  table.insert(display_lines, string.rep("-", 30))
+  cb:section("Cache Entries")
+  cb:separator("-", 30)
 
   if stats.total_entries == 0 then
-    table.insert(display_lines, "  (No cached queries)")
+    cb:styled("  (No cached queries)", "muted")
   else
     -- Group by connection
     local by_connection = {}
@@ -102,18 +126,25 @@ function ViewQueryCache.view_cache()
 
     for _, conn in ipairs(sorted_conns) do
       local entries = by_connection[conn]
-      table.insert(display_lines, "")
-      table.insert(display_lines, string.format("  Connection: %s (%d queries)", conn, #entries))
+      cb:blank()
+      cb:spans({
+        { text = "  Connection: ", style = "label" },
+        { text = conn, style = "server" },
+        { text = " (" },
+        { text = tostring(#entries), style = "number" },
+        { text = " queries)" },
+      })
 
       -- Sort by age (newest first)
       table.sort(entries, function(a, b) return a.age < b.age end)
 
       for i, entry in ipairs(entries) do
         if i > 10 then
-          table.insert(display_lines, string.format("    ... and %d more", #entries - 10))
+          cb:styled(string.format("    ... and %d more", #entries - 10), "muted")
           break
         end
 
+        local status_style = entry.valid and "success" or "error"
         local status = entry.valid and "valid" or "EXPIRED"
         local query_preview = entry.query
         if #query_preview > 50 then
@@ -122,33 +153,41 @@ function ViewQueryCache.view_cache()
         -- Clean up whitespace for display
         query_preview = query_preview:gsub("%s+", " ")
 
-        table.insert(display_lines, string.format("    [%s] %s ago, %d rows",
-          status, format_duration(entry.age), entry.result_rows))
-        table.insert(display_lines, string.format("      Query: %s", query_preview))
+        cb:spans({
+          { text = "    [" },
+          { text = status, style = status_style },
+          { text = "] " },
+          { text = format_duration(entry.age), style = "muted" },
+          { text = " ago, " },
+          { text = tostring(entry.result_rows), style = "number" },
+          { text = " rows" },
+        })
+        cb:spans({
+          { text = "      Query: ", style = "label" },
+          { text = query_preview, style = "muted" },
+        })
       end
     end
   end
-  table.insert(display_lines, "")
+  cb:blank()
 
   -- JSON output
-  table.insert(display_lines, "")
-  table.insert(display_lines, "Statistics JSON")
-  table.insert(display_lines, string.rep("=", 50))
-  table.insert(display_lines, "")
+  cb:blank()
+  cb:header("Statistics JSON")
+  cb:separator("=", 50)
+  cb:blank()
 
   local json_lines = JsonUtils.prettify_lines(stats)
   for _, line in ipairs(json_lines) do
-    table.insert(display_lines, line)
+    cb:line(line)
   end
 
   -- Create floating window
-  current_float = UiFloat.create(display_lines, {
+  current_float = UiFloat.create_styled(cb, {
     title = "Query Cache",
     border = "rounded",
-    filetype = "json",
     min_width = 60,
     max_width = 100,
-    max_height = 40,
     wrap = false,
     keymaps = {
       ['r'] = function()
