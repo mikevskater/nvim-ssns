@@ -539,152 +539,132 @@ function AddServerUI.show_new_connection_form_with_state(form_state, edit_connec
   local auth_label = get_auth_label(form_state.db_type, form_state.auth_type)
   local is_sqlite = form_state.db_type == "sqlite"
   local needs_auth_creds = form_state.auth_type == "sql"
+  local default_port = DEFAULT_PORTS[form_state.db_type]
 
-  -- Build styled content
+  -- Build styled content with inline inputs
   local cb = ContentBuilder.new()
 
-  -- Server Type section
+  -- Server Type section (select, not editable inline)
   cb:blank()
-  cb:styled("  SERVER TYPE", "section")
   cb:spans({
-    { text = "  " .. type_icon .. " ", style = "server" },
+    { text = "  ", style = "text" },
+    { text = "t", style = "key" },
+    { text = "  SERVER TYPE     ", style = "muted" },
+    { text = type_icon .. " ", style = "server" },
     { text = type_label, style = "value" },
   })
-  cb:spans({
-    { text = "  Press ", style = "muted" },
-    { text = "t", style = "key" },
-    { text = " to change", style = "muted" },
-  })
   cb:blank()
 
-  -- Connection Name section
-  cb:styled("  CONNECTION NAME", "section")
-  local name_display = form_state.name ~= "" and form_state.name or "(not set)"
-  if form_state.name ~= "" then
-    cb:styled("  " .. name_display, "value")
-  else
-    cb:styled("  " .. name_display, "muted")
-  end
-  cb:spans({
-    { text = "  Press ", style = "muted" },
-    { text = "n", style = "key" },
-    { text = " to set", style = "muted" },
+  -- Connection Name (inline input)
+  cb:labeled_input("name", "     CONNECTION NAME", {
+    value = form_state.name,
+    placeholder = "(required)",
+    width = 30,
   })
-  cb:blank()
 
-  -- Server Path section
-  local path_title = is_sqlite and "  DATABASE FILE" or "  SERVER"
-  cb:styled(path_title, "section")
-  local path_display = form_state.server_path ~= "" and form_state.server_path or "(not set)"
-  if form_state.server_path ~= "" then
-    cb:styled("  " .. path_display, "value")
-  else
-    cb:styled("  " .. path_display, "muted")
-  end
-  cb:spans({
-    { text = "  Press ", style = "muted" },
-    { text = "p", style = "key" },
-    { text = " to set", style = "muted" },
+  -- Server/Database File Path (inline input)
+  local path_label = is_sqlite and "     DATABASE FILE  " or "     SERVER         "
+  cb:labeled_input("server_path", path_label, {
+    value = form_state.server_path,
+    placeholder = "(required)",
+    width = 30,
   })
-  cb:styled("  " .. path_hint, "hint")
-  cb:blank()
 
-  -- Database section (not for SQLite)
+  -- Port (inline input, not for SQLite)
   if not is_sqlite then
-    cb:styled("  DATABASE (optional)", "section")
-    local db_display = form_state.database ~= "" and form_state.database or "(default)"
-    if form_state.database ~= "" then
-      cb:styled("  " .. db_display, "database")
-    else
-      cb:styled("  " .. db_display, "muted")
-    end
-    cb:spans({
-      { text = "  Press ", style = "muted" },
-      { text = "D", style = "key" },
-      { text = " to set", style = "muted" },
+    local port_str = form_state.port and tostring(form_state.port) or (default_port and tostring(default_port) or "")
+    cb:labeled_input("port", "     PORT           ", {
+      value = port_str,
+      placeholder = default_port and tostring(default_port) or "(default)",
+      width = 8,
     })
-    cb:blank()
   end
 
-  -- Authentication section (not for SQLite)
+  -- Database (inline input, not for SQLite)
   if not is_sqlite then
-    cb:styled("  AUTHENTICATION", "section")
-    cb:styled("  " .. auth_label, "value")
+    cb:labeled_input("database", "     DATABASE       ", {
+      value = form_state.database,
+      placeholder = "(optional)",
+      width = 25,
+    })
+  end
+
+  cb:blank()
+
+  -- Authentication section (select, not editable inline)
+  if not is_sqlite then
     cb:spans({
-      { text = "  Press ", style = "muted" },
+      { text = "  ", style = "text" },
       { text = "A", style = "key" },
-      { text = " to change", style = "muted" },
+      { text = "  AUTHENTICATION  ", style = "muted" },
+      { text = auth_label, style = "value" },
     })
 
-    -- Show username/password fields for SQL auth
+    -- Username/Password (inline inputs, conditional)
     if needs_auth_creds then
-      cb:blank()
-
-      local user_display = form_state.username ~= "" and form_state.username or "(not set)"
-      cb:spans({
-        { text = "  Username: ", style = "label" },
-        { text = user_display, style = form_state.username ~= "" and "value" or "muted" },
+      cb:labeled_input("username", "     USERNAME       ", {
+        value = form_state.username,
+        placeholder = "(required)",
+        width = 20,
       })
-
-      local pass_display = form_state.password ~= "" and string.rep("*", #form_state.password) or "(not set)"
-      cb:spans({
-        { text = "  Password: ", style = "label" },
-        { text = pass_display, style = form_state.password ~= "" and "value" or "muted" },
-      })
-
-      cb:spans({
-        { text = "  Press ", style = "muted" },
-        { text = "u", style = "key" },
-        { text = "/", style = "muted" },
-        { text = "P", style = "key" },
-        { text = " to set credentials", style = "muted" },
+      cb:labeled_input("password", "     PASSWORD       ", {
+        value = form_state.password,
+        placeholder = "(required)",
+        width = 20,
       })
     end
-
     cb:blank()
   end
 
-  -- Options section
+  -- Options section (toggles)
   cb:styled("  OPTIONS", "section")
-
   local fav_checkbox = form_state.favorite and "[x]" or "[ ]"
   local auto_checkbox = form_state.auto_connect and "[x]" or "[ ]"
 
   cb:spans({
+    { text = "  ", style = "text" },
+    { text = "f", style = "key" },
     { text = "  " .. fav_checkbox .. " ", style = form_state.favorite and "success" or "muted" },
     { text = "★", style = "warning" },
-    { text = " Favorite          Show in tree on startup", style = "muted" },
+    { text = " Favorite", style = "muted" },
   })
 
   cb:spans({
+    { text = "  ", style = "text" },
+    { text = "a", style = "key" },
     { text = "  " .. auto_checkbox .. " ", style = form_state.auto_connect and "success" or "muted" },
     { text = "⚡", style = "warning" },
-    { text = " Auto-connect      Connect automatically", style = "muted" },
-  })
-
-  cb:spans({
-    { text = "  Press ", style = "muted" },
-    { text = "f", style = "key" },
-    { text = " or ", style = "muted" },
-    { text = "a", style = "key" },
-    { text = " to toggle", style = "muted" },
+    { text = " Auto-connect", style = "muted" },
   })
   cb:blank()
+
+  -- Hints
+  if path_hint ~= "" then
+    cb:styled("  " .. path_hint, "hint")
+    cb:blank()
+  end
 
   -- Actions section
   cb:styled("  ───────────────────────────────────────────", "muted")
-  cb:blank()
   cb:spans({
-    { text = "  s", style = "key" },
-    { text = "   Save connection       ", style = "text" },
-    { text = "T", style = "key" },
-    { text = "   Test connection", style = "text" },
+    { text = "  ", style = "text" },
+    { text = "j/k", style = "key" },
+    { text = " Navigate  ", style = "muted" },
+    { text = "Enter", style = "key" },
+    { text = " Edit  ", style = "muted" },
+    { text = "Esc", style = "key" },
+    { text = " Confirm", style = "muted" },
   })
   cb:spans({
-    { text = "  b", style = "key" },
-    { text = "   Back to list          ", style = "text" },
+    { text = "  ", style = "text" },
+    { text = "s", style = "key" },
+    { text = "   Save    ", style = "muted" },
+    { text = "T", style = "key" },
+    { text = " Test  ", style = "muted" },
+    { text = "b", style = "key" },
+    { text = " Back  ", style = "muted" },
     { text = "q", style = "key" },
-    { text = "   Close", style = "text" },
+    { text = " Close", style = "muted" },
   })
   cb:blank()
 
@@ -694,16 +674,9 @@ function AddServerUI.show_new_connection_form_with_state(form_state, edit_connec
   local km = KeymapManager.get_group("add_server")
   local common = KeymapManager.get_group("common")
 
-  -- Build keymaps table dynamically
+  -- Build keymaps table - these work in normal mode alongside input navigation
   local keymaps = {}
   keymaps[common.close or "q"] = function() AddServerUI.close() end
-  keymaps[common.cancel or "<Esc>"] = function()
-    if #connections_list > 0 then
-      AddServerUI.show_connection_list()
-    else
-      AddServerUI.close()
-    end
-  end
   keymaps[km.back or "b"] = function()
     if #connections_list > 0 then
       AddServerUI.show_connection_list()
@@ -712,56 +685,66 @@ function AddServerUI.show_new_connection_form_with_state(form_state, edit_connec
     end
   end
   keymaps[km.db_type or "t"] = function()
+    -- Sync input values to form_state before showing select
+    AddServerUI._sync_inputs_to_form_state(form_state)
     AddServerUI.prompt_db_type(form_state, edit_connection)
   end
-  keymaps[km.set_name or "n"] = function()
-    AddServerUI.prompt_name(form_state, edit_connection)
-  end
-  keymaps[km.set_path or "p"] = function()
-    AddServerUI.prompt_server_path(form_state, edit_connection)
-  end
-  keymaps["D"] = function()
-    AddServerUI.prompt_database(form_state, edit_connection)
-  end
   keymaps["A"] = function()
+    AddServerUI._sync_inputs_to_form_state(form_state)
     AddServerUI.prompt_auth_type(form_state, edit_connection)
   end
-  keymaps["u"] = function()
-    AddServerUI.prompt_username(form_state, edit_connection)
-  end
-  keymaps["P"] = function()
-    AddServerUI.prompt_password(form_state, edit_connection)
-  end
   keymaps[km.toggle_favorite or "f"] = function()
+    AddServerUI._sync_inputs_to_form_state(form_state)
     form_state.favorite = not form_state.favorite
     AddServerUI.show_new_connection_form_with_state(form_state, edit_connection)
   end
   keymaps[km.toggle_auto_connect or "a"] = function()
+    AddServerUI._sync_inputs_to_form_state(form_state)
     form_state.auto_connect = not form_state.auto_connect
-    -- Auto-connect implies favorite
     if form_state.auto_connect then
       form_state.favorite = true
     end
     AddServerUI.show_new_connection_form_with_state(form_state, edit_connection)
   end
   keymaps[km.save or "s"] = function()
+    AddServerUI._sync_inputs_to_form_state(form_state)
     AddServerUI.save_connection(form_state, edit_connection)
   end
   keymaps[km.test or "T"] = function()
+    AddServerUI._sync_inputs_to_form_state(form_state)
     AddServerUI.test_connection(form_state)
   end
 
-  -- Create fresh float with styled content
-  current_float = UiFloat.create_styled(cb, {
+  -- Create float with styled content and input support
+  current_float = UiFloat.create(nil, {
     title = title,
     title_pos = "center",
     border = "rounded",
-    min_width = 52,
-    min_height = 20,
+    width = 55,
+    min_height = 18,
     centered = true,
     default_keymaps = false,
     keymaps = keymaps,
+    content_builder = cb,
+    enable_inputs = true,
   })
+end
+
+---Sync input field values back to form_state
+---@param form_state table Form state to update
+function AddServerUI._sync_inputs_to_form_state(form_state)
+  if not current_float then return end
+  
+  local values = current_float:get_all_input_values()
+  if values.name then form_state.name = values.name end
+  if values.server_path then form_state.server_path = values.server_path end
+  if values.database then form_state.database = values.database end
+  if values.username then form_state.username = values.username end
+  if values.password then form_state.password = values.password end
+  if values.port then
+    local port_num = tonumber(values.port)
+    form_state.port = port_num
+  end
 end
 
 ---Prompt for database type selection

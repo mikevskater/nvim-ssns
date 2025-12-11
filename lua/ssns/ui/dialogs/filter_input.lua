@@ -102,7 +102,7 @@ function UiFilterInput.show_input(group, current_filters, callback)
     title = " Filter Settings ",
     header = header,
     fields = fields,
-    width = 0.5,  -- 50% of screen width
+    width = 60,
     height = nil,  -- Auto-calculate
     on_submit = function(values)
       -- Reconstruct filter structure with object types

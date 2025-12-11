@@ -1,10 +1,11 @@
 ---@class UiFloatForm
 ---Form input floating window system
 ---Provides field-based input with navigation, editing, and validation
+---Now uses inline input fields instead of vim.ui.input prompts
 local UiFloatForm = {}
 
-local UiFloatBase = require('ssns.ui.base.float_base')
-local KeymapManager = require('ssns.keymap_manager')
+local UiFloat = require('ssns.ui.core.float')
+local ContentBuilder = require('ssns.ui.core.content_builder')
 
 ---@class FormField
 ---@field name string Field name/identifier
@@ -17,22 +18,19 @@ local KeymapManager = require('ssns.keymap_manager')
 ---@class FormConfig
 ---@field title string Form title
 ---@field fields FormField[] Array of form fields
----@field width number? Form width (default: 50% of screen)
+---@field width number? Form width (default: 60)
 ---@field height number? Form height (auto-calculated if not provided)
----@field on_submit fun(state: FormState, values: table) Called when form is submitted
----@field on_cancel fun(state: FormState)? Called when form is cancelled
----@field header_text string? Additional header text
----@field initial_data any? Initial state data
+---@field on_submit fun(values: table) Called when form is submitted
+---@field on_cancel fun()? Called when form is cancelled
+---@field header string|string[]? Header text or lines
 
 ---@class FormState
----@field main_buf number Main buffer
----@field main_win number Main window
+---@field float FloatWindow The floating window
 ---@field fields FormField[] Form fields
----@field selected_field_idx number Currently selected field index
----@field edit_mode boolean Whether currently in edit mode
----@field data any Custom data
 ---@field config FormConfig Configuration
----@field namespace number Highlight namespace
+
+-- Current form state (module-level for keymap access)
+local current_state = nil
 
 ---Create a form floating UI
 ---@param config FormConfig Configuration
@@ -49,199 +47,222 @@ function UiFloatForm.create(config)
     return nil
   end
 
-  -- Calculate dimensions
-  local ui = vim.api.nvim_list_uis()[1]
-  local width = config.width or math.floor(ui.width * 0.5)
-  local height = config.height or math.min(5 + (#config.fields * 3), math.floor(ui.height * 0.7))
+  -- Close any existing form
+  if current_state and current_state.float then
+    pcall(function() current_state.float:close() end)
+  end
 
   -- Create state
   local state = {
     fields = vim.deepcopy(config.fields),
-    selected_field_idx = 1,
-    edit_mode = false,
-    data = config.initial_data,
     config = config,
-    namespace = UiFloatBase.create_namespace("ssns_form"),
   }
 
-  -- Footer text for native footer
-  local footer_text = " <Enter>=Submit | <Esc>=Cancel | <Tab>=Next | j/k=Navigate | i=Edit "
+  -- Build content
+  local cb = UiFloatForm._build_content(state)
 
-  -- Create main buffer and window with native footer
-  state.main_buf = UiFloatBase.create_buffer({})
-  state.main_win = UiFloatBase.create_window(state.main_buf, {
+  -- Calculate dimensions
+  local width = config.width or 60
+  local height = config.height or UiFloatForm._calculate_height(state)
+
+  -- Build keymaps
+  local keymaps = {
+    ["s"] = function() UiFloatForm.submit() end,
+    ["<C-s>"] = function() UiFloatForm.submit() end,
+    ["q"] = function() UiFloatForm.cancel() end,
+    ["<Space>"] = function() UiFloatForm.toggle_checkbox_at_cursor() end,
+  }
+
+  -- Create float with input support
+  state.float = UiFloat.create(nil, {
+    title = config.title or " Form ",
+    title_pos = "center",
+    border = "rounded",
     width = width,
     height = height,
-    title = config.title,
-    border = 'rounded',
-    enter = true,
-    zindex = 50,
-    footer = { { footer_text, 'SsnsFloatHint' } },
-    footer_pos = 'center',
+    centered = true,
+    default_keymaps = false,
+    keymaps = keymaps,
+    content_builder = cb,
+    enable_inputs = true,
   })
 
-  UiFloatBase.set_window_options(state.main_win, {
-    number = false,
-    relativenumber = false,
-    cursorline = false,
-    wrap = false,
-    signcolumn = 'no',
-    winhighlight = 'Normal:Normal,FloatBorder:SsnsFloatBorder,FloatTitle:SsnsFloatTitle,CursorLine:SsnsFloatSelected',
-  })
-
-  -- Render
-  UiFloatForm.render(state)
-
-  -- Setup keymaps
-  UiFloatForm.setup_keymaps(state)
-
-  -- Setup cleanup
-  UiFloatBase.setup_cleanup_autocmd(state.main_win, function()
-    UiFloatForm.close(state)
-  end)
-
+  current_state = state
   return state
 end
 
----Render the form
+---Build ContentBuilder for form
 ---@param state FormState
-function UiFloatForm.render(state)
-  local lines = {}
+---@return ContentBuilder
+function UiFloatForm._build_content(state)
+  local cb = ContentBuilder.new()
 
   -- Header
-  if state.config.header_text then
-    table.insert(lines, state.config.header_text)
-    table.insert(lines, string.rep("─", 50))
-    table.insert(lines, "")
+  if state.config.header then
+    cb:blank()
+    local headers = type(state.config.header) == "table" and state.config.header or { state.config.header }
+    for _, line in ipairs(headers) do
+      cb:styled("  " .. line, "muted")
+    end
+    cb:blank()
   end
 
   -- Fields
-  for i, field in ipairs(state.fields) do
-    local prefix = i == state.selected_field_idx and "▶ " or "  "
-    local value_str = UiFloatForm.format_field_value(field)
-
-    table.insert(lines, string.format("%s%s", prefix, field.label))
-    table.insert(lines, string.format("  %s", value_str))
-    table.insert(lines, "")
-  end
-
-  -- Set buffer lines
-  UiFloatBase.set_buffer_lines(state.main_buf, lines)
-
-  -- Apply highlights
-  UiFloatBase.clear_highlights(state.main_buf, state.namespace)
-
-  local line_idx = 0
-  if state.config.header_text then
-    UiFloatBase.add_highlight(state.main_buf, state.namespace, "Comment", 0, 0, -1)
-    UiFloatBase.add_highlight(state.main_buf, state.namespace, "Comment", 1, 0, -1)
-    line_idx = 3
-  end
-
-  for i, field in ipairs(state.fields) do
-    if i == state.selected_field_idx then
-      UiFloatBase.add_highlight(state.main_buf, state.namespace, "Title", line_idx, 0, -1)
-      UiFloatBase.add_highlight(state.main_buf, state.namespace, "String", line_idx + 1, 0, -1)
+  for _, field in ipairs(state.fields) do
+    if field.type == "text" then
+      -- Text input field
+      cb:labeled_input(field.name, "  " .. field.label, {
+        value = tostring(field.value or ""),
+        placeholder = "(empty)",
+        width = 25,
+      })
+    elseif field.type == "checkbox" then
+      -- Checkbox (rendered as selectable line)
+      local checkbox = field.value and "[x]" or "[ ]"
+      cb:spans({
+        { text = "  ", style = "text" },
+        { text = checkbox .. " ", style = field.value and "success" or "muted" },
+        { text = field.label, style = "label" },
+      })
+    elseif field.type == "readonly" then
+      -- Read-only display
+      cb:spans({
+        { text = "  " .. field.label .. ": ", style = "label" },
+        { text = tostring(field.value or ""), style = "value" },
+      })
     end
-    line_idx = line_idx + 3
   end
 
-  -- Position cursor
-  local cursor_line = state.config.header_text and 3 or 0
-  cursor_line = cursor_line + ((state.selected_field_idx - 1) * 3) + 2
-  UiFloatBase.set_cursor(state.main_win, cursor_line, 2)
+  cb:blank()
+
+  -- Footer help
+  cb:styled("  ───────────────────────────────────────────", "muted")
+  cb:spans({
+    { text = "  ", style = "text" },
+    { text = "j/k", style = "key" },
+    { text = " Navigate  ", style = "muted" },
+    { text = "Enter", style = "key" },
+    { text = " Edit  ", style = "muted" },
+    { text = "Space", style = "key" },
+    { text = " Toggle", style = "muted" },
+  })
+  cb:spans({
+    { text = "  ", style = "text" },
+    { text = "s", style = "key" },
+    { text = " Submit    ", style = "muted" },
+    { text = "q/Esc", style = "key" },
+    { text = " Cancel", style = "muted" },
+  })
+  cb:blank()
+
+  return cb
 end
 
----Format field value for display
----@param field FormField
----@return string formatted Formatted value
-function UiFloatForm.format_field_value(field)
-  if field.type == "checkbox" then
-    return field.value and "[x]" or "[ ]"
-  elseif field.type == "text" then
-    return tostring(field.value or "")
-  elseif field.type == "readonly" then
-    return tostring(field.value or "")
-  else
-    return tostring(field.value or "")
-  end
-end
-
----Navigate to next field
+---Calculate form height based on fields
 ---@param state FormState
-function UiFloatForm.navigate_down(state)
-  if state.selected_field_idx < #state.fields then
-    state.selected_field_idx = state.selected_field_idx + 1
-    UiFloatForm.render(state)
+---@return number height
+function UiFloatForm._calculate_height(state)
+  local header_lines = 0
+  if state.config.header then
+    local headers = type(state.config.header) == "table" and state.config.header or { state.config.header }
+    header_lines = #headers + 2  -- blank + headers + blank
+  end
+
+  local field_lines = #state.fields
+  local footer_lines = 5  -- separator + 2 help lines + blank + border
+
+  return header_lines + field_lines + footer_lines
+end
+
+---Toggle checkbox at current cursor position
+function UiFloatForm.toggle_checkbox_at_cursor()
+  if not current_state or not current_state.float then return end
+
+  local cursor = current_state.float:get_cursor()
+  local row = cursor  -- 1-indexed
+
+  -- Find which field corresponds to this row
+  local field_idx = UiFloatForm._get_field_at_row(row)
+  if field_idx then
+    local field = current_state.fields[field_idx]
+    if field and field.type == "checkbox" then
+      field.value = not field.value
+      UiFloatForm._refresh()
+    end
   end
 end
 
----Navigate to previous field
----@param state FormState
-function UiFloatForm.navigate_up(state)
-  if state.selected_field_idx > 1 then
-    state.selected_field_idx = state.selected_field_idx - 1
-    UiFloatForm.render(state)
+---Get field index at a given row
+---@param row number 1-indexed row
+---@return number? field_idx
+function UiFloatForm._get_field_at_row(row)
+  if not current_state then return nil end
+
+  -- Calculate starting row for fields
+  local start_row = 1
+  if current_state.config.header then
+    local headers = type(current_state.config.header) == "table" and current_state.config.header or { current_state.config.header }
+    start_row = 2 + #headers  -- blank + headers + blank
   end
+
+  local field_row = row - start_row + 1
+  if field_row >= 1 and field_row <= #current_state.fields then
+    return field_row
+  end
+  return nil
 end
 
----Toggle checkbox field
----@param state FormState
-function UiFloatForm.toggle_checkbox(state)
-  local field = state.fields[state.selected_field_idx]
-  if field.type == "checkbox" then
-    field.value = not field.value
-    UiFloatForm.render(state)
+---Refresh form display (preserving values)
+function UiFloatForm._refresh()
+  if not current_state or not current_state.float then return end
+
+  -- Sync input values back to fields
+  local input_values = current_state.float:get_all_input_values()
+  for _, field in ipairs(current_state.fields) do
+    if field.type == "text" and input_values[field.name] then
+      field.value = input_values[field.name]
+    end
   end
-end
 
----Enter edit mode for text field
----@param state FormState
-function UiFloatForm.enter_edit_mode(state)
-  local field = state.fields[state.selected_field_idx]
+  -- Rebuild content
+  local cb = UiFloatForm._build_content(current_state)
+  current_state.float:update_styled(cb)
 
-  if field.type == "text" then
-    state.edit_mode = true
-
-    -- Prompt for input
-    vim.ui.input({
-      prompt = field.label .. ": ",
-      default = tostring(field.value or ""),
-    }, function(input)
-      state.edit_mode = false
-
-      if input ~= nil then
-        -- Validate if validator exists
-        if field.validator then
-          local valid, err = field.validator(input)
-          if not valid then
-            vim.notify(string.format("SSNS: Invalid value: %s", err or "Validation failed"), vim.log.levels.WARN)
-            return
-          end
-        end
-
-        field.value = input
-        UiFloatForm.render(state)
-      end
-    end)
-  elseif field.type == "checkbox" then
-    UiFloatForm.toggle_checkbox(state)
+  -- Re-setup inputs
+  if current_state.float._input_manager then
+    local inputs = cb:get_inputs()
+    local input_order = cb:get_input_order()
+    current_state.float._input_manager:update_inputs(inputs, input_order)
+    current_state.float._input_manager:init_highlights()
   end
 end
 
 ---Submit the form
----@param state FormState
-function UiFloatForm.submit(state)
-  -- Collect values
+function UiFloatForm.submit()
+  if not current_state then return end
+
+  -- Collect values from inputs and fields
   local values = {}
-  for _, field in ipairs(state.fields) do
-    values[field.name] = field.value
+
+  -- Get text input values
+  if current_state.float then
+    local input_values = current_state.float:get_all_input_values()
+    for k, v in pairs(input_values) do
+      values[k] = v
+    end
+  end
+
+  -- Get checkbox/readonly values directly from fields
+  for _, field in ipairs(current_state.fields) do
+    if field.type == "checkbox" or field.type == "readonly" then
+      values[field.name] = field.value
+    end
   end
 
   -- Validate all fields
-  for _, field in ipairs(state.fields) do
+  for _, field in ipairs(current_state.fields) do
     if field.validator then
-      local valid, err = field.validator(field.value)
+      local valid, err = field.validator(values[field.name])
       if not valid then
         vim.notify(string.format("SSNS: %s - %s", field.label, err or "Invalid value"), vim.log.levels.WARN)
         return
@@ -249,51 +270,40 @@ function UiFloatForm.submit(state)
     end
   end
 
+  -- Close form
+  UiFloatForm.close()
+
   -- Call submit callback
-  state.config.on_submit(state, values)
+  current_state.config.on_submit(values)
 end
 
 ---Cancel the form
----@param state FormState
-function UiFloatForm.cancel(state)
-  if state.config.on_cancel then
-    state.config.on_cancel(state)
-  else
-    UiFloatForm.close(state)
+function UiFloatForm.cancel()
+  if not current_state then return end
+
+  local on_cancel = current_state.config.on_cancel
+
+  -- Close form
+  UiFloatForm.close()
+
+  -- Call cancel callback if provided
+  if on_cancel then
+    on_cancel()
   end
 end
 
----Setup keymaps
----@param state FormState
-function UiFloatForm.setup_keymaps(state)
-  local keymaps = {
-    -- Navigation
-    { mode = "n", lhs = "j", rhs = function() UiFloatForm.navigate_down(state) end, desc = "Next field" },
-    { mode = "n", lhs = "k", rhs = function() UiFloatForm.navigate_up(state) end, desc = "Previous field" },
-    { mode = "n", lhs = "<Tab>", rhs = function() UiFloatForm.navigate_down(state) end, desc = "Next field" },
-    { mode = "n", lhs = "<S-Tab>", rhs = function() UiFloatForm.navigate_up(state) end, desc = "Previous field" },
-
-    -- Edit
-    { mode = "n", lhs = "i", rhs = function() UiFloatForm.enter_edit_mode(state) end, desc = "Edit field" },
-    { mode = "n", lhs = "<Space>", rhs = function() UiFloatForm.toggle_checkbox(state) end, desc = "Toggle checkbox" },
-
-    -- Submit/Cancel
-    { mode = "n", lhs = "<CR>", rhs = function() UiFloatForm.submit(state) end, desc = "Submit" },
-    { mode = "n", lhs = "<Esc>", rhs = function() UiFloatForm.cancel(state) end, desc = "Cancel" },
-    { mode = "n", lhs = "q", rhs = function() UiFloatForm.cancel(state) end, desc = "Close" },
-  }
-
-  UiFloatBase.set_keymaps(state.main_buf, keymaps, 'form')
+---Close the form
+function UiFloatForm.close()
+  if current_state and current_state.float then
+    pcall(function() current_state.float:close() end)
+  end
+  current_state = nil
 end
 
----Close the form
+---Render the form (compatibility - now just refreshes)
 ---@param state FormState
-function UiFloatForm.close(state)
-  if not state then return end
-
-  -- Close main window
-  UiFloatBase.close_window(state.main_win)
-  UiFloatBase.delete_buffer(state.main_buf)
+function UiFloatForm.render(state)
+  -- No-op for compatibility, form renders on create
 end
 
 return UiFloatForm

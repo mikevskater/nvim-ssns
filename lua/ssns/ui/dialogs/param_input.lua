@@ -78,7 +78,7 @@ function UiParamInput.show_input(procedure_name, server_name, database_name, par
     title = string.format(" Procedure Parameters: %s ", procedure_name),
     header = header,
     fields = fields,
-    width = 0.5,  -- 50% of screen width
+    width = 60,
     height = nil,  -- Auto-calculate based on fields
     on_submit = function(values)
       -- Transform values back to parameter table format expected by callback
