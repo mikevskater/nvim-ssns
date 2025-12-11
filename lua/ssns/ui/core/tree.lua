@@ -1349,34 +1349,56 @@ function UiTree.show_dependencies(obj)
     end
   end
 
+  local UiFloat = require('ssns.ui.core.float')
+  local ContentBuilder = require('ssns.ui.core.content_builder')
+  local cb = ContentBuilder.new()
+
   -- Show "DEPENDS ON" section
   if #depends_on > 0 then
-    table.insert(lines, "This object depends on:")
-    table.insert(lines, "")
+    cb:section("This object depends on:")
+    cb:blank()
     for _, dep in ipairs(depends_on) do
-      table.insert(lines, string.format("  [%s].[%s] (%s)", dep.schema_name, dep.object_name, dep.object_type))
+      cb:spans({
+        { text = "  [" },
+        { text = dep.schema_name, style = "schema" },
+        { text = "].[" },
+        { text = dep.object_name, style = "table" },
+        { text = "] (" },
+        { text = dep.object_type, style = "muted" },
+        { text = ")" },
+      })
     end
-    table.insert(lines, "")
+    cb:blank()
   end
 
   -- Show "DEPENDED ON BY" section
   if #depended_on_by > 0 then
-    table.insert(lines, "This object is depended on by:")
-    table.insert(lines, "")
+    cb:section("This object is depended on by:")
+    cb:blank()
     for _, dep in ipairs(depended_on_by) do
-      table.insert(lines, string.format("  [%s].[%s] (%s)", dep.schema_name, dep.object_name, dep.object_type))
+      cb:spans({
+        { text = "  [" },
+        { text = dep.schema_name, style = "schema" },
+        { text = "].[" },
+        { text = dep.object_name, style = "table" },
+        { text = "] (" },
+        { text = dep.object_type, style = "muted" },
+        { text = ")" },
+      })
     end
   end
 
-  table.insert(lines, "")
-  table.insert(lines, string.format("Total: %d dependencies", #dependencies))
+  cb:blank()
+  cb:spans({
+    { text = "Total: ", style = "label" },
+    { text = tostring(#dependencies), style = "number" },
+    { text = " dependencies" },
+  })
 
-  local UiFloat = require('ssns.ui.core.float')
-  UiFloat.create(lines, {
+  UiFloat.create_styled(cb, {
     title = "Dependencies",
     min_width = 80,
     max_height = 30,
-    filetype = 'ssns-dependencies',
     footer = "q/Esc: close",
   })
 end
