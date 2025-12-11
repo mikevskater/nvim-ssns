@@ -161,42 +161,42 @@ function UiFloatInteractive.setup_keymaps(state)
   end
 
   -- Navigation
-  KeymapManager.set_keymap(state.bufnr, 'n', 'j', safe_call(function()
+  KeymapManager.set(state.bufnr, 'n', 'j', safe_call(function()
     UiFloatInteractive.navigate(state, 'down')
-  end), { noremap = true, silent = true }, 'ssns-picker')
+  end), { noremap = true, silent = true })
 
-  KeymapManager.set_keymap(state.bufnr, 'n', 'k', safe_call(function()
+  KeymapManager.set(state.bufnr, 'n', 'k', safe_call(function()
     UiFloatInteractive.navigate(state, 'up')
-  end), { noremap = true, silent = true }, 'ssns-picker')
+  end), { noremap = true, silent = true })
 
-  KeymapManager.set_keymap(state.bufnr, 'n', '<Down>', safe_call(function()
+  KeymapManager.set(state.bufnr, 'n', '<Down>', safe_call(function()
     UiFloatInteractive.navigate(state, 'down')
-  end), { noremap = true, silent = true }, 'ssns-picker')
+  end), { noremap = true, silent = true })
 
-  KeymapManager.set_keymap(state.bufnr, 'n', '<Up>', safe_call(function()
+  KeymapManager.set(state.bufnr, 'n', '<Up>', safe_call(function()
     UiFloatInteractive.navigate(state, 'up')
-  end), { noremap = true, silent = true }, 'ssns-picker')
+  end), { noremap = true, silent = true })
 
   -- Selection
-  KeymapManager.set_keymap(state.bufnr, 'n', '<CR>', safe_call(function()
+  KeymapManager.set(state.bufnr, 'n', '<CR>', safe_call(function()
     state.config.on_select(state)
-  end), { noremap = true, silent = true }, 'ssns-picker')
+  end), { noremap = true, silent = true })
 
   -- Close
-  KeymapManager.set_keymap(state.bufnr, 'n', '<Esc>', safe_call(function()
+  KeymapManager.set(state.bufnr, 'n', '<Esc>', safe_call(function()
     UiFloatInteractive.close(state)
-  end), { noremap = true, silent = true }, 'ssns-picker')
+  end), { noremap = true, silent = true })
 
-  KeymapManager.set_keymap(state.bufnr, 'n', 'q', safe_call(function()
+  KeymapManager.set(state.bufnr, 'n', 'q', safe_call(function()
     UiFloatInteractive.close(state)
-  end), { noremap = true, silent = true }, 'ssns-picker')
+  end), { noremap = true, silent = true })
 
   -- Custom keymaps
   if state.config.custom_keymaps then
     for key, handler in pairs(state.config.custom_keymaps) do
-      KeymapManager.set_keymap(state.bufnr, 'n', key, safe_call(function()
+      KeymapManager.set(state.bufnr, 'n', key, safe_call(function()
         handler(state)
-      end), { noremap = true, silent = true }, 'ssns-picker')
+      end), { noremap = true, silent = true })
     end
   end
 end

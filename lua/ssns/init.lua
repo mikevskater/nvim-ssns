@@ -624,7 +624,7 @@ function Ssns._register_commands()
 
   -- :SSNSThemeClear - Clear theme and use defaults
   vim.api.nvim_create_user_command("SSNSThemeClear", function()
-    local ThemeManager = require('ssns.ui.themes.theme_manager')
+    local ThemeManager = require('ssns.ui.theme_manager')
     ThemeManager.clear_theme()
   end, {
     nargs = 0,

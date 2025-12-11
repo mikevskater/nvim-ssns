@@ -6,7 +6,7 @@ local UiHighlights = {}
 ---Now delegates to ThemeManager for actual highlight setup
 function UiHighlights.setup()
   -- Initialize and apply theme manager
-  local ThemeManager = require('ssns.ui.themes.theme_manager')
+  local ThemeManager = require('ssns.ui.theme_manager')
   ThemeManager.setup()
 end
 

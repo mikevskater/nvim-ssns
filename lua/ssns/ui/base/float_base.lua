@@ -214,7 +214,10 @@ end
 ---@param group string? Keymap group name
 function UiFloatBase.set_keymap(bufnr, mode, lhs, rhs, opts, group)
   opts = opts or { noremap = true, silent = true }
-  KeymapManager.set_keymap(bufnr, mode, lhs, rhs, opts, group or 'float_ui')
+  KeymapManager.set(bufnr, mode, lhs, rhs, opts, false)
+  if group then
+    KeymapManager.mark_group_active(bufnr, group or 'float_ui')
+  end
 end
 
 ---Setup multiple keymaps on buffer
