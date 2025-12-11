@@ -30,6 +30,8 @@
 ---@field zindex number? Window layer ordering (default: 50)
 ---@field on_close function? Callback when window closes
 ---@field style "minimal"|nil? Window style (default: "minimal")
+---@field content_builder ContentBuilder? ContentBuilder instance for styled content with inputs
+---@field enable_inputs boolean? Enable input field mode for the window
 
 ---@class FloatWindow
 ---A floating window instance
@@ -52,11 +54,19 @@ function UiFloat.create(lines, config)
   lines = lines or {}
   config = config or {}
 
+  -- Handle content_builder in config
+  local content_builder = config.content_builder
+  if content_builder then
+    lines = content_builder:build_lines()
+  end
+
   local instance = setmetatable({
     bufnr = nil,
     winid = nil,
     config = config,
     lines = lines,
+    _input_manager = nil,
+    _content_builder = content_builder,
   }, FloatWindow)
 
   -- Apply defaults
@@ -82,6 +92,18 @@ function UiFloat.create(lines, config)
 
   -- Setup autocmds
   instance:_setup_autocmds()
+
+  -- Apply styled content if content_builder provided
+  if content_builder and instance:is_valid() then
+    local ns_id = vim.api.nvim_create_namespace("ssns_float_content")
+    content_builder:apply_to_buffer(instance.bufnr, ns_id)
+    instance._content_ns = ns_id
+    
+    -- Setup inputs if enabled
+    if config.enable_inputs then
+      instance:_setup_input_manager(content_builder)
+    end
+  end
 
   return instance
 end
@@ -369,6 +391,114 @@ end
 function FloatWindow:set_cursor(row, col)
   if self:is_valid() then
     vim.api.nvim_win_set_cursor(self.winid, { row, col })
+  end
+end
+
+-- ============================================================================
+-- Input Field Support for FloatWindow
+-- ============================================================================
+
+---Setup input manager from content builder
+---@param content_builder ContentBuilder
+function FloatWindow:_setup_input_manager(content_builder)
+  local InputManager = require('ssns.ui.core.input_manager')
+  
+  local inputs = content_builder:get_inputs()
+  local input_order = content_builder:get_input_order()
+  
+  -- Create input manager
+  self._input_manager = InputManager.new({
+    bufnr = self.bufnr,
+    winid = self.winid,
+    inputs = inputs,
+    input_order = input_order,
+  })
+  
+  -- Setup input mode handling
+  self._input_manager:setup()
+  
+  -- Initialize highlights for all inputs
+  self._input_manager:init_highlights()
+  
+  -- Position cursor on first input if available (schedule to ensure window is ready)
+  if #input_order > 0 then
+    local first_input = inputs[input_order[1]]
+    if first_input then
+      vim.schedule(function()
+        if vim.api.nvim_win_is_valid(self.winid) then
+          vim.api.nvim_win_set_cursor(self.winid, {first_input.line, first_input.col_start})
+        end
+      end)
+    end
+  end
+end
+
+---Show the float (alias for focus)
+function FloatWindow:show()
+  self:focus()
+end
+
+---Enter input mode for a specific input or current input under cursor
+---@param key string? Input key (optional - uses cursor position if not provided)
+function FloatWindow:enter_input(key)
+  if not self._input_manager then return end
+  
+  if key then
+    self._input_manager:enter_input_mode(key)
+  else
+    -- Find input under cursor
+    local cursor = vim.api.nvim_win_get_cursor(self.winid)
+    local row = cursor[1]
+    local col = cursor[2]
+    
+    for input_key, input in pairs(self._input_manager.inputs) do
+      if input.line == row and col >= input.col_start and col < input.col_end then
+        self._input_manager:enter_input_mode(input_key)
+        return
+      end
+    end
+  end
+end
+
+---Navigate to next input
+function FloatWindow:next_input()
+  if self._input_manager then
+    self._input_manager:next_input()
+  end
+end
+
+---Navigate to previous input
+function FloatWindow:prev_input()
+  if self._input_manager then
+    self._input_manager:prev_input()
+  end
+end
+
+---Get value of a specific input
+---@param key string Input key
+---@return string? value
+function FloatWindow:get_input_value(key)
+  if self._input_manager then
+    return self._input_manager:get_value(key)
+  end
+  return nil
+end
+
+---Get all input values
+---@return table<string, string> values Map of key -> value
+function FloatWindow:get_all_input_values()
+  if self._input_manager then
+    return self._input_manager:get_all_values()
+  end
+  return {}
+end
+
+---Set value of a specific input
+---@param key string Input key
+---@param value string New value
+function FloatWindow:set_input_value(key, value)
+  if self._input_manager then
+    self._input_manager:set_value(key, value)
   end
 end
 

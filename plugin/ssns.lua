@@ -15,3 +15,11 @@ vim.api.nvim_create_user_command("SSNSVersion", function()
 end, {
   desc = "Show SSNS version",
 })
+
+-- Development test command for input fields
+vim.api.nvim_create_user_command("SSNSInputTest", function()
+  local input_test = require('ssns.ui.dialogs.input_test')
+  input_test.show()
+end, {
+  desc = "Test input fields in floating window (dev)",
+})

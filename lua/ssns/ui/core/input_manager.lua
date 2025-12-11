@@ -46,6 +46,7 @@ function InputManager.new(config)
   -- State
   self.in_input_mode = false
   self.active_input = nil
+  self.current_input_idx = 1  -- Track current input index for Tab navigation
   self.values = {}
   self._namespace = vim.api.nvim_create_namespace("ssns_input_manager")
   self._autocmd_group = nil
@@ -103,23 +104,28 @@ function InputManager:setup()
   self:_setup_input_keymaps()
 end
 
----Check if cursor is on an input field and enter input mode if so
+---Check if cursor is on an input field and update highlighting
 function InputManager:_check_cursor_on_input()
   local cursor = vim.api.nvim_win_get_cursor(self.winid)
   local row = cursor[1]  -- 1-indexed
   local col = cursor[2]  -- 0-indexed
   
   -- Find input at cursor position
-  for key, input in pairs(self.inputs) do
-    if input.line == row and col >= input.col_start and col < input.col_end then
-      -- Cursor is on this input - don't auto-enter, but highlight it
-      self:_highlight_input(key, true)
+  for i, key in ipairs(self.input_order) do
+    local input = self.inputs[key]
+    if input and input.line == row and col >= input.col_start and col < input.col_end then
+      -- Cursor is on this input - update index and highlight
+      self.current_input_idx = i
+      self:_highlight_current_input(key)
       return
     end
   end
   
-  -- Not on any input - clear highlights
-  self:_clear_input_highlights()
+  -- Not on any input - keep current input highlighted
+  if #self.input_order > 0 then
+    local current_key = self.input_order[self.current_input_idx]
+    self:_highlight_current_input(current_key)
+  end
 end
 
 ---Enter input mode for a specific input field
@@ -130,6 +136,14 @@ function InputManager:enter_input_mode(key)
   
   self.in_input_mode = true
   self.active_input = key
+  
+  -- Update current_input_idx to match activated input
+  for i, k in ipairs(self.input_order) do
+    if k == key then
+      self.current_input_idx = i
+      break
+    end
+  end
   
   -- Make buffer modifiable
   vim.api.nvim_buf_set_option(self.bufnr, 'modifiable', true)
@@ -142,7 +156,7 @@ function InputManager:enter_input_mode(key)
   vim.api.nvim_win_set_cursor(self.winid, {input.line, cursor_col})
   
   -- Highlight active input
-  self:_highlight_input(key, true)
+  self:_highlight_current_input(key)
   
   -- Enter insert mode
   vim.cmd("startinsert")
@@ -168,8 +182,10 @@ function InputManager:_exit_input_mode()
   -- Make buffer non-modifiable again
   vim.api.nvim_buf_set_option(self.bufnr, 'modifiable', false)
   
-  -- Clear highlights
-  self:_clear_input_highlights()
+  -- Keep the current input highlighted (not all cleared)
+  if exited_key then
+    self:_highlight_current_input(exited_key)
+  end
   
   -- Callback
   if self.on_input_exit and exited_key then
@@ -210,19 +226,12 @@ end
 function InputManager:next_input()
   if #self.input_order == 0 then return end
   
-  local current_idx = 1
-  if self.active_input then
-    for i, key in ipairs(self.input_order) do
-      if key == self.active_input then
-        current_idx = i
-        break
-      end
-    end
-  end
-  
-  -- Find next input
-  local next_idx = (current_idx % #self.input_order) + 1
+  -- Find next input index
+  local next_idx = (self.current_input_idx % #self.input_order) + 1
   local next_key = self.input_order[next_idx]
+  
+  -- Update tracked index
+  self.current_input_idx = next_idx
   
   -- Exit current input mode if active
   if self.in_input_mode then
@@ -232,10 +241,11 @@ function InputManager:next_input()
       self:enter_input_mode(next_key)
     end)
   else
-    -- Just move to next input
+    -- Move cursor and highlight
     local input = self.inputs[next_key]
     if input then
       vim.api.nvim_win_set_cursor(self.winid, {input.line, input.col_start})
+      self:_highlight_current_input(next_key)
     end
   end
 end
@@ -244,19 +254,12 @@ end
 function InputManager:prev_input()
   if #self.input_order == 0 then return end
   
-  local current_idx = 1
-  if self.active_input then
-    for i, key in ipairs(self.input_order) do
-      if key == self.active_input then
-        current_idx = i
-        break
-      end
-    end
-  end
-  
-  -- Find previous input
-  local prev_idx = ((current_idx - 2) % #self.input_order) + 1
+  -- Find previous input index
+  local prev_idx = ((self.current_input_idx - 2) % #self.input_order) + 1
   local prev_key = self.input_order[prev_idx]
+  
+  -- Update tracked index
+  self.current_input_idx = prev_idx
   
   -- Exit current input mode if active
   if self.in_input_mode then
@@ -265,9 +268,11 @@ function InputManager:prev_input()
       self:enter_input_mode(prev_key)
     end)
   else
+    -- Move cursor and highlight
     local input = self.inputs[prev_key]
     if input then
       vim.api.nvim_win_set_cursor(self.winid, {input.line, input.col_start})
+      self:_highlight_current_input(prev_key)
     end
   end
 end
@@ -276,22 +281,48 @@ end
 function InputManager:_setup_input_keymaps()
   local opts = { buffer = self.bufnr, noremap = true, silent = true }
   
-  -- Normal mode: Enter activates input under cursor
+  -- Normal mode: Enter activates input under cursor (or at current index)
   vim.keymap.set('n', '<CR>', function()
     local cursor = vim.api.nvim_win_get_cursor(self.winid)
     local row = cursor[1]
     local col = cursor[2]
     
-    -- Find input at cursor
+    -- First check if cursor is directly on an input
     for key, input in pairs(self.inputs) do
       if input.line == row and col >= input.col_start and col < input.col_end then
         self:enter_input_mode(key)
         return
       end
     end
+    
+    -- Otherwise, activate the current tracked input
+    if #self.input_order > 0 then
+      local current_key = self.input_order[self.current_input_idx]
+      if current_key then
+        self:enter_input_mode(current_key)
+      end
+    end
   end, opts)
   
-  -- Normal mode Tab/Shift-Tab: move between inputs
+  -- Normal mode: j/Down moves to next input
+  vim.keymap.set('n', 'j', function()
+    self:next_input()
+  end, opts)
+  
+  vim.keymap.set('n', '<Down>', function()
+    self:next_input()
+  end, opts)
+  
+  -- Normal mode: k/Up moves to previous input
+  vim.keymap.set('n', 'k', function()
+    self:prev_input()
+  end, opts)
+  
+  vim.keymap.set('n', '<Up>', function()
+    self:prev_input()
+  end, opts)
+  
+  -- Normal mode Tab/Shift-Tab: also move between inputs (alternative)
   vim.keymap.set('n', '<Tab>', function()
     self:next_input()
   end, opts)
@@ -300,7 +331,12 @@ function InputManager:_setup_input_keymaps()
     self:prev_input()
   end, opts)
   
-  -- Insert mode Tab/Shift-Tab: move between inputs
+  -- Insert mode Enter: confirm/exit input (instead of newline)
+  vim.keymap.set('i', '<CR>', function()
+    vim.cmd("stopinsert")
+  end, opts)
+  
+  -- Insert mode Tab/Shift-Tab: move to next/prev input
   vim.keymap.set('i', '<Tab>', function()
     self:next_input()
   end, opts)
@@ -381,6 +417,17 @@ function InputManager:_highlight_input(key, active)
   )
 end
 
+---Highlight the current input (for Tab navigation in normal mode)
+---@param current_key string Key of currently focused input
+function InputManager:_highlight_current_input(current_key)
+  -- Clear all and reapply with current highlighted
+  vim.api.nvim_buf_clear_namespace(self.bufnr, self._namespace, 0, -1)
+  
+  for key, _ in pairs(self.inputs) do
+    self:_highlight_input(key, key == current_key)
+  end
+end
+
 ---Clear all input highlights
 function InputManager:_clear_input_highlights()
   vim.api.nvim_buf_clear_namespace(self.bufnr, self._namespace, 0, -1)
@@ -388,6 +435,15 @@ function InputManager:_clear_input_highlights()
   -- Reapply inactive highlights to all inputs
   for key, _ in pairs(self.inputs) do
     self:_highlight_input(key, false)
+  end
+end
+
+---Initialize highlights for all inputs (call after setup)
+function InputManager:init_highlights()
+  -- Highlight first input as current, others as inactive
+  if #self.input_order > 0 then
+    local first_key = self.input_order[1]
+    self:_highlight_current_input(first_key)
   end
 end
 
