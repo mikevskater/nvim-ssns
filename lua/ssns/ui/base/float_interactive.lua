@@ -67,9 +67,9 @@ function UiFloatInteractive.create(config)
   -- Setup keymaps
   UiFloatInteractive.setup_keymaps(state)
 
-  -- Enable cursorline with themed highlighting
+  -- Enable cursorline with themed highlighting for all UI elements
   vim.api.nvim_set_option_value('cursorline', true, { win = state.winid })
-  vim.api.nvim_set_option_value('winhighlight', 'CursorLine:SsnsFloatSelected', { win = state.winid })
+  vim.api.nvim_set_option_value('winhighlight', 'Normal:Normal,FloatBorder:SsnsFloatBorder,FloatTitle:SsnsFloatTitle,CursorLine:SsnsFloatSelected', { win = state.winid })
 
   return state
 end

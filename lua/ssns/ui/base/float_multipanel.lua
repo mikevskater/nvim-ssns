@@ -108,13 +108,14 @@ function UiFloatMultiPanel.create(config)
     -- Create namespace for highlights
     state.namespaces[panel.name] = UiFloatBase.create_namespace("ssns_panel_" .. panel.name)
 
-    -- Set window options
+    -- Set window options with themed highlights
     UiFloatBase.set_window_options(winid, {
       number = false,
       relativenumber = false,
       cursorline = not panel.readonly,
       wrap = false,
       signcolumn = 'no',
+      winhighlight = 'Normal:Normal,FloatBorder:SsnsFloatBorder,FloatTitle:SsnsFloatTitle,CursorLine:SsnsFloatSelected',
     })
   end
 

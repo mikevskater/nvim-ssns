@@ -80,17 +80,15 @@ function UiFloatBase.create_window(bufnr, config)
     win_config.footer_pos = 'center'
   end
   
-  -- Apply custom window highlights for borders and titles
-  local winhl = {}
+  -- Apply custom window highlights for borders, titles, and selection
+  local winhl = {'Normal:Normal', 'CursorLine:SsnsFloatSelected'}
   if not config.no_border_hl then
     table.insert(winhl, 'FloatBorder:SsnsFloatBorder')
   end
   if not config.no_title_hl then
     table.insert(winhl, 'FloatTitle:SsnsFloatTitle')
   end
-  if #winhl > 0 then
-    win_config.winhighlight = table.concat(winhl, ',')
-  end
+  win_config.winhighlight = table.concat(winhl, ',')
   
   local enter = config.enter ~= nil and config.enter or true
   local winid = vim.api.nvim_open_win(bufnr, enter, win_config)
@@ -287,25 +285,30 @@ function UiFloatBase.calculate_split_layout(total_width, total_height, ratios)
   local start_row = math.floor((screen_height - total_height) / 2)
   local start_col = math.floor((screen_width - total_width) / 2)
   
+  -- Calculate actual usable width (accounting for borders)
+  -- Each panel has left border (1 char), and the last panel has right border (1 char)
+  -- Shared borders are counted once
+  local num_panels = #ratios
+  local border_chars = num_panels + 1  -- num_panels left borders + 1 right border for last
+  local usable_width = total_width - border_chars
+  
   local current_col = start_col
   
   for i, ratio in ipairs(ratios) do
-    local panel_width = math.floor(total_width * ratio)
+    local panel_width = math.floor(usable_width * ratio)
     
-    -- Adjust for shared borders (except first panel)
-    if i > 1 then
-      current_col = current_col - 1
-      panel_width = panel_width + 1
-    end
+    -- Account for inner content width (subtract 2 for left/right borders)
+    local content_width = panel_width
     
     table.insert(layouts, {
-      width = panel_width,
-      height = total_height,
+      width = content_width,
+      height = total_height - 2,  -- Subtract for top/bottom borders
       row = start_row,
       col = current_col,
     })
     
-    current_col = current_col + panel_width
+    -- Move to next panel position (content + 1 for shared border)
+    current_col = current_col + content_width + 1
   end
   
   return layouts
