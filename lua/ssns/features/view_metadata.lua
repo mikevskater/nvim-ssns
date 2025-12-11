@@ -5,6 +5,7 @@ local ViewMetadata = {}
 
 local GoTo = require('ssns.features.go_to')
 local UiFloat = require('ssns.ui.core.float')
+local ContentBuilder = require('ssns.ui.core.content_builder')
 
 -- Store reference to current floating window for cleanup
 local current_float = nil
@@ -37,22 +38,20 @@ local function pad(str, width)
   return str .. string.rep(" ", width - #str)
 end
 
----Format a metadata section into display lines
+---Format a metadata section into styled ContentBuilder content
+---@param cb ContentBuilder
 ---@param section table Section with title, headers, rows
----@return string[] lines
-local function format_section(section)
-  local lines = {}
-
+local function format_section_styled(cb, section)
   -- Title
-  table.insert(lines, section.title)
-  table.insert(lines, "")
+  cb:section(section.title)
+  cb:blank()
 
   local headers = section.headers or {}
   local rows = section.rows or {}
 
   if #rows == 0 then
-    table.insert(lines, "  (No data)")
-    return lines
+    cb:styled("  (No data)", "muted")
+    return
   end
 
   -- Calculate column widths
@@ -76,14 +75,14 @@ local function format_section(section)
   for i, header in ipairs(headers) do
     table.insert(header_parts, pad(header, widths[i]))
   end
-  table.insert(lines, "  " .. table.concat(header_parts, "  "))
+  cb:styled("  " .. table.concat(header_parts, "  "), "label")
 
   -- Build separator line
   local sep_parts = {}
   for i, _ in ipairs(headers) do
     table.insert(sep_parts, string.rep("-", widths[i]))
   end
-  table.insert(lines, "  " .. table.concat(sep_parts, "  "))
+  cb:line("  " .. table.concat(sep_parts, "  "))
 
   -- Build data rows
   for _, row in ipairs(rows) do
@@ -92,29 +91,24 @@ local function format_section(section)
       local cell = row[i] or "-"
       table.insert(row_parts, pad(cell, widths[i]))
     end
-    table.insert(lines, "  " .. table.concat(row_parts, "  "))
+    cb:line("  " .. table.concat(row_parts, "  "))
   end
-
-  return lines
 end
 
----Format metadata info into display lines
+---Format metadata info into styled ContentBuilder
 ---@param metadata table Metadata with sections array
----@return string[] lines
-local function format_metadata(metadata)
-  local lines = {}
+---@return ContentBuilder cb
+local function format_metadata_styled(metadata)
+  local cb = ContentBuilder.new()
 
   for i, section in ipairs(metadata.sections or {}) do
     if i > 1 then
-      table.insert(lines, "")  -- Blank line between sections
+      cb:blank()  -- Blank line between sections
     end
-    local section_lines = format_section(section)
-    for _, line in ipairs(section_lines) do
-      table.insert(lines, line)
-    end
+    format_section_styled(cb, section)
   end
 
-  return lines
+  return cb
 end
 
 ---Get display name for an object
@@ -138,8 +132,8 @@ function ViewMetadata.show_metadata_float(target_object, identifier)
     return
   end
 
-  -- Format into lines
-  local lines = format_metadata(metadata)
+  -- Format into styled ContentBuilder
+  local cb = format_metadata_styled(metadata)
 
   -- Build title
   local obj_type = (target_object.object_type or "object"):upper()
@@ -149,20 +143,19 @@ function ViewMetadata.show_metadata_float(target_object, identifier)
   local title = string.format(" %s: %s ", obj_type, display_name)
 
   -- Create floating window
-  current_float = UiFloat.create(lines, {
+  current_float = UiFloat.create_styled(cb, {
     title = title,
     title_pos = "center",
     footer = " q/ESC/<CR>: close ",
     footer_pos = "center",
     border = "rounded",
-    filetype = "ssns-metadata",
     readonly = true,
     modifiable = false,
     cursorline = true,
     wrap = false,
     centered = true,
     max_width = math.floor(vim.o.columns * 0.85),
-    max_height = math.floor(vim.o.lines * 0.85),
+    max_height = math.floor(vim.o.lines * 0.7),
     min_width = 50,
     min_height = 5,
     default_keymaps = false,
