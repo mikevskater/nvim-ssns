@@ -5,6 +5,7 @@
 local ViewTypeCompatibility = {}
 
 local UiFloat = require('ssns.ui.core.float')
+local ContentBuilder = require('ssns.ui.core.content_builder')
 local JsonUtils = require('ssns.utils.json')
 local TypeCompatibility = require('ssns.completion.type_compatibility')
 
@@ -38,24 +39,24 @@ function ViewTypeCompatibility.view_compatibility()
   -- Close any existing float
   ViewTypeCompatibility.close_current_float()
 
-  -- Build display content
-  local display_lines = {}
-
-  table.insert(display_lines, "Type Compatibility Rules")
-  table.insert(display_lines, string.rep("=", 50))
-  table.insert(display_lines, "")
+  -- Build styled content
+  local cb = ContentBuilder.new()
+  
+  cb:header("Type Compatibility Rules")
+  cb:separator("=", 50)
+  cb:blank()
 
   -- Purpose
-  table.insert(display_lines, "Purpose")
-  table.insert(display_lines, string.rep("-", 30))
-  table.insert(display_lines, "  Warn users when comparing incompatible")
-  table.insert(display_lines, "  column types in WHERE/ON clauses")
-  table.insert(display_lines, "")
+  cb:section("Purpose")
+  cb:separator("-", 30)
+  cb:indent("Warn users when comparing incompatible", 1, "muted")
+  cb:indent("column types in WHERE/ON clauses", 1, "muted")
+  cb:blank()
 
   -- Type categories
-  table.insert(display_lines, "Type Categories")
-  table.insert(display_lines, string.rep("-", 30))
-  table.insert(display_lines, "")
+  cb:section("Type Categories")
+  cb:separator("-", 30)
+  cb:blank()
 
   -- Sort categories for consistent display
   local sorted_categories = {}
@@ -66,49 +67,58 @@ function ViewTypeCompatibility.view_compatibility()
 
   for _, category in ipairs(sorted_categories) do
     local types = TypeCompatibility.categories[category]
-    table.insert(display_lines, string.format("  %s:", category:upper()))
+    cb:spans({
+      { text = "  " },
+      { text = category:upper(), style = "emphasis" },
+      { text = ":" },
+    })
 
     -- Group types into rows of 4
     local type_row = {}
     for i, t in ipairs(types) do
       table.insert(type_row, t)
       if #type_row == 4 or i == #types then
-        table.insert(display_lines, "    " .. table.concat(type_row, ", "))
+        cb:indent(table.concat(type_row, ", "), 2, "value")
         type_row = {}
       end
     end
-    table.insert(display_lines, "")
+    cb:blank()
   end
 
   -- Normalization
-  table.insert(display_lines, "Type Normalization")
-  table.insert(display_lines, string.rep("-", 30))
-  table.insert(display_lines, "  1. Convert to lowercase")
-  table.insert(display_lines, "  2. Remove size parameters: varchar(50) -> varchar")
-  table.insert(display_lines, "")
+  cb:section("Type Normalization")
+  cb:separator("-", 30)
+  cb:indent("1. Convert to lowercase", 1)
+  cb:indent("2. Remove size parameters: varchar(50) -> varchar", 1)
+  cb:blank()
 
   local norm_examples = { "VARCHAR(50)", "DECIMAL(10,2)", "nvarchar(max)", "datetime2(7)" }
   for _, example in ipairs(norm_examples) do
     local normalized = TypeCompatibility.normalize_type(example)
-    table.insert(display_lines, string.format("  %s -> %s", example, normalized))
+    cb:spans({
+      { text = "  " },
+      { text = example, style = "label" },
+      { text = " -> " },
+      { text = normalized, style = "value" },
+    })
   end
-  table.insert(display_lines, "")
+  cb:blank()
 
   -- Compatibility rules
-  table.insert(display_lines, "Compatibility Rules")
-  table.insert(display_lines, string.rep("-", 30))
-  table.insert(display_lines, "  Same type after normalization: Compatible")
-  table.insert(display_lines, "  Same category: Compatible")
-  table.insert(display_lines, "  numeric <-> boolean: Warning (implicit conv)")
-  table.insert(display_lines, "  string <-> numeric: Error")
-  table.insert(display_lines, "  string <-> temporal: Warning (format must match)")
-  table.insert(display_lines, "  Different categories: Error")
-  table.insert(display_lines, "")
+  cb:section("Compatibility Rules")
+  cb:separator("-", 30)
+  cb:spans({ { text = "  Same type after normalization: " }, { text = "Compatible", style = "success" } })
+  cb:spans({ { text = "  Same category: " }, { text = "Compatible", style = "success" } })
+  cb:spans({ { text = "  numeric <-> boolean: " }, { text = "Warning (implicit conv)", style = "warning" } })
+  cb:spans({ { text = "  string <-> numeric: " }, { text = "Error", style = "error" } })
+  cb:spans({ { text = "  string <-> temporal: " }, { text = "Warning (format must match)", style = "warning" } })
+  cb:spans({ { text = "  Different categories: " }, { text = "Error", style = "error" } })
+  cb:blank()
 
   -- Test comparisons
-  table.insert(display_lines, "Test Comparisons")
-  table.insert(display_lines, string.rep("-", 30))
-  table.insert(display_lines, "")
+  cb:section("Test Comparisons")
+  cb:separator("-", 30)
+  cb:blank()
 
   for _, pair in ipairs(test_pairs) do
     local t1, t2 = pair[1], pair[2]
@@ -117,19 +127,34 @@ function ViewTypeCompatibility.view_compatibility()
     local cat1 = TypeCompatibility.get_category(t1) or "unknown"
     local cat2 = TypeCompatibility.get_category(t2) or "unknown"
 
-    table.insert(display_lines, string.format("  %s %s vs %s", info.icon, t1, t2))
-    table.insert(display_lines, string.format("      Categories: %s vs %s", cat1, cat2))
+    -- Result line with icon
+    local status_style = info.compatible and "success" or "error"
+    if info.warning then status_style = "warning" end
+    
+    cb:spans({
+      { text = "  " },
+      { text = info.icon .. " ", style = status_style },
+      { text = t1, style = "label" },
+      { text = " vs " },
+      { text = t2, style = "label" },
+    })
+    cb:spans({
+      { text = "      Categories: " },
+      { text = cat1, style = "muted" },
+      { text = " vs ", style = "muted" },
+      { text = cat2, style = "muted" },
+    })
     if info.warning then
-      table.insert(display_lines, string.format("      %s", info.warning))
+      cb:indent(info.warning, 3, "warning")
     end
   end
-  table.insert(display_lines, "")
+  cb:blank()
 
   -- JSON output
-  table.insert(display_lines, "")
-  table.insert(display_lines, "Categories JSON")
-  table.insert(display_lines, string.rep("=", 50))
-  table.insert(display_lines, "")
+  cb:blank()
+  cb:header("Categories JSON")
+  cb:separator("=", 50)
+  cb:blank()
 
   local json_data = {
     categories = TypeCompatibility.categories,
@@ -151,17 +176,16 @@ function ViewTypeCompatibility.view_compatibility()
 
   local json_lines = JsonUtils.prettify_lines(json_data)
   for _, line in ipairs(json_lines) do
-    table.insert(display_lines, line)
+    cb:line(line)
   end
 
-  -- Create floating window
-  current_float = UiFloat.create(display_lines, {
+  -- Create styled floating window
+  current_float = UiFloat.create_styled(cb, {
     title = "Type Compatibility",
     border = "rounded",
     filetype = "markdown",
     min_width = 60,
     max_width = 100,
-    max_height = 50,
     wrap = false,
     keymaps = {
       ['r'] = function()
