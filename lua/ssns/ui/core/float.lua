@@ -492,4 +492,789 @@ function UiFloat.ContentBuilder()
   return require('ssns.ui.core.content_builder')
 end
 
+-- ============================================================================
+-- Multi-Panel Floating Window Support (with nested layouts)
+-- ============================================================================
+
+---@class MultiPanelConfig
+---Configuration for multi-panel floating window
+---@field layout LayoutNode Root layout node defining panel structure
+---@field total_width_ratio number? Total width as ratio of screen (default: 0.85)
+---@field total_height_ratio number? Total height as ratio of screen (default: 0.75)
+---@field footer string? Footer text (shown below all panels)
+---@field on_close function? Callback when window closes
+---@field initial_focus string? Panel name to focus initially
+---@field augroup_name string? Name for autocmd group
+
+---@class LayoutNode
+---A node in the layout tree - either a split or a panel
+---@field split "horizontal"|"vertical"? Split direction (nil = leaf panel)
+---@field ratio number? Size ratio relative to siblings (default: 1.0)
+---@field children LayoutNode[]? Child nodes for splits
+---@field name string? Panel name (required for leaf nodes)
+---@field title string? Panel title
+---@field filetype string? Filetype for syntax highlighting
+---@field focusable boolean? Can this panel be focused (default: true)
+---@field cursorline boolean? Show cursor line when focused (default: true)
+---@field on_render fun(state: MultiPanelState): string[], table[]? Render callback
+---@field on_focus fun(state: MultiPanelState)? Called when panel gains focus
+---@field on_blur fun(state: MultiPanelState)? Called when panel loses focus
+
+---@class MultiPanelState
+---State object for multi-panel window
+---@field panels table<string, PanelInfo> Map of panel name -> panel info
+---@field panel_order string[] Ordered list of panel names (for tab navigation)
+---@field focused_panel string Currently focused panel name
+---@field footer_buf number? Footer buffer
+---@field footer_win number? Footer window
+---@field config MultiPanelConfig Original configuration
+---@field data any Custom user data
+---@field _augroup number? Autocmd group ID
+---@field _closed boolean? Whether the window has been closed
+---@field _layout_cache table? Cached layout calculations
+
+---@class PanelInfo
+---Information about a single panel
+---@field bufnr number Buffer handle
+---@field winid number Window handle
+---@field namespace number Highlight namespace
+---@field definition LayoutNode Panel definition
+
+---@class MultiPanelWindow
+---Multi-panel floating window instance
+local MultiPanelWindow = {}
+MultiPanelWindow.__index = MultiPanelWindow
+
+-- Box drawing characters
+local BORDER_CHARS = {
+  horizontal = "─",
+  vertical = "│",
+  top_left = "╭",
+  top_right = "╮",
+  bottom_left = "╰",
+  bottom_right = "╯",
+  t_down = "┬",  -- T pointing down (top edge with connection below)
+  t_up = "┴",    -- T pointing up (bottom edge with connection above)
+  t_right = "├", -- T pointing right (left edge with connection right)
+  t_left = "┤",  -- T pointing left (right edge with connection left)
+  cross = "┼",   -- 4-way intersection
+}
+
+---@class BorderPosition
+---@field top boolean Has neighbor above
+---@field bottom boolean Has neighbor below
+---@field left boolean Has neighbor to the left
+---@field right boolean Has neighbor to the right
+
+---Create border for a panel based on its position in the layout
+---@param pos BorderPosition Position flags
+---@return table border Border characters
+local function create_panel_border(pos)
+  local c = BORDER_CHARS
+
+  -- Determine corner characters based on neighbors
+  local top_left, top_right, bottom_left, bottom_right
+
+  -- Top-left corner
+  if pos.top and pos.left then
+    top_left = c.cross
+  elseif pos.top then
+    top_left = c.t_right
+  elseif pos.left then
+    top_left = c.t_down
+  else
+    top_left = c.top_left
+  end
+
+  -- Top-right corner
+  if pos.top and pos.right then
+    top_right = c.cross
+  elseif pos.top then
+    top_right = c.t_left
+  elseif pos.right then
+    top_right = c.t_down
+  else
+    top_right = c.top_right
+  end
+
+  -- Bottom-left corner
+  if pos.bottom and pos.left then
+    bottom_left = c.cross
+  elseif pos.bottom then
+    bottom_left = c.t_right
+  elseif pos.left then
+    bottom_left = c.t_up
+  else
+    bottom_left = c.bottom_left
+  end
+
+  -- Bottom-right corner
+  if pos.bottom and pos.right then
+    bottom_right = c.cross
+  elseif pos.bottom then
+    bottom_right = c.t_left
+  elseif pos.right then
+    bottom_right = c.t_up
+  else
+    bottom_right = c.bottom_right
+  end
+
+  return {
+    top_left, c.horizontal, top_right,
+    c.vertical, bottom_right, c.horizontal,
+    bottom_left, c.vertical,
+  }
+end
+
+---@class LayoutRect
+---@field x number Left position
+---@field y number Top position
+---@field width number Width
+---@field height number Height
+
+---@class PanelLayout
+---@field name string Panel name
+---@field rect LayoutRect Panel rectangle
+---@field border_pos BorderPosition Border position flags
+---@field definition LayoutNode Panel definition
+
+---Recursively calculate layout for a layout node
+---@param node LayoutNode Layout node
+---@param rect LayoutRect Available rectangle
+---@param border_pos BorderPosition Inherited border position
+---@param results PanelLayout[] Output array
+---@param sibling_info table? Info about siblings {index, total, direction}
+local function calculate_layout_recursive(node, rect, border_pos, results, sibling_info)
+  if node.split then
+    -- This is a split node - divide space among children
+    local children = node.children or {}
+    if #children == 0 then return end
+
+    -- Calculate total ratio
+    local total_ratio = 0
+    for _, child in ipairs(children) do
+      total_ratio = total_ratio + (child.ratio or 1.0)
+    end
+
+    if node.split == "horizontal" then
+      -- Split horizontally (children side by side)
+      local available_width = rect.width - (#children - 1)  -- Account for shared borders
+      local current_x = rect.x
+
+      for i, child in ipairs(children) do
+        local child_ratio = (child.ratio or 1.0) / total_ratio
+        local child_width = math.floor(available_width * child_ratio)
+
+        -- Last child gets remaining width
+        if i == #children then
+          child_width = rect.x + rect.width - current_x
+        end
+
+        -- Calculate border position for child
+        local child_border = {
+          top = border_pos.top,
+          bottom = border_pos.bottom,
+          left = i > 1,           -- Has left neighbor if not first
+          right = i < #children,  -- Has right neighbor if not last
+        }
+
+        local child_rect = {
+          x = current_x,
+          y = rect.y,
+          width = child_width,
+          height = rect.height,
+        }
+
+        calculate_layout_recursive(child, child_rect, child_border, results, {
+          index = i,
+          total = #children,
+          direction = "horizontal",
+        })
+
+        current_x = current_x + child_width + 1  -- +1 for shared border
+      end
+    else
+      -- Split vertically (children stacked)
+      local available_height = rect.height - (#children - 1)  -- Account for shared borders
+      local current_y = rect.y
+
+      for i, child in ipairs(children) do
+        local child_ratio = (child.ratio or 1.0) / total_ratio
+        local child_height = math.floor(available_height * child_ratio)
+
+        -- Last child gets remaining height
+        if i == #children then
+          child_height = rect.y + rect.height - current_y
+        end
+
+        -- Calculate border position for child
+        local child_border = {
+          top = i > 1,            -- Has top neighbor if not first
+          bottom = i < #children, -- Has bottom neighbor if not last
+          left = border_pos.left,
+          right = border_pos.right,
+        }
+
+        local child_rect = {
+          x = rect.x,
+          y = current_y,
+          width = rect.width,
+          height = child_height,
+        }
+
+        calculate_layout_recursive(child, child_rect, child_border, results, {
+          index = i,
+          total = #children,
+          direction = "vertical",
+        })
+
+        current_y = current_y + child_height + 1  -- +1 for shared border
+      end
+    end
+  else
+    -- This is a leaf panel
+    table.insert(results, {
+      name = node.name,
+      rect = rect,
+      border_pos = border_pos,
+      definition = node,
+    })
+  end
+end
+
+---Calculate full layout from config
+---@param config MultiPanelConfig Configuration
+---@return PanelLayout[] layouts, number total_width, number total_height, number start_row, number start_col
+local function calculate_full_layout(config)
+  local width_ratio = config.total_width_ratio or 0.85
+  local height_ratio = config.total_height_ratio or 0.75
+  local total_width = math.floor(vim.o.columns * width_ratio)
+  local total_height = math.floor(vim.o.lines * height_ratio)
+  local start_row = math.floor((vim.o.lines - total_height) / 2)
+  local start_col = math.floor((vim.o.columns - total_width) / 2)
+
+  local results = {}
+  local root_rect = {
+    x = start_col,
+    y = start_row,
+    width = total_width,
+    height = total_height,
+  }
+
+  calculate_layout_recursive(config.layout, root_rect, {
+    top = false,
+    bottom = false,
+    left = false,
+    right = false,
+  }, results, nil)
+
+  return results, total_width, total_height, start_row, start_col
+end
+
+---Collect panel names in order (for tab navigation)
+---@param node LayoutNode Layout node
+---@param result string[] Output array
+local function collect_panel_names(node, result)
+  if node.split then
+    for _, child in ipairs(node.children or {}) do
+      collect_panel_names(child, result)
+    end
+  elseif node.name then
+    table.insert(result, node.name)
+  end
+end
+
+---Create a multi-panel floating window
+---@param config MultiPanelConfig Configuration
+---@return MultiPanelState? state State object (nil if creation failed)
+function UiFloat.create_multi_panel(config)
+  if not config.layout then
+    vim.notify("SSNS: Layout configuration is required", vim.log.levels.ERROR)
+    return nil
+  end
+
+  -- Calculate layouts
+  local layouts, total_width, total_height, start_row, start_col = calculate_full_layout(config)
+
+  if #layouts == 0 then
+    vim.notify("SSNS: No panels defined in layout", vim.log.levels.ERROR)
+    return nil
+  end
+
+  -- Collect panel names for tab navigation
+  local panel_order = {}
+  collect_panel_names(config.layout, panel_order)
+
+  -- Determine initial focus
+  local initial_focus = config.initial_focus
+  if not initial_focus and #panel_order > 0 then
+    initial_focus = panel_order[1]
+  end
+
+  -- Create state
+  local state = setmetatable({
+    panels = {},
+    panel_order = panel_order,
+    focused_panel = initial_focus,
+    footer_buf = nil,
+    footer_win = nil,
+    config = config,
+    data = {},
+    _closed = false,
+    _layout_cache = {
+      total_width = total_width,
+      total_height = total_height,
+      start_row = start_row,
+      start_col = start_col,
+    },
+  }, MultiPanelWindow)
+
+  -- Create panels
+  for _, panel_layout in ipairs(layouts) do
+    local def = panel_layout.definition
+    local rect = panel_layout.rect
+    local border = create_panel_border(panel_layout.border_pos)
+
+    -- Create buffer
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_option(bufnr, 'buftype', 'nofile')
+    vim.api.nvim_buf_set_option(bufnr, 'swapfile', false)
+    vim.api.nvim_buf_set_option(bufnr, 'bufhidden', 'wipe')
+    vim.api.nvim_buf_set_option(bufnr, 'modifiable', false)
+
+    if def.filetype then
+      vim.api.nvim_buf_set_option(bufnr, 'filetype', def.filetype)
+    end
+
+    -- Create window
+    local win_opts = {
+      relative = "editor",
+      width = rect.width,
+      height = rect.height,
+      row = rect.y,
+      col = rect.x,
+      style = "minimal",
+      border = border,
+      zindex = 50,
+      focusable = def.focusable ~= false,
+    }
+
+    if def.title then
+      win_opts.title = string.format(" %s ", def.title)
+      win_opts.title_pos = "center"
+    end
+
+    local winid = vim.api.nvim_open_win(bufnr, false, win_opts)
+
+    -- Configure window options with themed highlights
+    vim.api.nvim_set_option_value('number', false, { win = winid })
+    vim.api.nvim_set_option_value('relativenumber', false, { win = winid })
+    vim.api.nvim_set_option_value('wrap', false, { win = winid })
+    vim.api.nvim_set_option_value('signcolumn', 'no', { win = winid })
+    vim.api.nvim_set_option_value('winhighlight',
+      'Normal:Normal,FloatBorder:SsnsFloatBorder,FloatTitle:SsnsFloatTitle,CursorLine:SsnsFloatSelected',
+      { win = winid }
+    )
+
+    -- Cursorline only on focusable panels (start disabled, focus_panel will enable)
+    vim.api.nvim_set_option_value('cursorline', false, { win = winid })
+
+    -- Store panel info
+    state.panels[def.name] = {
+      bufnr = bufnr,
+      winid = winid,
+      namespace = vim.api.nvim_create_namespace("ssns_panel_" .. def.name),
+      definition = def,
+    }
+  end
+
+  -- Create footer if specified
+  if config.footer then
+    state.footer_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_option(state.footer_buf, 'buftype', 'nofile')
+    vim.api.nvim_buf_set_option(state.footer_buf, 'modifiable', false)
+
+    -- Center the footer text
+    local footer_text = config.footer
+    local text_len = vim.fn.strdisplaywidth(footer_text)
+    local padding = math.floor((total_width - text_len) / 2)
+    local centered_text = string.rep(" ", math.max(0, padding)) .. footer_text
+
+    vim.api.nvim_buf_set_option(state.footer_buf, 'modifiable', true)
+    vim.api.nvim_buf_set_lines(state.footer_buf, 0, -1, false, {centered_text})
+    vim.api.nvim_buf_set_option(state.footer_buf, 'modifiable', false)
+
+    state.footer_win = vim.api.nvim_open_win(state.footer_buf, false, {
+      relative = "editor",
+      width = total_width,
+      height = 1,
+      row = start_row + total_height + 2,
+      col = start_col,
+      style = "minimal",
+      border = "none",
+      zindex = 52,
+      focusable = false,
+    })
+
+    -- Style footer with themed hint color
+    vim.api.nvim_set_option_value('winhighlight', 'Normal:SsnsFloatHint', { win = state.footer_win })
+  end
+
+  -- Focus initial panel
+  state:focus_panel(state.focused_panel)
+
+  -- Setup autocmds
+  state:_setup_autocmds()
+
+  return state
+end
+
+---Focus a specific panel
+---@param panel_name string Panel to focus
+function MultiPanelWindow:focus_panel(panel_name)
+  if self._closed then return end
+
+  local panel = self.panels[panel_name]
+  if not panel or panel.definition.focusable == false then
+    return
+  end
+
+  -- Call blur on current panel
+  local current_panel = self.panels[self.focused_panel]
+  if current_panel and current_panel.definition.name ~= panel_name then
+    -- Disable cursorline on previous panel
+    if vim.api.nvim_win_is_valid(current_panel.winid) then
+      vim.api.nvim_set_option_value('cursorline', false, { win = current_panel.winid })
+    end
+    if current_panel.definition.on_blur then
+      current_panel.definition.on_blur(self)
+    end
+  end
+
+  -- Update focused panel
+  self.focused_panel = panel_name
+
+  -- Focus the window and enable cursorline
+  if vim.api.nvim_win_is_valid(panel.winid) then
+    vim.api.nvim_set_current_win(panel.winid)
+    if panel.definition.cursorline ~= false then
+      vim.api.nvim_set_option_value('cursorline', true, { win = panel.winid })
+    end
+  end
+
+  -- Call focus callback
+  if panel.definition.on_focus then
+    panel.definition.on_focus(self)
+  end
+end
+
+---Focus next panel in order
+function MultiPanelWindow:focus_next_panel()
+  if self._closed then return end
+
+  local current_idx = 1
+  for i, name in ipairs(self.panel_order) do
+    if name == self.focused_panel then
+      current_idx = i
+      break
+    end
+  end
+
+  -- Find next focusable panel
+  for offset = 1, #self.panel_order do
+    local next_idx = ((current_idx - 1 + offset) % #self.panel_order) + 1
+    local next_name = self.panel_order[next_idx]
+    local next_panel = self.panels[next_name]
+    if next_panel and next_panel.definition.focusable ~= false then
+      self:focus_panel(next_name)
+      return
+    end
+  end
+end
+
+---Focus previous panel in order
+function MultiPanelWindow:focus_prev_panel()
+  if self._closed then return end
+
+  local current_idx = 1
+  for i, name in ipairs(self.panel_order) do
+    if name == self.focused_panel then
+      current_idx = i
+      break
+    end
+  end
+
+  -- Find previous focusable panel
+  for offset = 1, #self.panel_order do
+    local prev_idx = ((current_idx - 1 - offset) % #self.panel_order) + 1
+    local prev_name = self.panel_order[prev_idx]
+    local prev_panel = self.panels[prev_name]
+    if prev_panel and prev_panel.definition.focusable ~= false then
+      self:focus_panel(prev_name)
+      return
+    end
+  end
+end
+
+---Render a specific panel
+---@param panel_name string Panel to render
+function MultiPanelWindow:render_panel(panel_name)
+  if self._closed then return end
+
+  local panel = self.panels[panel_name]
+  if not panel then return end
+
+  local def = panel.definition
+  if not def.on_render then return end
+
+  -- Call render callback
+  local lines, highlights = def.on_render(self)
+  lines = lines or {}
+  highlights = highlights or {}
+
+  -- Update buffer content
+  if vim.api.nvim_buf_is_valid(panel.bufnr) then
+    vim.api.nvim_buf_set_option(panel.bufnr, 'modifiable', true)
+    vim.api.nvim_buf_set_lines(panel.bufnr, 0, -1, false, lines)
+    vim.api.nvim_buf_set_option(panel.bufnr, 'modifiable', false)
+
+    -- Apply highlights
+    vim.api.nvim_buf_clear_namespace(panel.bufnr, panel.namespace, 0, -1)
+    for _, hl in ipairs(highlights) do
+      -- hl format: {line, col_start, col_end, hl_group}
+      vim.api.nvim_buf_add_highlight(
+        panel.bufnr, panel.namespace,
+        hl[4], hl[1], hl[2], hl[3]
+      )
+    end
+  end
+end
+
+---Render all panels
+function MultiPanelWindow:render_all()
+  for name, _ in pairs(self.panels) do
+    self:render_panel(name)
+  end
+end
+
+---Update panel title
+---@param panel_name string Panel name
+---@param title string New title
+function MultiPanelWindow:update_panel_title(panel_name, title)
+  if self._closed then return end
+
+  local panel = self.panels[panel_name]
+  if not panel or not vim.api.nvim_win_is_valid(panel.winid) then
+    return
+  end
+
+  vim.api.nvim_win_set_config(panel.winid, {
+    title = string.format(" %s ", title),
+    title_pos = "center",
+  })
+end
+
+---Get panel buffer
+---@param panel_name string Panel name
+---@return number? bufnr Buffer number or nil
+function MultiPanelWindow:get_panel_buffer(panel_name)
+  local panel = self.panels[panel_name]
+  return panel and panel.bufnr or nil
+end
+
+---Get panel window
+---@param panel_name string Panel name
+---@return number? winid Window ID or nil
+function MultiPanelWindow:get_panel_window(panel_name)
+  local panel = self.panels[panel_name]
+  return panel and panel.winid or nil
+end
+
+---Set cursor in panel
+---@param panel_name string Panel name
+---@param row number Row (1-indexed)
+---@param col number? Column (0-indexed, default 0)
+function MultiPanelWindow:set_cursor(panel_name, row, col)
+  if self._closed then return end
+
+  local panel = self.panels[panel_name]
+  if panel and vim.api.nvim_win_is_valid(panel.winid) then
+    -- Ensure row is within buffer bounds
+    local line_count = vim.api.nvim_buf_line_count(panel.bufnr)
+    row = math.max(1, math.min(row, line_count))
+    pcall(vim.api.nvim_win_set_cursor, panel.winid, {row, col or 0})
+  end
+end
+
+---Get cursor position in panel
+---@param panel_name string Panel name
+---@return number row, number col
+function MultiPanelWindow:get_cursor(panel_name)
+  local panel = self.panels[panel_name]
+  if panel and vim.api.nvim_win_is_valid(panel.winid) then
+    local pos = vim.api.nvim_win_get_cursor(panel.winid)
+    return pos[1], pos[2]
+  end
+  return 1, 0
+end
+
+---Setup keymaps for all panels
+---@param keymaps table<string, function> Keymaps to set on all focusable panels
+function MultiPanelWindow:set_keymaps(keymaps)
+  for name, panel in pairs(self.panels) do
+    if panel.definition.focusable ~= false then
+      for lhs, handler in pairs(keymaps) do
+        vim.keymap.set('n', lhs, handler, {
+          buffer = panel.bufnr,
+          noremap = true,
+          silent = true,
+        })
+      end
+    end
+  end
+end
+
+---Setup keymaps for a specific panel
+---@param panel_name string Panel name
+---@param keymaps table<string, function> Keymaps to set
+function MultiPanelWindow:set_panel_keymaps(panel_name, keymaps)
+  local panel = self.panels[panel_name]
+  if not panel then return end
+
+  for lhs, handler in pairs(keymaps) do
+    vim.keymap.set('n', lhs, handler, {
+      buffer = panel.bufnr,
+      noremap = true,
+      silent = true,
+    })
+  end
+end
+
+---Setup autocmds for cleanup and resize
+function MultiPanelWindow:_setup_autocmds()
+  local augroup_name = self.config.augroup_name or ("SSNSMultiPanel_" .. tostring(os.time()))
+  self._augroup = vim.api.nvim_create_augroup(augroup_name, { clear = true })
+
+  -- Close when any panel window is closed
+  for name, panel in pairs(self.panels) do
+    vim.api.nvim_create_autocmd("WinClosed", {
+      group = self._augroup,
+      pattern = tostring(panel.winid),
+      once = true,
+      callback = function()
+        self:close()
+      end,
+    })
+  end
+
+  -- Handle terminal resize
+  vim.api.nvim_create_autocmd("VimResized", {
+    group = self._augroup,
+    callback = function()
+      if not self._closed then
+        self:_recalculate_layout()
+      end
+    end,
+  })
+end
+
+---Recalculate layout after resize
+function MultiPanelWindow:_recalculate_layout()
+  if self._closed then return end
+
+  -- Calculate new layouts
+  local layouts, total_width, total_height, start_row, start_col = calculate_full_layout(self.config)
+
+  -- Update cache
+  self._layout_cache = {
+    total_width = total_width,
+    total_height = total_height,
+    start_row = start_row,
+    start_col = start_col,
+  }
+
+  -- Update panel windows
+  for _, panel_layout in ipairs(layouts) do
+    local panel = self.panels[panel_layout.name]
+    local rect = panel_layout.rect
+    local border = create_panel_border(panel_layout.border_pos)
+
+    if panel and vim.api.nvim_win_is_valid(panel.winid) then
+      vim.api.nvim_win_set_config(panel.winid, {
+        relative = "editor",
+        width = rect.width,
+        height = rect.height,
+        row = rect.y,
+        col = rect.x,
+        border = border,
+      })
+    end
+  end
+
+  -- Update footer if present
+  if self.footer_win and vim.api.nvim_win_is_valid(self.footer_win) then
+    -- Recenter footer text
+    if self.footer_buf and vim.api.nvim_buf_is_valid(self.footer_buf) then
+      local footer_text = self.config.footer or ""
+      local text_len = vim.fn.strdisplaywidth(footer_text)
+      local padding = math.floor((total_width - text_len) / 2)
+      local centered_text = string.rep(" ", math.max(0, padding)) .. footer_text
+
+      vim.api.nvim_buf_set_option(self.footer_buf, 'modifiable', true)
+      vim.api.nvim_buf_set_lines(self.footer_buf, 0, -1, false, {centered_text})
+      vim.api.nvim_buf_set_option(self.footer_buf, 'modifiable', false)
+    end
+
+    vim.api.nvim_win_set_config(self.footer_win, {
+      relative = "editor",
+      width = total_width,
+      height = 1,
+      row = start_row + total_height + 2,
+      col = start_col,
+    })
+  end
+end
+
+---Check if multi-panel window is valid
+---@return boolean
+function MultiPanelWindow:is_valid()
+  if self._closed then return false end
+
+  -- Check if any panel window is valid
+  for _, panel in pairs(self.panels) do
+    if vim.api.nvim_win_is_valid(panel.winid) then
+      return true
+    end
+  end
+  return false
+end
+
+---Close the multi-panel window
+function MultiPanelWindow:close()
+  if self._closed then return end
+  self._closed = true
+
+  -- Call on_close callback
+  if self.config.on_close then
+    pcall(self.config.on_close, self)
+  end
+
+  -- Close all panel windows
+  for _, panel in pairs(self.panels) do
+    if panel.winid and vim.api.nvim_win_is_valid(panel.winid) then
+      pcall(vim.api.nvim_win_close, panel.winid, true)
+    end
+  end
+
+  -- Close footer
+  if self.footer_win and vim.api.nvim_win_is_valid(self.footer_win) then
+    pcall(vim.api.nvim_win_close, self.footer_win, true)
+  end
+
+  -- Clear autocmds
+  if self._augroup then
+    pcall(vim.api.nvim_del_augroup_by_id, self._augroup)
+  end
+end
+
 return UiFloat
