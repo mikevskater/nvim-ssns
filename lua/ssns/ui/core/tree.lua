@@ -1371,34 +1371,14 @@ function UiTree.show_dependencies(obj)
   table.insert(lines, "")
   table.insert(lines, string.format("Total: %d dependencies", #dependencies))
 
-  -- Create floating window
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.api.nvim_buf_set_option(buf, 'modifiable', false)
-  vim.api.nvim_buf_set_option(buf, 'filetype', 'ssns-dependencies')
-
-  -- Calculate window size
-  local width = 80
-  local height = math.min(#lines + 2, 30)
-  local row = math.floor((vim.o.lines - height) / 2)
-  local col = math.floor((vim.o.columns - width) / 2)
-
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = row,
-    col = col,
-    style = "minimal",
-    border = "rounded",
-    title = " Dependencies ",
-    title_pos = "center",
+  local UiFloat = require('ssns.ui.core.float')
+  UiFloat.create(lines, {
+    title = "Dependencies",
+    min_width = 80,
+    max_height = 30,
+    filetype = 'ssns-dependencies',
+    footer = "q/Esc: close",
   })
-
-  -- Close on any key press
-  vim.api.nvim_buf_set_keymap(buf, "n", "q", ":close<CR>", { noremap = true, silent = true })
-  vim.api.nvim_buf_set_keymap(buf, "n", "<Esc>", ":close<CR>", { noremap = true, silent = true })
-  vim.api.nvim_buf_set_keymap(buf, "n", "<CR>", ":close<CR>", { noremap = true, silent = true })
 end
 
 ---Navigate to an object in the tree (expand parents and position cursor)

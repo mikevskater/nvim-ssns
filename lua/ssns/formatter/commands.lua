@@ -115,33 +115,17 @@ end
 ---Show formatter performance statistics
 function FormatterCommands.show_stats()
   local Stats = require('ssns.formatter.stats')
+  local UiFloat = require('ssns.ui.core.float')
   local output = Stats.format_summary()
-
-  -- Display in a floating window
-  local buf = vim.api.nvim_create_buf(false, true)
   local lines = vim.split(output, "\n")
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.api.nvim_buf_set_option(buf, "modifiable", false)
-  vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
-  vim.api.nvim_buf_set_option(buf, "filetype", "text")
 
-  local width = 60
-  local height = math.min(#lines + 2, 25)
-  vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    col = math.floor((vim.o.columns - width) / 2),
-    row = math.floor((vim.o.lines - height) / 2),
-    style = "minimal",
-    border = "rounded",
-    title = " Formatter Stats ",
-    title_pos = "center",
+  UiFloat.create(lines, {
+    title = "Formatter Stats",
+    min_width = 60,
+    max_height = 25,
+    filetype = 'text',
+    footer = "q/Esc: close",
   })
-
-  -- Close on q or Esc
-  vim.api.nvim_buf_set_keymap(buf, "n", "q", ":close<CR>", { noremap = true, silent = true })
-  vim.api.nvim_buf_set_keymap(buf, "n", "<Esc>", ":close<CR>", { noremap = true, silent = true })
 end
 
 ---Reset formatter statistics

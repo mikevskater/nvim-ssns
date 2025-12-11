@@ -885,6 +885,7 @@ end
 ---Show cache statistics
 function Ssns.show_stats()
   local Cache = require('ssns.cache')
+  local UiFloat = require('ssns.ui.core.float')
   local stats = Cache.get_stats()
 
   local lines = {
@@ -907,29 +908,11 @@ function Ssns.show_stats()
 
   table.insert(lines, "======================")
 
-  -- Display in a floating window
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-
-  local width = 60
-  local height = #lines
-  local row = math.floor((vim.o.lines - height) / 2)
-  local col = math.floor((vim.o.columns - width) / 2)
-
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = row,
-    col = col,
-    style = "minimal",
-    border = "rounded",
+  UiFloat.create(lines, {
+    title = "SSNS Statistics",
+    min_width = 60,
+    footer = "q/Esc: close",
   })
-
-  -- Close on any key press
-  vim.api.nvim_buf_set_keymap(buf, "n", "q", ":close<CR>", { noremap = true, silent = true })
-  vim.api.nvim_buf_set_keymap(buf, "n", "<Esc>", ":close<CR>", { noremap = true, silent = true })
-  vim.api.nvim_buf_set_keymap(buf, "n", "<CR>", ":close<CR>", { noremap = true, silent = true })
 end
 
 ---Debug cache contents
@@ -1066,35 +1049,13 @@ function Ssns.show_completion_stats()
   table.insert(lines, "Note: Stats only tracked when debug mode is enabled")
   table.insert(lines, "===============================================")
 
-  -- Display in a floating window
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-
-  local width = math.min(70, vim.o.columns - 4)
-  local height = math.min(#lines, vim.o.lines - 4)
-  local row = math.floor((vim.o.lines - height) / 2)
-  local col = math.floor((vim.o.columns - width) / 2)
-
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = row,
-    col = col,
-    style = "minimal",
-    border = "rounded",
-    title = " Completion Stats ",
-    title_pos = "center",
+  local UiFloat = require('ssns.ui.core.float')
+  UiFloat.create(lines, {
+    title = "Completion Stats",
+    min_width = 70,
+    max_width = 70,
+    footer = "q/Esc: close",
   })
-
-  -- Set buffer options
-  vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
-  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
-
-  -- Close on any key press
-  vim.api.nvim_buf_set_keymap(buf, "n", "q", ":close<CR>", { noremap = true, silent = true })
-  vim.api.nvim_buf_set_keymap(buf, "n", "<Esc>", ":close<CR>", { noremap = true, silent = true })
-  vim.api.nvim_buf_set_keymap(buf, "n", "<CR>", ":close<CR>", { noremap = true, silent = true })
 end
 
 ---Reset completion performance statistics
@@ -1178,34 +1139,14 @@ function Ssns.show_usage_stats()
     end
   end
 
-  -- Display in floating window
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.api.nvim_set_option_value('modifiable', false, { buf = buf })
-  vim.api.nvim_set_option_value('filetype', 'ssns-usage-stats', { buf = buf })
-
-  local width = 80
-  local height = math.min(#lines + 2, vim.o.lines - 4)
-  local row = math.floor((vim.o.lines - height) / 2)
-  local col = math.floor((vim.o.columns - width) / 2)
-
-  local opts = {
-    relative = 'editor',
-    width = width,
-    height = height,
-    row = row,
-    col = col,
-    style = 'minimal',
-    border = 'rounded',
-    title = ' Usage Statistics ',
-    title_pos = 'center'
-  }
-
-  local win = vim.api.nvim_open_win(buf, true, opts)
-
-  -- Close on q or <Esc>
-  vim.keymap.set('n', 'q', '<cmd>close<cr>', { buffer = buf, nowait = true })
-  vim.keymap.set('n', '<Esc>', '<cmd>close<cr>', { buffer = buf, nowait = true })
+  local UiFloat = require('ssns.ui.core.float')
+  UiFloat.create(lines, {
+    title = "Usage Statistics",
+    min_width = 80,
+    max_width = 80,
+    filetype = 'ssns-usage-stats',
+    footer = "q/Esc: close",
+  })
 end
 
 ---Clear all usage weights

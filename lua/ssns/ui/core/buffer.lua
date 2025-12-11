@@ -111,6 +111,7 @@ local function create_float_window(bufnr, ui_config)
     wrap = false,
     spell = false,
     list = false,
+    winhighlight = 'Normal:Normal,FloatBorder:SsnsFloatBorder,FloatTitle:SsnsFloatTitle,CursorLine:SsnsFloatSelected',
   }
 
   for opt, val in pairs(win_opts) do

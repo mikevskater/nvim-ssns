@@ -421,32 +421,16 @@ function Benchmark.run_and_display(opts)
 
   local results = Benchmark.run_suite(opts)
   local output = Benchmark.format_results(results)
-
-  -- Display in a floating window
-  local buf = vim.api.nvim_create_buf(false, true)
   local lines = vim.split(output, "\n")
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.api.nvim_buf_set_option(buf, "modifiable", false)
-  vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
-  vim.api.nvim_buf_set_option(buf, "filetype", "text")
 
-  local width = 95
-  local height = math.min(#lines + 2, 30)
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    col = math.floor((vim.o.columns - width) / 2),
-    row = math.floor((vim.o.lines - height) / 2),
-    style = "minimal",
-    border = "rounded",
-    title = " Formatter Benchmarks ",
-    title_pos = "center",
+  local UiFloat = require('ssns.ui.core.float')
+  UiFloat.create(lines, {
+    title = "Formatter Benchmarks",
+    min_width = 95,
+    max_height = 30,
+    filetype = 'text',
+    footer = "q/Esc: close",
   })
-
-  -- Close on q or Esc
-  vim.api.nvim_buf_set_keymap(buf, "n", "q", ":close<CR>", { noremap = true, silent = true })
-  vim.api.nvim_buf_set_keymap(buf, "n", "<Esc>", ":close<CR>", { noremap = true, silent = true })
 
   vim.notify("Benchmark complete. Press 'q' or <Esc> to close.", vim.log.levels.INFO)
 end
