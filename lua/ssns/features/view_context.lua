@@ -5,6 +5,7 @@
 local ViewContext = {}
 
 local UiFloat = require('ssns.ui.core.float')
+local ContentBuilder = require('ssns.ui.core.content_builder')
 local JsonUtils = require('ssns.utils.json')
 local StatementContext = require('ssns.completion.statement_context')
 
@@ -45,29 +46,53 @@ function ViewContext.view_context()
     return
   end
 
-  -- Build display content
-  local display_lines = {}
+  -- Build styled content
+  local cb = ContentBuilder.new()
 
-  table.insert(display_lines, "Statement Context (IntelliSense)")
-  table.insert(display_lines, string.rep("=", 50))
-  table.insert(display_lines, "")
+  cb:header("Statement Context (IntelliSense)")
+  cb:separator("=", 50)
+  cb:blank()
 
   -- Cursor position info
-  table.insert(display_lines, "Cursor Position")
-  table.insert(display_lines, string.rep("-", 30))
-  table.insert(display_lines, string.format("  Line: %d, Column: %d", line_num, col))
-  table.insert(display_lines, string.format("  Line text: %s", line_text))
-  table.insert(display_lines, string.format("  Before cursor: %s|", line_text:sub(1, col - 1)))
-  table.insert(display_lines, "")
+  cb:section("Cursor Position")
+  cb:separator("-", 30)
+  cb:spans({
+    { text = "  Line: ", style = "label" },
+    { text = tostring(line_num), style = "number" },
+    { text = ", Column: " },
+    { text = tostring(col), style = "number" },
+  })
+  cb:spans({
+    { text = "  Line text: ", style = "label" },
+    { text = line_text, style = "muted" },
+  })
+  cb:spans({
+    { text = "  Before cursor: ", style = "label" },
+    { text = line_text:sub(1, col - 1), style = "muted" },
+    { text = "|", style = "warning" },
+  })
+  cb:blank()
 
   -- Main context info
-  table.insert(display_lines, "Context Detection")
-  table.insert(display_lines, string.rep("-", 30))
-  table.insert(display_lines, string.format("  Type: %s", context.type or "unknown"))
-  table.insert(display_lines, string.format("  Mode: %s", context.mode or "unknown"))
-  table.insert(display_lines, string.format("  Prefix: \"%s\"", context.prefix or ""))
-  table.insert(display_lines, string.format("  Trigger: %s", context.trigger and ("\"" .. context.trigger .. "\"") or "nil"))
-  table.insert(display_lines, "")
+  cb:section("Context Detection")
+  cb:separator("-", 30)
+  cb:spans({
+    { text = "  Type: ", style = "label" },
+    { text = context.type or "unknown", style = "emphasis" },
+  })
+  cb:spans({
+    { text = "  Mode: ", style = "label" },
+    { text = context.mode or "unknown", style = "emphasis" },
+  })
+  cb:spans({
+    { text = "  Prefix: ", style = "label" },
+    { text = "\"" .. (context.prefix or "") .. "\"", style = "string" },
+  })
+  cb:spans({
+    { text = "  Trigger: ", style = "label" },
+    { text = context.trigger and ("\"" .. context.trigger .. "\"") or "nil", style = context.trigger and "string" or "muted" },
+  })
+  cb:blank()
 
   -- Extra context fields
   local extra_fields = {
@@ -79,104 +104,158 @@ function ViewContext.view_context()
   for _, field in ipairs(extra_fields) do
     if context[field] then
       if not has_extra then
-        table.insert(display_lines, "Extra Context")
-        table.insert(display_lines, string.rep("-", 30))
+        cb:section("Extra Context")
+        cb:separator("-", 30)
         has_extra = true
       end
       local value = context[field]
       if type(value) == "table" then
-        table.insert(display_lines, string.format("  %s:", field))
+        cb:spans({
+          { text = "  " },
+          { text = field, style = "label" },
+          { text = ":" },
+        })
         for k, v in pairs(value) do
-          table.insert(display_lines, string.format("    %s: %s", k, tostring(v)))
+          cb:spans({
+            { text = "    " },
+            { text = tostring(k), style = "key" },
+            { text = ": " },
+            { text = tostring(v), style = "value" },
+          })
         end
       else
-        table.insert(display_lines, string.format("  %s: %s", field, tostring(value)))
+        cb:spans({
+          { text = "  " },
+          { text = field, style = "label" },
+          { text = ": " },
+          { text = tostring(value), style = "value" },
+        })
       end
     end
   end
   if has_extra then
-    table.insert(display_lines, "")
+    cb:blank()
   end
 
   -- Tables in scope
   if context.tables_in_scope and #context.tables_in_scope > 0 then
-    table.insert(display_lines, "Tables in Scope")
-    table.insert(display_lines, string.rep("-", 30))
+    cb:section("Tables in Scope")
+    cb:separator("-", 30)
     for i, t in ipairs(context.tables_in_scope) do
       local desc
+      local style = "table"
       if t.is_cte then
         local col_count = t.columns and #t.columns or 0
         desc = string.format("[CTE] %s (%d columns)", t.name, col_count)
+        style = "view"
       elseif t.is_subquery then
         local col_count = t.columns and #t.columns or 0
         desc = string.format("[Subquery] %s AS %s (%d columns)", t.name or "?", t.alias or t.name, col_count)
+        style = "muted"
       elseif t.is_temp_table then
         local col_count = t.columns and #t.columns or 0
         desc = string.format("[Temp] %s%s (%d columns)", t.name, t.alias and (" AS " .. t.alias) or "", col_count)
+        style = "warning"
       elseif t.is_tvf then
         desc = string.format("[TVF] %s.%s AS %s", t.schema or "dbo", t.function_name or t.name, t.alias or t.name)
+        style = "func"
       else
         desc = string.format("%s AS %s", t.table or t.name or "?", t.alias or "-")
       end
-      table.insert(display_lines, string.format("  %d. %s", i, desc))
+      cb:spans({
+        { text = string.format("  %d. ", i), style = "muted" },
+        { text = desc, style = style },
+      })
     end
-    table.insert(display_lines, "")
+    cb:blank()
   end
 
   -- Aliases map
   if context.aliases and next(context.aliases) then
-    table.insert(display_lines, "Alias Map")
-    table.insert(display_lines, string.rep("-", 30))
+    cb:section("Alias Map")
+    cb:separator("-", 30)
     local sorted_aliases = {}
     for alias in pairs(context.aliases) do
       table.insert(sorted_aliases, alias)
     end
     table.sort(sorted_aliases)
     for _, alias in ipairs(sorted_aliases) do
-      table.insert(display_lines, string.format("  %s -> %s", alias, context.aliases[alias]))
+      cb:spans({
+        { text = "  " },
+        { text = alias, style = "emphasis" },
+        { text = " -> " },
+        { text = context.aliases[alias], style = "table" },
+      })
     end
-    table.insert(display_lines, "")
+    cb:blank()
   end
 
   -- CTEs
   if context.ctes and next(context.ctes) then
-    table.insert(display_lines, "CTEs")
-    table.insert(display_lines, string.rep("-", 30))
+    cb:section("CTEs")
+    cb:separator("-", 30)
     for name, cte in pairs(context.ctes) do
       local col_count = cte.columns and #cte.columns or 0
-      table.insert(display_lines, string.format("  %s (%d columns)", name, col_count))
+      cb:spans({
+        { text = "  " },
+        { text = name, style = "view" },
+        { text = " (" },
+        { text = tostring(col_count), style = "number" },
+        { text = " columns)" },
+      })
     end
-    table.insert(display_lines, "")
+    cb:blank()
   end
 
   -- Temp tables
   if context.temp_tables and next(context.temp_tables) then
-    table.insert(display_lines, "Temp Tables")
-    table.insert(display_lines, string.rep("-", 30))
+    cb:section("Temp Tables")
+    cb:separator("-", 30)
     for name, temp in pairs(context.temp_tables) do
       local col_count = temp.columns and #temp.columns or 0
       local global = temp.is_global and " (global)" or ""
-      table.insert(display_lines, string.format("  %s%s (%d columns)", name, global, col_count))
+      cb:spans({
+        { text = "  " },
+        { text = name, style = "warning" },
+        { text = global, style = "muted" },
+        { text = " (" },
+        { text = tostring(col_count), style = "number" },
+        { text = " columns)" },
+      })
     end
-    table.insert(display_lines, "")
+    cb:blank()
   end
 
   -- Statement chunk info (brief)
   if context.chunk then
-    table.insert(display_lines, "Statement Chunk")
-    table.insert(display_lines, string.rep("-", 30))
-    table.insert(display_lines, string.format("  Type: %s", context.chunk.statement_type or "?"))
-    table.insert(display_lines, string.format("  Lines: %d-%d", context.chunk.start_line or 0, context.chunk.end_line or 0))
-    table.insert(display_lines, string.format("  Tables: %d", context.chunk.tables and #context.chunk.tables or 0))
-    table.insert(display_lines, string.format("  Columns: %d", context.chunk.columns and #context.chunk.columns or 0))
-    table.insert(display_lines, "")
+    cb:section("Statement Chunk")
+    cb:separator("-", 30)
+    cb:spans({
+      { text = "  Type: ", style = "label" },
+      { text = context.chunk.statement_type or "?", style = "keyword" },
+    })
+    cb:spans({
+      { text = "  Lines: ", style = "label" },
+      { text = tostring(context.chunk.start_line or 0), style = "number" },
+      { text = "-" },
+      { text = tostring(context.chunk.end_line or 0), style = "number" },
+    })
+    cb:spans({
+      { text = "  Tables: ", style = "label" },
+      { text = tostring(context.chunk.tables and #context.chunk.tables or 0), style = "number" },
+    })
+    cb:spans({
+      { text = "  Columns: ", style = "label" },
+      { text = tostring(context.chunk.columns and #context.chunk.columns or 0), style = "number" },
+    })
+    cb:blank()
   end
 
   -- Add JSON section for full context
-  table.insert(display_lines, "")
-  table.insert(display_lines, "Full JSON Output")
-  table.insert(display_lines, string.rep("=", 50))
-  table.insert(display_lines, "")
+  cb:blank()
+  cb:header("Full JSON Output")
+  cb:separator("=", 50)
+  cb:blank()
 
   -- Create a cleaned context for JSON output (remove large nested objects)
   local json_context = {
@@ -198,17 +277,15 @@ function ViewContext.view_context()
 
   local json_lines = JsonUtils.prettify_lines(json_context)
   for _, line in ipairs(json_lines) do
-    table.insert(display_lines, line)
+    cb:line(line)
   end
 
   -- Create floating window
-  current_float = UiFloat.create(display_lines, {
+  current_float = UiFloat.create_styled(cb, {
     title = "Statement Context",
     border = "rounded",
-    filetype = "json",
     min_width = 60,
     max_width = 100,
-    max_height = 40,
     wrap = false,
     keymaps = {
       ['r'] = function()
