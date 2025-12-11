@@ -1122,36 +1122,73 @@ function RulesEditor._save_preset()
   local current_preset = state.available_presets[state.selected_preset_idx]
   local default_name = current_preset and current_preset.is_user and current_preset.name or Presets.generate_unique_name("Custom")
 
-  vim.ui.input({ prompt = "Save preset as: ", default = default_name }, function(name)
-    if not name or name == "" then return end
+  local save_win = UiFloat.create({
+    title = "Save Preset",
+    width = 55,
+    height = 8,
+    center = true,
+    content_builder = true,
+    enable_inputs = true,
+  })
 
-    local file_name = name:gsub("[^%w_%-]", "_")
-    local ok, err = Presets.save(file_name, name, state.current_config, "User-defined preset")
+  if save_win then
+    local cb = save_win:get_content_builder()
+    cb:line("")
+    cb:line("  Save current settings as preset:", "SsnsUiTitle")
+    cb:line("")
+    cb:labeled_input("  Name: ", "name", default_name, 35)
+    cb:line("")
+    cb:line("  <Enter>=Save | <Esc>=Cancel", "SsnsUiHint")
+    save_win:render()
 
-    if ok then
-      -- Reload presets
-      Presets.clear_cache()
-      state.available_presets = Presets.list()
+    local function do_save()
+      local name = save_win:get_input_value("name")
+      save_win:close()
 
-      -- Find and select the new preset
-      for i, p in ipairs(state.available_presets) do
-        if p.name == name then
-          state.selected_preset_idx = i
-          break
+      if not name or name == "" then return end
+
+      local file_name = name:gsub("[^%w_%-]", "_")
+      local ok, err = Presets.save(file_name, name, state.current_config, "User-defined preset")
+
+      if ok then
+        -- Reload presets
+        Presets.clear_cache()
+        state.available_presets = Presets.list()
+
+        -- Find and select the new preset
+        for i, p in ipairs(state.available_presets) do
+          if p.name == name then
+            state.selected_preset_idx = i
+            break
+          end
         end
-      end
 
-      state.is_dirty = false
-      if multi_panel then
-        multi_panel:render_panel("presets")
-        multi_panel:update_panel_title("rules", RulesEditor._get_rules_title())
-      end
+        state.is_dirty = false
+        if multi_panel then
+          multi_panel:render_panel("presets")
+          multi_panel:update_panel_title("rules", RulesEditor._get_rules_title())
+        end
 
-      vim.notify("Preset saved: " .. name, vim.log.levels.INFO)
-    else
-      vim.notify("Failed to save: " .. (err or "unknown"), vim.log.levels.ERROR)
+        vim.notify("Preset saved: " .. name, vim.log.levels.INFO)
+      else
+        vim.notify("Failed to save: " .. (err or "unknown"), vim.log.levels.ERROR)
+      end
     end
-  end)
+
+    vim.keymap.set("n", "<CR>", function()
+      save_win:enter_input()
+    end, { buffer = save_win.buf, nowait = true })
+
+    vim.keymap.set("n", "<Esc>", function()
+      save_win:close()
+    end, { buffer = save_win.buf, nowait = true })
+
+    vim.keymap.set("n", "q", function()
+      save_win:close()
+    end, { buffer = save_win.buf, nowait = true })
+
+    save_win:on_input_submit(do_save)
+  end
 end
 
 ---Delete selected preset (user only)
@@ -1205,32 +1242,69 @@ function RulesEditor._rename_preset()
     return
   end
 
-  vim.ui.input({ prompt = "New name: ", default = preset.name }, function(new_name)
-    if not new_name or new_name == "" then return end
+  local rename_win = UiFloat.create({
+    title = "Rename Preset",
+    width = 55,
+    height = 8,
+    center = true,
+    content_builder = true,
+    enable_inputs = true,
+  })
 
-    local ok, err = Presets.rename(preset.file_name, new_name)
-    if ok then
-      Presets.clear_cache()
-      state.available_presets = Presets.list()
+  if rename_win then
+    local cb = rename_win:get_content_builder()
+    cb:line("")
+    cb:line(string.format("  Rename preset '%s':", preset.name), "SsnsUiTitle")
+    cb:line("")
+    cb:labeled_input("  New name: ", "name", preset.name, 32)
+    cb:line("")
+    cb:line("  <Enter>=Rename | <Esc>=Cancel", "SsnsUiHint")
+    rename_win:render()
 
-      -- Find the renamed preset
-      for i, p in ipairs(state.available_presets) do
-        if p.name == new_name then
-          state.selected_preset_idx = i
-          break
+    local function do_rename()
+      local new_name = rename_win:get_input_value("name")
+      rename_win:close()
+
+      if not new_name or new_name == "" then return end
+
+      local ok, err = Presets.rename(preset.file_name, new_name)
+      if ok then
+        Presets.clear_cache()
+        state.available_presets = Presets.list()
+
+        -- Find the renamed preset
+        for i, p in ipairs(state.available_presets) do
+          if p.name == new_name then
+            state.selected_preset_idx = i
+            break
+          end
         end
-      end
 
-      if multi_panel then
-        multi_panel:render_panel("presets")
-        multi_panel:update_panel_title("rules", RulesEditor._get_rules_title())
-      end
+        if multi_panel then
+          multi_panel:render_panel("presets")
+          multi_panel:update_panel_title("rules", RulesEditor._get_rules_title())
+        end
 
-      vim.notify("Preset renamed", vim.log.levels.INFO)
-    else
-      vim.notify("Failed to rename: " .. (err or "unknown"), vim.log.levels.ERROR)
+        vim.notify("Preset renamed", vim.log.levels.INFO)
+      else
+        vim.notify("Failed to rename: " .. (err or "unknown"), vim.log.levels.ERROR)
+      end
     end
-  end)
+
+    vim.keymap.set("n", "<CR>", function()
+      rename_win:enter_input()
+    end, { buffer = rename_win.buf, nowait = true })
+
+    vim.keymap.set("n", "<Esc>", function()
+      rename_win:close()
+    end, { buffer = rename_win.buf, nowait = true })
+
+    vim.keymap.set("n", "q", function()
+      rename_win:close()
+    end, { buffer = rename_win.buf, nowait = true })
+
+    rename_win:on_input_submit(do_rename)
+  end
 end
 
 ---Check if editor is open
