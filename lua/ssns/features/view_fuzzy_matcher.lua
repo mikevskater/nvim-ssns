@@ -183,19 +183,54 @@ function ViewFuzzyMatcher.view_matcher()
         ViewFuzzyMatcher.view_matcher()
       end,
       ['t'] = function()
-        -- Interactive test
-        vim.ui.input({ prompt = "String 1: " }, function(s1)
-          if s1 and s1 ~= "" then
-            vim.ui.input({ prompt = "String 2: " }, function(s2)
-              if s2 and s2 ~= "" then
-                local is_match, score = FuzzyMatcher.is_match(s1, s2, 0.85)
-                local match_str = is_match and "MATCH" or "no match"
-                vim.notify(string.format("FuzzyMatch: '%s' vs '%s' = %.2f (%s)",
-                  s1, s2, score, match_str), vim.log.levels.INFO)
-              end
-            end)
+        -- Interactive test - show dialog with two inputs
+        local test_win = UiFloat.create({
+          title = "Test Fuzzy Match",
+          width = 55,
+          height = 10,
+          center = true,
+          content_builder = true,
+          enable_inputs = true,
+        })
+
+        if test_win then
+          local cb = test_win:get_content_builder()
+          cb:line("")
+          cb:line("  Compare two strings:", "SsnsUiTitle")
+          cb:line("")
+          cb:labeled_input("  String 1: ", "str1", "", 35)
+          cb:labeled_input("  String 2: ", "str2", "", 35)
+          cb:line("")
+          cb:line("  <Enter>=Compare | Tab=Next | <Esc>=Cancel", "SsnsUiHint")
+          test_win:render()
+
+          local function do_compare()
+            local s1 = test_win:get_input_value("str1")
+            local s2 = test_win:get_input_value("str2")
+            test_win:close()
+
+            if s1 and s1 ~= "" and s2 and s2 ~= "" then
+              local is_match, score = FuzzyMatcher.is_match(s1, s2, 0.85)
+              local match_str = is_match and "MATCH" or "no match"
+              vim.notify(string.format("FuzzyMatch: '%s' vs '%s' = %.2f (%s)",
+                s1, s2, score, match_str), vim.log.levels.INFO)
+            end
           end
-        end)
+
+          vim.keymap.set("n", "<CR>", function()
+            test_win:enter_input()
+          end, { buffer = test_win.buf, nowait = true })
+
+          vim.keymap.set("n", "<Esc>", function()
+            test_win:close()
+          end, { buffer = test_win.buf, nowait = true })
+
+          vim.keymap.set("n", "q", function()
+            test_win:close()
+          end, { buffer = test_win.buf, nowait = true })
+
+          test_win:on_input_submit(do_compare)
+        end
       end,
     },
     footer = "q: close | r: refresh | t: test two strings",

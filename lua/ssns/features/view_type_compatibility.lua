@@ -192,22 +192,57 @@ function ViewTypeCompatibility.view_compatibility()
         ViewTypeCompatibility.view_compatibility()
       end,
       ['t'] = function()
-        -- Interactive test
-        vim.ui.input({ prompt = "Type 1 (e.g., int): " }, function(t1)
-          if t1 and t1 ~= "" then
-            vim.ui.input({ prompt = "Type 2 (e.g., varchar): " }, function(t2)
-              if t2 and t2 ~= "" then
-                local info = TypeCompatibility.get_info(t1, t2)
-                local msg = string.format("TypeCheck: %s vs %s = %s %s",
-                  t1, t2, info.icon, info.compatible and "compatible" or "INCOMPATIBLE")
-                if info.warning then
-                  msg = msg .. " - " .. info.warning
-                end
-                vim.notify(msg, info.compatible and vim.log.levels.INFO or vim.log.levels.WARN)
+        -- Interactive test - show dialog with two inputs
+        local test_win = UiFloat.create({
+          title = "Test Type Compatibility",
+          width = 55,
+          height = 10,
+          center = true,
+          content_builder = true,
+          enable_inputs = true,
+        })
+
+        if test_win then
+          local cb = test_win:get_content_builder()
+          cb:line("")
+          cb:line("  Compare two SQL types:", "SsnsUiTitle")
+          cb:line("")
+          cb:labeled_input("  Type 1: ", "type1", "", 35)
+          cb:labeled_input("  Type 2: ", "type2", "", 35)
+          cb:line("")
+          cb:line("  <Enter>=Check | Tab=Next | <Esc>=Cancel", "SsnsUiHint")
+          test_win:render()
+
+          local function do_check()
+            local t1 = test_win:get_input_value("type1")
+            local t2 = test_win:get_input_value("type2")
+            test_win:close()
+
+            if t1 and t1 ~= "" and t2 and t2 ~= "" then
+              local info = TypeCompatibility.get_info(t1, t2)
+              local msg = string.format("TypeCheck: %s vs %s = %s %s",
+                t1, t2, info.icon, info.compatible and "compatible" or "INCOMPATIBLE")
+              if info.warning then
+                msg = msg .. " - " .. info.warning
               end
-            end)
+              vim.notify(msg, info.compatible and vim.log.levels.INFO or vim.log.levels.WARN)
+            end
           end
-        end)
+
+          vim.keymap.set("n", "<CR>", function()
+            test_win:enter_input()
+          end, { buffer = test_win.buf, nowait = true })
+
+          vim.keymap.set("n", "<Esc>", function()
+            test_win:close()
+          end, { buffer = test_win.buf, nowait = true })
+
+          vim.keymap.set("n", "q", function()
+            test_win:close()
+          end, { buffer = test_win.buf, nowait = true })
+
+          test_win:on_input_submit(do_check)
+        end
       end,
     },
     footer = "q: close | r: refresh | t: test two types",

@@ -286,14 +286,39 @@ function ViewUsageWeights.view_weights()
         ViewUsageWeights.view_weights()
       end,
       ['C'] = function()
-        -- Clear all weights (with confirmation)
-        vim.ui.input({ prompt = "Clear ALL usage weights? (y/N): " }, function(input)
-          if input and input:lower() == "y" then
-            UsageTracker.clear_weights(nil)
-            vim.notify("SSNS: All usage weights cleared", vim.log.levels.INFO)
-            ViewUsageWeights.view_weights()
+        -- Clear all weights (with confirmation dialog)
+        local confirm_win = UiFloat.create({
+          title = "Clear Usage Weights",
+          width = 50,
+          height = 8,
+          center = true,
+          content_builder = true,
+        })
+
+        if confirm_win then
+          local cb = confirm_win:get_content_builder()
+          cb:line("")
+          cb:line("  ⚠ Clear ALL usage weights?", "WarningMsg")
+          cb:line("  This cannot be undone.", "SsnsUiHint")
+          cb:line("")
+          cb:line("  Press <Enter> to confirm, <Esc> to cancel", "Comment")
+          confirm_win:render()
+
+          local confirm_keymaps = {
+            ["<CR>"] = function()
+              confirm_win:close()
+              UsageTracker.clear_weights(nil)
+              vim.notify("SSNS: All usage weights cleared", vim.log.levels.INFO)
+              ViewUsageWeights.view_weights()
+            end,
+            ["<Esc>"] = function() confirm_win:close() end,
+            ["q"] = function() confirm_win:close() end,
+            ["n"] = function() confirm_win:close() end,
+          }
+          for key, fn in pairs(confirm_keymaps) do
+            vim.keymap.set("n", key, fn, { buffer = confirm_win.buf, nowait = true })
           end
-        end)
+        end
       end,
     },
     footer = "q: close | r: refresh | s: save now | C: clear all (confirm)",

@@ -192,12 +192,46 @@ function ViewDebugLog.view_log(filter)
         ViewDebugLog.view_log(nil)
       end,
       ['f'] = function()
-        -- Prompt for filter
-        vim.ui.input({ prompt = "Filter: " }, function(input)
-          if input and input ~= "" then
-            ViewDebugLog.view_log(input)
+        -- Show filter input dialog
+        local filter_win = UiFloat.create({
+          title = "Filter Log",
+          width = 50,
+          height = 7,
+          center = true,
+          content_builder = true,
+          enable_inputs = true,
+        })
+
+        if filter_win then
+          local cb = filter_win:get_content_builder()
+          cb:line("")
+          cb:labeled_input("  Filter: ", "filter", current_filter or "", 35)
+          cb:line("")
+          cb:line("  <Enter>=Apply | <Esc>=Cancel", "SsnsUiHint")
+          filter_win:render()
+
+          local function apply_filter()
+            local input = filter_win:get_input_value("filter")
+            filter_win:close()
+            if input and input ~= "" then
+              ViewDebugLog.view_log(input)
+            end
           end
-        end)
+
+          vim.keymap.set("n", "<CR>", function()
+            filter_win:enter_input()
+          end, { buffer = filter_win.buf, nowait = true })
+
+          vim.keymap.set("n", "<Esc>", function()
+            filter_win:close()
+          end, { buffer = filter_win.buf, nowait = true })
+
+          vim.keymap.set("n", "q", function()
+            filter_win:close()
+          end, { buffer = filter_win.buf, nowait = true })
+
+          filter_win:on_input_submit(apply_filter)
+        end
       end,
       ['C'] = function()
         -- Clear log file
