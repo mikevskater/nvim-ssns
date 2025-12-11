@@ -216,7 +216,6 @@ local function navigate_buffers(direction)
   -- Re-render all panels
   if multi_panel then
     multi_panel:render_all()
-    multi_panel:set_cursor("buffers", ui_state.selected_buffer_idx + 4, 0)
   end
 end
 
@@ -239,7 +238,6 @@ local function navigate_history(direction)
   if multi_panel then
     multi_panel:render_panel("history")
     multi_panel:render_panel("preview")
-    multi_panel:set_cursor("history", ui_state.selected_entry_idx + 3, 0)
   end
 end
 
@@ -489,6 +487,8 @@ function UiHistory.show_history(options)
                 if multi_panel then
                   multi_panel:update_panel_title("buffers", "Buffers ●")
                   multi_panel:update_panel_title("history", "History")
+                  -- Position cursor on selected buffer
+                  multi_panel:set_cursor("buffers", ui_state.selected_buffer_idx + 4, 0)
                 end
               end,
             },
@@ -501,6 +501,8 @@ function UiHistory.show_history(options)
                 if multi_panel then
                   multi_panel:update_panel_title("buffers", "Buffers")
                   multi_panel:update_panel_title("history", "History ●")
+                  -- Position cursor on selected entry
+                  multi_panel:set_cursor("history", ui_state.selected_entry_idx + 3, 0)
                 end
               end,
             },
@@ -581,13 +583,6 @@ function UiHistory.show_history(options)
     [common.next_field or "<Tab>"] = function() multi_panel:focus_next_panel() end,
     [common.prev_field or "<S-Tab>"] = function() multi_panel:focus_prev_panel() end,
   })
-
-  -- Position cursor on first buffer (after render is complete)
-  vim.schedule(function()
-    if multi_panel and multi_panel:is_valid() then
-      multi_panel:set_cursor("buffers", ui_state.selected_buffer_idx + 4, 0)
-    end
-  end)
 
   -- Mark focus on initial panel
   multi_panel:update_panel_title("buffers", "Buffers ●")
