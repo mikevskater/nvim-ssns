@@ -106,87 +106,89 @@ function Ssns.setup(user_config)
   -- Register commands
   Ssns._register_commands()
 
-  -- Setup expand asterisk keymap for SQL buffers
+  -- Setup keymaps for SQL buffers using KeymapManager (handles conflicts)
   vim.api.nvim_create_autocmd("FileType", {
     pattern = "sql",
     callback = function(args)
       local bufnr = args.buf
-      vim.keymap.set('n', '<Leader>ce', function()
-        local ExpandAsterisk = require('ssns.features.expand_asterisk')
-        ExpandAsterisk.expand_asterisk_at_cursor()
-      end, {
-        buffer = bufnr,
-        noremap = true,
-        silent = true,
-        desc = 'Expand asterisk (Columns Expand)'
-      })
-
-      -- Go-to object in tree keymap
+      local KeymapManager = require('ssns.keymap_manager')
       local keymaps = Config.get_keymaps()
-      if keymaps.go_to then
-        vim.keymap.set('n', keymaps.go_to, function()
-          local GoTo = require('ssns.features.go_to')
-          GoTo.go_to_object_at_cursor()
-        end, {
-          buffer = bufnr,
-          noremap = true,
-          silent = true,
-          desc = 'SSNS: Go to object in tree'
-        })
-      end
-
-      -- View definition keymap
-      if keymaps.view_definition then
-        vim.keymap.set('n', keymaps.view_definition, function()
-          local ViewDefinition = require('ssns.features.view_definition')
-          ViewDefinition.view_definition_at_cursor()
-        end, {
-          buffer = bufnr,
-          noremap = true,
-          silent = true,
-          desc = 'SSNS: View object definition'
-        })
-      end
-
-      -- View metadata keymap
-      if keymaps.view_metadata then
-        vim.keymap.set('n', keymaps.view_metadata, function()
-          local ViewMetadata = require('ssns.features.view_metadata')
-          ViewMetadata.view_metadata_at_cursor()
-        end, {
-          buffer = bufnr,
-          noremap = true,
-          silent = true,
-          desc = 'SSNS: View object metadata'
-        })
-      end
-
-      -- Connection picker keymaps (attach/change connection for SQL files)
       local query_keymaps = keymaps.query or {}
 
-      -- Attach connection keymap
-      local attach_key = query_keymaps.attach_connection or "<Leader>a"
-      vim.keymap.set('n', attach_key, function()
-        local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
-        ConnectionPicker.show(bufnr)
-      end, {
-        buffer = bufnr,
-        noremap = true,
-        silent = true,
-        desc = 'SSNS: Attach buffer to connection'
-      })
+      -- Build list of keymaps to set
+      local sql_keymaps = {
+        -- Expand asterisk keymap
+        {
+          mode = "n",
+          lhs = "<Leader>ce",
+          rhs = function()
+            local ExpandAsterisk = require('ssns.features.expand_asterisk')
+            ExpandAsterisk.expand_asterisk_at_cursor()
+          end,
+          desc = "SSNS: Expand asterisk (Columns Expand)",
+        },
+        -- Attach connection keymap
+        {
+          mode = "n",
+          lhs = query_keymaps.attach_connection or "<Leader>a",
+          rhs = function()
+            local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+            ConnectionPicker.show(bufnr)
+          end,
+          desc = "SSNS: Attach buffer to connection",
+        },
+        -- Change connection keymap (hierarchical picker)
+        {
+          mode = "n",
+          lhs = query_keymaps.change_connection or "<Leader>A",
+          rhs = function()
+            local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
+            ConnectionPicker.show_hierarchical(bufnr)
+          end,
+          desc = "SSNS: Change connection (pick server then database)",
+        },
+      }
 
-      -- Change connection keymap (hierarchical picker)
-      local change_key = query_keymaps.change_connection or "<Leader>A"
-      vim.keymap.set('n', change_key, function()
-        local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
-        ConnectionPicker.show_hierarchical(bufnr)
-      end, {
-        buffer = bufnr,
-        noremap = true,
-        silent = true,
-        desc = 'SSNS: Change connection (pick server then database)'
-      })
+      -- Add optional keymaps if configured
+      if keymaps.go_to then
+        table.insert(sql_keymaps, {
+          mode = "n",
+          lhs = keymaps.go_to,
+          rhs = function()
+            local GoTo = require('ssns.features.go_to')
+            GoTo.go_to_object_at_cursor()
+          end,
+          desc = "SSNS: Go to object in tree",
+        })
+      end
+
+      if keymaps.view_definition then
+        table.insert(sql_keymaps, {
+          mode = "n",
+          lhs = keymaps.view_definition,
+          rhs = function()
+            local ViewDefinition = require('ssns.features.view_definition')
+            ViewDefinition.view_definition_at_cursor()
+          end,
+          desc = "SSNS: View object definition",
+        })
+      end
+
+      if keymaps.view_metadata then
+        table.insert(sql_keymaps, {
+          mode = "n",
+          lhs = keymaps.view_metadata,
+          rhs = function()
+            local ViewMetadata = require('ssns.features.view_metadata')
+            ViewMetadata.view_metadata_at_cursor()
+          end,
+          desc = "SSNS: View object metadata",
+        })
+      end
+
+      -- Set all keymaps using KeymapManager (saves conflicts for restoration)
+      KeymapManager.set_multiple(bufnr, sql_keymaps, true)
+      KeymapManager.mark_group_active(bufnr, "sql_filetype")
 
       -- Enable semantic highlighting for SQL files
       local sh_config = Config.get_semantic_highlighting()
