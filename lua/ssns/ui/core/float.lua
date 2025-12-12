@@ -190,6 +190,12 @@ function FloatWindow:_create_buffer()
   vim.api.nvim_buf_set_option(self.bufnr, 'bufhidden', 'wipe')
   vim.api.nvim_buf_set_option(self.bufnr, 'swapfile', false)
 
+  -- Call on_pre_filetype callback if provided
+  -- This allows setting buffer variables BEFORE filetype triggers autocmds
+  if self.config.on_pre_filetype then
+    self.config.on_pre_filetype(self.bufnr)
+  end
+
   if self.config.filetype then
     vim.api.nvim_buf_set_option(self.bufnr, 'filetype', self.config.filetype)
   end
@@ -1422,6 +1428,8 @@ function UiFloat.create_multi_panel(config)
       -- Standard panel options
       modifiable = false,
       readonly = true,
+      -- Pre-filetype callback for setting buffer vars before autocmds trigger
+      on_pre_filetype = def.on_pre_filetype,
     })
 
     -- Store panel info with FloatWindow instance

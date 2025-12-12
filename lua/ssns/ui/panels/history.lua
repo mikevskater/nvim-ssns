@@ -702,7 +702,8 @@ function UiHistory.show_history(options)
           on_render = render_preview,
           -- Skip full semantic highlighting (which connects to DB and loads objects)
           -- Use basic tokenization-based highlighting instead
-          on_create = function(bufnr)
+          -- on_pre_filetype runs BEFORE filetype is set, so autocmds see the buffer var
+          on_pre_filetype = function(bufnr)
             vim.b[bufnr].ssns_skip_semantic_highlight = true
           end,
           use_basic_highlighting = true,
