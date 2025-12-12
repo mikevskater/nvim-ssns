@@ -1482,6 +1482,14 @@ function MultiPanelWindow:render_panel(panel_name)
       )
     end
   end
+
+  -- Apply basic SQL highlighting if requested (tokenization-only, no DB connection)
+  if def.use_basic_highlighting then
+    local ok, SemanticHighlighter = pcall(require, 'ssns.highlighting.semantic')
+    if ok and SemanticHighlighter.apply_basic_highlighting then
+      SemanticHighlighter.apply_basic_highlighting(panel.float.bufnr)
+    end
+  end
 end
 
 ---Render all panels

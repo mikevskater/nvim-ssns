@@ -692,6 +692,12 @@ function UiHistory.show_history(options)
           focusable = true,
           cursorline = false,
           on_render = render_preview,
+          -- Skip full semantic highlighting (which connects to DB and loads objects)
+          -- Use basic tokenization-based highlighting instead
+          on_create = function(bufnr)
+            vim.b[bufnr].ssns_skip_semantic_highlight = true
+          end,
+          use_basic_highlighting = true,
         },
       },
     },

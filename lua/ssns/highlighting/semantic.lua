@@ -244,4 +244,104 @@ function SemanticHighlighter.get_namespace()
   return ns_id
 end
 
+-- ============================================================================
+-- Basic Highlighting (No Database Connection)
+-- For read-only preview buffers like history preview, theme preview, etc.
+-- Only highlights based on tokenization - no schema/object lookups
+-- ============================================================================
+
+-- Map token types and keyword categories to highlight groups (no DB lookups)
+local BASIC_HIGHLIGHT_MAP = {
+  -- Keywords by category
+  keyword_statement = "SsnsKeywordStatement",
+  keyword_clause = "SsnsKeywordClause",
+  keyword_function = "SsnsKeywordFunction",
+  keyword_datatype = "SsnsKeywordDatatype",
+  keyword_operator = "SsnsKeywordOperator",
+  keyword_constraint = "SsnsKeywordConstraint",
+  keyword_modifier = "SsnsKeywordModifier",
+  keyword_misc = "SsnsKeywordMisc",
+  keyword_global_variable = "SsnsKeywordGlobalVariable",
+  keyword_system_procedure = "SsnsKeywordSystemProcedure",
+  -- Token types
+  string = "SsnsString",
+  number = "SsnsNumber",
+  operator = "SsnsOperator",
+  comment = "SsnsComment",
+  line_comment = "SsnsComment",
+  variable = "SsnsParameter",
+  global_variable = "SsnsKeywordGlobalVariable",
+  system_procedure = "SsnsKeywordSystemProcedure",
+  temp_table = "SsnsTempTable",
+}
+
+---Apply basic keyword/token highlighting to a buffer without any database lookups
+---This is used for read-only preview buffers (history preview, etc.) where we don't
+---want to trigger database connections or schema loading
+---@param bufnr number Buffer number
+function SemanticHighlighter.apply_basic_highlighting(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+
+  -- Ensure namespace exists
+  if not ns_id then
+    ns_id = vim.api.nvim_create_namespace(NAMESPACE)
+  end
+
+  -- Clear existing highlights
+  vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
+
+  -- Get buffer content and tokenize
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local text = table.concat(lines, '\n')
+
+  local Tokenizer = require('ssns.completion.tokenizer')
+  local tokens = Tokenizer.tokenize(text)
+
+  -- Apply highlights based purely on token type (no classifier/database)
+  for _, token in ipairs(tokens) do
+    local highlight_group = nil
+
+    if token.type == "keyword" or token.type == "go" then
+      -- Use keyword category for granular highlighting
+      local category = token.keyword_category or "misc"
+      highlight_group = BASIC_HIGHLIGHT_MAP["keyword_" .. category]
+    elseif token.type == "string" then
+      highlight_group = BASIC_HIGHLIGHT_MAP.string
+    elseif token.type == "number" then
+      highlight_group = BASIC_HIGHLIGHT_MAP.number
+    elseif token.type == "operator" then
+      highlight_group = BASIC_HIGHLIGHT_MAP.operator
+    elseif token.type == "comment" then
+      highlight_group = BASIC_HIGHLIGHT_MAP.comment
+    elseif token.type == "line_comment" then
+      highlight_group = BASIC_HIGHLIGHT_MAP.line_comment
+    elseif token.type == "variable" then
+      highlight_group = BASIC_HIGHLIGHT_MAP.variable
+    elseif token.type == "global_variable" then
+      highlight_group = BASIC_HIGHLIGHT_MAP.global_variable
+    elseif token.type == "system_procedure" then
+      highlight_group = BASIC_HIGHLIGHT_MAP.system_procedure
+    elseif token.type == "temp_table" then
+      highlight_group = BASIC_HIGHLIGHT_MAP.temp_table
+    end
+
+    if highlight_group then
+      -- Convert 1-indexed (tokenizer) to 0-indexed (nvim API)
+      local line = token.line - 1
+      local col_start = token.col - 1
+      local col_end = col_start + #token.text
+
+      -- Ensure we don't go past buffer bounds
+      if line >= 0 and line < #lines then
+        local line_len = #lines[line + 1]
+        if col_start >= 0 and col_end <= line_len then
+          vim.api.nvim_buf_add_highlight(bufnr, ns_id, highlight_group, line, col_start, col_end)
+        end
+      end
+    end
+  end
+end
+
 return SemanticHighlighter
