@@ -119,22 +119,8 @@ end
 ---@param mp MultiPanelWindow
 ---@return string[] lines, table[] highlights
 local function render_preview(mp)
-  local lines = PreviewSql.get_lines()
-
-  -- Apply semantic highlighting in next tick
-  vim.schedule(function()
-    if multi_panel then
-      local bufnr = multi_panel:get_panel_buffer("preview")
-      if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-        local ok, SemanticHighlighter = pcall(require, 'ssns.highlighting.semantic')
-        if ok and SemanticHighlighter.apply_to_buffer then
-          pcall(SemanticHighlighter.apply_to_buffer, bufnr)
-        end
-      end
-    end
-  end)
-
-  return lines, {}
+  -- Use pre-defined highlights from PreviewSql (no parser needed)
+  return PreviewSql.build()
 end
 
 ---Handle theme selection change
@@ -245,9 +231,12 @@ function ThemePicker.show()
           name = "preview",
           title = "Preview",
           ratio = 0.75,
-          filetype = "sql",
           cursorline = false,
           on_render = render_preview,
+          on_create = function(bufnr)
+            -- Mark buffer to skip semantic highlighting (we use pre-defined highlights)
+            vim.b[bufnr].ssns_skip_semantic_highlight = true
+          end,
           on_focus = function()
             if multi_panel then
               multi_panel:update_panel_title("themes", "Themes")
@@ -263,16 +252,6 @@ function ThemePicker.show()
     initial_focus = "themes",
     augroup_name = "SSNSThemePicker",
     on_close = function()
-      -- Disable semantic highlighting on preview buffer
-      if multi_panel then
-        local bufnr = multi_panel:get_panel_buffer("preview")
-        if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-          local ok, SemanticHighlighter = pcall(require, 'ssns.highlighting.semantic')
-          if ok and SemanticHighlighter.disable then
-            pcall(SemanticHighlighter.disable, bufnr)
-          end
-        end
-      end
       multi_panel = nil
       ui_state = {
         available_themes = {},
