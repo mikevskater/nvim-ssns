@@ -102,6 +102,15 @@ function ContentBuilder.new()
   return self
 end
 
+---Clear all content, resetting the builder for reuse
+---@return ContentBuilder self For chaining
+function ContentBuilder:clear()
+  self._lines = {}
+  self._inputs = {}
+  self._input_order = {}
+  return self
+end
+
 ---Get the highlight group for a style
 ---@param style string Style name
 ---@return string|nil group Highlight group name or nil for normal
