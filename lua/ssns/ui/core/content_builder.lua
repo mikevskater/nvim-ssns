@@ -55,7 +55,7 @@ local STYLE_MAPPINGS = {
   -- Input field styles
   input = "SsnsFloatInput",         -- Input field background
   input_active = "SsnsFloatInputActive", -- Active/focused input
-  input_placeholder = "SsnsUiHint", -- Placeholder text
+  input_placeholder = "SsnsFloatInputPlaceholder", -- Placeholder text (italic, dimmer)
   
   -- Special
   normal = nil,                     -- No highlight, use default
@@ -75,12 +75,16 @@ local STYLE_MAPPINGS = {
 ---@field key string Unique identifier for the input
 ---@field line number 1-indexed line number
 ---@field col_start number 0-indexed start column of input value area
----@field col_end number 0-indexed end column of input value area
----@field width number Total width of input field
+---@field col_end number 0-indexed end column of input value area (dynamic, updates based on content)
+---@field width number Current effective width of input field
+---@field default_width number Default/minimum display width (pads with spaces, expands if text longer)
+---@field min_width number? Minimum display width override
 ---@field value string Current value
 ---@field default string Default/initial value
 ---@field placeholder string Placeholder text when empty
+---@field is_showing_placeholder boolean Whether currently displaying placeholder text
 ---@field label string? Optional label text before input
+---@field prefix_len number Length of label prefix (for line reconstruction)
 
 ---@class ContentBuilderState
 ---@field lines ContentLine[] Built content lines
@@ -256,14 +260,15 @@ end
 
 ---Add an input field
 ---@param key string Unique identifier for retrieving the value
----@param opts table Options: { label = string?, value = string?, placeholder = string?, width = number?, label_style = string? }
+---@param opts table Options: { label = string?, value = string?, placeholder = string?, width = number?, min_width = number?, label_style = string? }
 ---@return ContentBuilder self For chaining
 function ContentBuilder:input(key, opts)
   opts = opts or {}
   local label = opts.label or ""
   local value = opts.value or ""
   local placeholder = opts.placeholder or ""
-  local width = opts.width or 20
+  local default_width = opts.width or 20  -- Default/minimum display width
+  local min_width = opts.min_width or default_width
   local label_style = opts.label_style or "label"
   local separator = opts.separator or ": "
   
@@ -281,18 +286,19 @@ function ContentBuilder:input(key, opts)
     is_placeholder = true
   end
   
-  -- Pad or truncate display text to fit width
-  if #display_text < width then
-    display_text = display_text .. string.rep(" ", width - #display_text)
-  elseif #display_text > width then
-    display_text = display_text:sub(1, width)
+  -- Calculate effective width: at least default_width, but expands for longer text
+  local effective_width = math.max(default_width, min_width, #display_text)
+  
+  -- Pad display text to effective width (no truncation - expands if needed)
+  if #display_text < effective_width then
+    display_text = display_text .. string.rep(" ", effective_width - #display_text)
   end
   
   -- Build full line: "Label: [value_______]"
   local input_start = #prefix
   local text = prefix .. "[" .. display_text .. "]"
   local input_value_start = input_start + 1  -- After "["
-  local input_value_end = input_value_start + width  -- Before "]"
+  local input_value_end = input_value_start + effective_width  -- Before "]"
   
   local line = {
     text = text,
@@ -337,11 +343,15 @@ function ContentBuilder:input(key, opts)
     line = line_num,
     col_start = input_value_start,
     col_end = input_value_end,
-    width = width,
+    width = effective_width,  -- Current effective width
+    default_width = default_width,  -- Minimum display width (for padding)
+    min_width = min_width,
     value = value,
     default = value,
     placeholder = placeholder,
+    is_showing_placeholder = is_placeholder,
     label = label,
+    prefix_len = #prefix,  -- Store prefix length for line reconstruction
   }
   table.insert(self._input_order, key)
   

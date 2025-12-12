@@ -110,11 +110,11 @@ function UiFloatForm._build_content(state)
   -- Fields
   for _, field in ipairs(state.fields) do
     if field.type == "text" then
-      -- Text input field
+      -- Text input field with dynamic width support
       cb:labeled_input(field.name, "  " .. field.label, {
         value = tostring(field.value or ""),
-        placeholder = "(empty)",
-        width = 25,
+        placeholder = field.placeholder or "(empty)",
+        width = field.width or 25,  -- Default width, expands for longer text
       })
     elseif field.type == "checkbox" then
       -- Checkbox (rendered as selectable line)
