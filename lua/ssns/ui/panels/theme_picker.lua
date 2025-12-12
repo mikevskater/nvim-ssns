@@ -2,218 +2,191 @@
 ---Theme picker UI with live preview
 local ThemePicker = {}
 
-local UiFloatMultiPanel = require('ssns.ui.base.float_multipanel')
-local UiFloatBase = require('ssns.ui.base.float_base')
+local UiFloat = require('ssns.ui.core.float')
+local ContentBuilder = require('ssns.ui.core.content_builder')
 local ThemeManager = require('ssns.ui.theme_manager')
 local KeymapManager = require('ssns.keymap_manager')
+local PreviewSql = require('ssns.ui.panels.theme_preview_sql')
 
----@type table? Current state
-local state = nil
+---@type MultiPanelWindow? Current multi-panel window
+local multi_panel = nil
 
--- Preview SQL that showcases all highlight groups
-local PREVIEW_SQL = [[
--- ============================================
--- SSNS Theme Preview
--- This query showcases all highlight groups
--- ============================================
+---@type table UI state
+local ui_state = {
+  available_themes = {},
+  original_theme = nil,
+  selected_idx = 1,
+  theme_line_map = {},
+}
 
--- Database & Schema References
-USE master;
-GO
-
--- Statement Keywords (SELECT, INSERT, CREATE, etc.)
-SELECT
-    -- Column References
-    u.id,
-    u.username,
-    u.email,
-    u.created_at,
-    -- Alias References
-    o.order_total AS total,
-    -- Function Keywords (COUNT, SUM, GETDATE, etc.)
-    COUNT(*) AS order_count,
-    SUM(o.amount) AS total_amount,
-    GETDATE() AS current_date,
-    CAST(u.balance AS DECIMAL(10,2)) AS balance,
-    COALESCE(u.nickname, 'N/A') AS display_name
--- Clause Keywords (FROM, WHERE, JOIN, etc.)
-FROM dbo.Users u
--- Table & View References
-INNER JOIN dbo.Orders o ON u.id = o.user_id
-LEFT JOIN dbo.UserProfiles up ON u.id = up.user_id
--- Operator Keywords (AND, OR, NOT, IN, BETWEEN)
-WHERE u.status = 'active'
-    AND o.created_at BETWEEN '2024-01-01' AND '2024-12-31'
-    AND u.role IN ('admin', 'user', 'moderator')
-    OR NOT u.is_deleted = 1
--- Modifier Keywords (ASC, DESC, NOLOCK, etc.)
-ORDER BY u.created_at DESC, u.username ASC;
-
--- Number Literals
-SELECT 42, 3.14159, -100, 0x1F;
-
--- String Literals
-SELECT 'Hello World', N'Unicode String', 'It''s escaped';
-
--- Parameter References (@params and @@system)
-DECLARE @UserId INT = 1;
-DECLARE @SearchTerm NVARCHAR(100) = '%test%';
-SELECT @@VERSION, @@ROWCOUNT, @@IDENTITY;
-
--- Procedure & Function Calls
-EXEC dbo.GetUserById @UserId = @UserId;
-EXEC sp_help 'dbo.Users';
-
--- Datatype Keywords (INT, VARCHAR, DATETIME, etc.)
-CREATE TABLE #TempUsers (
-    id INT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    email NVARCHAR(255) UNIQUE,
-    balance DECIMAL(18,2) DEFAULT 0.00,
-    created_at DATETIME DEFAULT GETDATE(),
-    metadata XML NULL
-);
-
--- Constraint Keywords (PRIMARY, KEY, FOREIGN, etc.)
-ALTER TABLE dbo.Orders
-ADD CONSTRAINT FK_Orders_Users
-    FOREIGN KEY (user_id) REFERENCES dbo.Users(id)
-    ON DELETE CASCADE
-    ON UPDATE NO ACTION;
-
--- Index Reference
-CREATE NONCLUSTERED INDEX IX_Users_Email
-ON dbo.Users (email)
-INCLUDE (username, created_at);
-
--- CTE (Common Table Expression)
-WITH ActiveUsers AS (
-    SELECT id, username, email
-    FROM dbo.Users
-    WHERE status = 'active'
-),
-RecentOrders AS (
-    SELECT user_id, COUNT(*) as cnt
-    FROM dbo.Orders
-    WHERE created_at > DATEADD(DAY, -30, GETDATE())
-    GROUP BY user_id
-)
-SELECT * FROM ActiveUsers au
-JOIN RecentOrders ro ON au.id = ro.user_id;
-
--- Unresolved (gray - not in database)
-SELECT * FROM dbo.UnknownTable WHERE unknown_col = 1;
-]]
-
----Render themes list panel
----@param mp_state table MultiPanel state
----@return string[] lines Lines to render
-local function render_themes_list(mp_state)
-  local lines = {}
-  local themes = mp_state.data.available_themes
+---Render themes list panel using ContentBuilder
+---@param mp MultiPanelWindow
+---@return string[] lines, table[] highlights
+local function render_themes_list(mp)
+  local cb = ContentBuilder.new()
+  local themes = ui_state.available_themes
   local current = ThemeManager.get_current()
 
-  table.insert(lines, "")
+  cb:blank()
 
   local user_section_added = false
   local theme_line_map = {}
 
   for i, theme in ipairs(themes) do
+    local is_selected = i == ui_state.selected_idx
+    local is_current = (theme.name == current) or (theme.is_default and current == nil)
+
     -- Add separator after Default option
     if theme.is_default then
-      local prefix = i == mp_state.selected_idx and " ▶ " or "   "
-      local suffix = current == nil and " ●" or ""
-      local line = string.format("%s%s%s", prefix, theme.display_name, suffix)
-      theme_line_map[i] = #lines
-      table.insert(lines, line)
-      table.insert(lines, "")
-      table.insert(lines, " ─── Built-in ───")
-      table.insert(lines, "")
+      theme_line_map[i] = cb:line_count()
+
+      if is_selected then
+        cb:spans({
+          { text = " ▶ ", style = "emphasis" },
+          { text = theme.display_name, style = "highlight" },
+          { text = is_current and " ●" or "", style = "success" },
+        })
+      else
+        cb:spans({
+          { text = "   " },
+          { text = theme.display_name },
+          { text = is_current and " ●" or "", style = "success" },
+        })
+      end
+
+      cb:blank()
+      cb:styled(" ─── Built-in ───", "muted")
+      cb:blank()
     elseif theme.is_user and not user_section_added then
-      table.insert(lines, "")
-      table.insert(lines, " ─── User Themes ───")
-      table.insert(lines, "")
+      cb:blank()
+      cb:styled(" ─── User Themes ───", "muted")
+      cb:blank()
       user_section_added = true
 
-      local prefix = i == mp_state.selected_idx and " ▶ " or "   "
-      local suffix = theme.name == current and " ●" or ""
-      local line = string.format("%s%s%s", prefix, theme.display_name, suffix)
-      theme_line_map[i] = #lines
-      table.insert(lines, line)
+      theme_line_map[i] = cb:line_count()
+
+      if is_selected then
+        cb:spans({
+          { text = " ▶ ", style = "emphasis" },
+          { text = theme.display_name, style = "highlight" },
+          { text = is_current and " ●" or "", style = "success" },
+        })
+      else
+        cb:spans({
+          { text = "   " },
+          { text = theme.display_name },
+          { text = is_current and " ●" or "", style = "success" },
+        })
+      end
     else
-      local prefix = i == mp_state.selected_idx and " ▶ " or "   "
-      local suffix = theme.name == current and " ●" or ""
-      local line = string.format("%s%s%s", prefix, theme.display_name, suffix)
-      theme_line_map[i] = #lines
-      table.insert(lines, line)
+      theme_line_map[i] = cb:line_count()
+
+      if is_selected then
+        cb:spans({
+          { text = " ▶ ", style = "emphasis" },
+          { text = theme.display_name, style = "highlight" },
+          { text = is_current and " ●" or "", style = "success" },
+        })
+      else
+        cb:spans({
+          { text = "   " },
+          { text = theme.display_name },
+          { text = is_current and " ●" or "", style = "success" },
+        })
+      end
     end
   end
 
-  table.insert(lines, "")
+  cb:blank()
 
-  -- Store line map for mouse click support
-  mp_state.data.theme_line_map = theme_line_map
+  -- Store line map for cursor positioning
+  ui_state.theme_line_map = theme_line_map
 
-  -- Apply highlights in next tick
+  -- Position cursor on selected theme
   vim.schedule(function()
-    local bufnr = mp_state.buffers.themes
-    local ns_id = mp_state.namespaces.themes
-    if not vim.api.nvim_buf_is_valid(bufnr) then return end
-
-    UiFloatBase.clear_highlights(bufnr, ns_id)
-
-    for line_idx, line in ipairs(lines) do
-      if line:match("───") then
-        UiFloatBase.add_highlight(bufnr, ns_id, "Comment", line_idx - 1, 0, -1)
-      elseif line:match("▶") then
-        UiFloatBase.add_highlight(bufnr, ns_id, "SsnsFloatSelected", line_idx - 1, 0, -1)
-        UiFloatBase.add_highlight(bufnr, ns_id, "Special", line_idx - 1, 1, 4)
-      elseif line:match("●") then
-        UiFloatBase.add_highlight(bufnr, ns_id, "DiagnosticOk", line_idx - 1, #line - 2, -1)
+    if multi_panel then
+      local cursor_line = theme_line_map[ui_state.selected_idx]
+      if cursor_line then
+        multi_panel:set_cursor("themes", cursor_line + 1, 0)
       end
-    end
-
-    -- Position cursor
-    local cursor_line = theme_line_map[mp_state.selected_idx]
-    if cursor_line then
-      UiFloatBase.set_cursor(mp_state.windows.themes, cursor_line + 1, 0)
     end
   end)
 
-  return lines
+  return cb:build_lines(), cb:build_highlights()
 end
 
 ---Render preview panel
----@param mp_state table MultiPanel state
----@return string[] lines Lines to render
-local function render_preview(mp_state)
-  local lines = vim.split(PREVIEW_SQL, "\n")
+---@param mp MultiPanelWindow
+---@return string[] lines, table[] highlights
+local function render_preview(mp)
+  local lines = PreviewSql.get_lines()
 
   -- Apply semantic highlighting in next tick
   vim.schedule(function()
-    local bufnr = mp_state.buffers.preview
-    if not vim.api.nvim_buf_is_valid(bufnr) then return end
-
-    local ok, SemanticHighlighter = pcall(require, 'ssns.highlighting.semantic')
-    if ok and SemanticHighlighter.apply_to_buffer then
-      pcall(SemanticHighlighter.apply_to_buffer, bufnr)
+    if multi_panel then
+      local bufnr = multi_panel:get_panel_buffer("preview")
+      if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+        local ok, SemanticHighlighter = pcall(require, 'ssns.highlighting.semantic')
+        if ok and SemanticHighlighter.apply_to_buffer then
+          pcall(SemanticHighlighter.apply_to_buffer, bufnr)
+        end
+      end
     end
   end)
 
-  return lines
+  return lines, {}
 end
 
 ---Handle theme selection change
----@param mp_state table MultiPanel state
-local function on_selection_change(mp_state)
-  local theme = mp_state.data.available_themes[mp_state.selected_idx]
-  if theme then
+local function on_selection_change()
+  local theme = ui_state.available_themes[ui_state.selected_idx]
+  if theme and multi_panel then
     ThemeManager.preview(theme.name)
 
     -- Re-render both panels to update highlighting and current marker
-    UiFloatMultiPanel.render_panel(mp_state, "themes")
-    UiFloatMultiPanel.render_panel(mp_state, "preview")
+    multi_panel:render_panel("themes")
+    multi_panel:render_panel("preview")
   end
+end
+
+---Navigate theme list
+---@param direction number 1 for down, -1 for up
+local function navigate_themes(direction)
+  if not multi_panel then return end
+
+  ui_state.selected_idx = ui_state.selected_idx + direction
+
+  -- Wrap around
+  if ui_state.selected_idx < 1 then
+    ui_state.selected_idx = #ui_state.available_themes
+  elseif ui_state.selected_idx > #ui_state.available_themes then
+    ui_state.selected_idx = 1
+  end
+
+  -- Re-render and preview
+  on_selection_change()
+end
+
+---Apply selected theme
+local function apply_theme()
+  if not multi_panel then return end
+
+  local theme = ui_state.available_themes[ui_state.selected_idx]
+  if theme then
+    ThemeManager.set_theme(theme.name, true)
+  end
+
+  ThemePicker.close()
+end
+
+---Cancel and restore original theme
+local function cancel_selection()
+  if not multi_panel then return end
+
+  -- Restore original theme
+  ThemeManager.preview(ui_state.original_theme)
+
+  ThemePicker.close()
 end
 
 ---Show the theme picker UI
@@ -234,168 +207,127 @@ function ThemePicker.show()
   })
 
   -- Save current theme to restore on cancel
-  local original_theme = ThemeManager.get_current()
+  ui_state.original_theme = ThemeManager.get_current()
+  ui_state.available_themes = themes
+  ui_state.theme_line_map = {}
 
   -- Find current theme index
-  local selected_idx = 1
-  if original_theme then
+  ui_state.selected_idx = 1
+  if ui_state.original_theme then
     for i, theme in ipairs(themes) do
-      if theme.name == original_theme then
-        selected_idx = i
+      if theme.name == ui_state.original_theme then
+        ui_state.selected_idx = i
         break
       end
     end
   end
 
-  -- Create multi-panel UI
-  state = UiFloatMultiPanel.create({
-    panels = {
-      {
-        name = "themes",
-        width_ratio = 0.25,
-        title = "Themes",
-        on_render = render_themes_list,
-        keymaps = {
-          { mode = "n", lhs = "<CR>", rhs = function() ThemePicker._apply() end, desc = "Apply theme" },
-          { mode = "n", lhs = "<Esc>", rhs = function() ThemePicker._cancel() end, desc = "Cancel" },
-          { mode = "n", lhs = "q", rhs = function() ThemePicker._cancel() end, desc = "Close" },
-          { mode = "n", lhs = "j", rhs = function() ThemePicker._navigate(1) end, desc = "Next theme" },
-          { mode = "n", lhs = "k", rhs = function() ThemePicker._navigate(-1) end, desc = "Previous theme" },
-          { mode = "n", lhs = "<Down>", rhs = function() ThemePicker._navigate(1) end, desc = "Next theme" },
-          { mode = "n", lhs = "<Up>", rhs = function() ThemePicker._navigate(-1) end, desc = "Previous theme" },
-          { mode = "n", lhs = "<Tab>", rhs = function() ThemePicker._swap_focus() end, desc = "Switch to preview" },
-          { mode = "n", lhs = "<LeftMouse>", rhs = function() ThemePicker._handle_mouse_click() end, desc = "Select theme with mouse" },
+  local common = KeymapManager.get_group("common")
+
+  -- Create multi-panel UI using UiFloat
+  multi_panel = UiFloat.create_multi_panel({
+    layout = {
+      split = "horizontal",  -- Left and right columns
+      children = {
+        {
+          name = "themes",
+          title = "Themes",
+          ratio = 0.25,
+          on_render = render_themes_list,
+          on_focus = function()
+            if multi_panel then
+              multi_panel:update_panel_title("themes", "Themes ●")
+              multi_panel:update_panel_title("preview", "Preview")
+            end
+          end,
         },
-      },
-      {
-        name = "preview",
-        width_ratio = 0.75,
-        title = "Preview",
-        on_render = render_preview,
-        filetype = "sql",
-        keymaps = {
-          { mode = "n", lhs = "<CR>", rhs = function() ThemePicker._apply() end, desc = "Apply theme" },
-          { mode = "n", lhs = "<Esc>", rhs = function() ThemePicker._cancel() end, desc = "Cancel" },
-          { mode = "n", lhs = "q", rhs = function() ThemePicker._cancel() end, desc = "Close" },
-          { mode = "n", lhs = "<Tab>", rhs = function() ThemePicker._swap_focus() end, desc = "Switch to themes" },
-          { mode = "n", lhs = "<S-Tab>", rhs = function() ThemePicker._swap_focus() end, desc = "Switch to themes" },
+        {
+          name = "preview",
+          title = "Preview",
+          ratio = 0.75,
+          filetype = "sql",
+          cursorline = false,
+          on_render = render_preview,
+          on_focus = function()
+            if multi_panel then
+              multi_panel:update_panel_title("themes", "Themes")
+              multi_panel:update_panel_title("preview", "Preview ●")
+            end
+          end,
         },
       },
     },
-    footer = " <Enter>=Apply  <Tab>=Switch Panel  <Esc>=Cancel  j/k=Navigate  Click=Select ",
-    on_selection_change = on_selection_change,
+    total_width_ratio = 0.80,
+    total_height_ratio = 0.85,
+    footer = " <Enter>=Apply  <Tab>=Switch Panel  <Esc>=Cancel  j/k=Navigate ",
+    initial_focus = "themes",
+    augroup_name = "SSNSThemePicker",
     on_close = function()
       -- Disable semantic highlighting on preview buffer
-      if state and state.buffers and state.buffers.preview then
-        local ok, SemanticHighlighter = pcall(require, 'ssns.highlighting.semantic')
-        if ok and SemanticHighlighter.disable then
-          pcall(SemanticHighlighter.disable, state.buffers.preview)
+      if multi_panel then
+        local bufnr = multi_panel:get_panel_buffer("preview")
+        if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+          local ok, SemanticHighlighter = pcall(require, 'ssns.highlighting.semantic')
+          if ok and SemanticHighlighter.disable then
+            pcall(SemanticHighlighter.disable, bufnr)
+          end
         end
       end
+      multi_panel = nil
+      ui_state = {
+        available_themes = {},
+        original_theme = nil,
+        selected_idx = 1,
+        theme_line_map = {},
+      }
     end,
-    initial_data = {
-      available_themes = themes,
-      original_theme = original_theme,
-      theme_line_map = {},
-    },
   })
 
-  if state then
-    state.selected_idx = selected_idx
-    
-    -- Preview selected theme
-    on_selection_change(state)
-  end
-end
-
----Navigate theme list
----@param direction number 1 for down, -1 for up
-function ThemePicker._navigate(direction)
-  if not state then return end
-
-  state.selected_idx = state.selected_idx + direction
-
-  -- Wrap around
-  if state.selected_idx < 1 then
-    state.selected_idx = #state.data.available_themes
-  elseif state.selected_idx > #state.data.available_themes then
-    state.selected_idx = 1
-  end
-
-  -- Re-render and preview
-  UiFloatMultiPanel.render_panel(state, "themes")
-  on_selection_change(state)
-end
-
----Switch focus between panels
-function ThemePicker._swap_focus()
-  if not state then return end
-
-  local target = state.focused_panel == "themes" and "preview" or "themes"
-  UiFloatMultiPanel.focus_panel(state, target)
-end
-
----Handle mouse click on theme list
-function ThemePicker._handle_mouse_click()
-  if not state then return end
-
-  local mouse = vim.fn.getmousepos()
-  if mouse.winid ~= state.windows.themes then
+  if not multi_panel then
     return
   end
 
-  -- Check if this line corresponds to a theme
-  local line = mouse.line - 1
-  local theme_line_map = state.data.theme_line_map or {}
+  -- Render all panels
+  multi_panel:render_all()
 
-  -- Build reverse map
-  local line_to_theme = {}
-  for theme_idx, line_num in pairs(theme_line_map) do
-    line_to_theme[line_num] = theme_idx
-  end
+  -- Setup keymaps for themes panel
+  multi_panel:set_panel_keymaps("themes", {
+    [common.close or "q"] = function() ThemePicker.close() end,
+    [common.cancel or "<Esc>"] = cancel_selection,
+    [common.nav_down or "j"] = function() navigate_themes(1) end,
+    [common.nav_up or "k"] = function() navigate_themes(-1) end,
+    [common.nav_down_alt or "<Down>"] = function() navigate_themes(1) end,
+    [common.nav_up_alt or "<Up>"] = function() navigate_themes(-1) end,
+    [common.confirm or "<CR>"] = apply_theme,
+    [common.next_field or "<Tab>"] = function() multi_panel:focus_next_panel() end,
+    [common.prev_field or "<S-Tab>"] = function() multi_panel:focus_prev_panel() end,
+  })
 
-  local theme_idx = line_to_theme[line]
-  if theme_idx and theme_idx >= 1 and theme_idx <= #state.data.available_themes then
-    state.selected_idx = theme_idx
-    UiFloatMultiPanel.render_panel(state, "themes")
-    on_selection_change(state)
-  end
-end
+  -- Setup keymaps for preview panel
+  multi_panel:set_panel_keymaps("preview", {
+    [common.close or "q"] = function() ThemePicker.close() end,
+    [common.cancel or "<Esc>"] = cancel_selection,
+    [common.confirm or "<CR>"] = apply_theme,
+    [common.next_field or "<Tab>"] = function() multi_panel:focus_next_panel() end,
+    [common.prev_field or "<S-Tab>"] = function() multi_panel:focus_prev_panel() end,
+  })
 
----Apply selected theme
-function ThemePicker._apply()
-  if not state then return end
-
-  local theme = state.data.available_themes[state.selected_idx]
-  if theme then
-    ThemeManager.set_theme(theme.name, true)
-  end
-
-  ThemePicker.close()
-end
-
----Cancel and restore original theme
-function ThemePicker._cancel()
-  if not state then return end
-
-  -- Restore original theme
-  ThemeManager.preview(state.data.original_theme)
-
-  ThemePicker.close()
+  -- Preview selected theme
+  on_selection_change()
 end
 
 ---Close the theme picker
 function ThemePicker.close()
-  if not state then return end
+  if not multi_panel then return end
 
-  UiFloatMultiPanel.close(state)
-  state = nil
+  multi_panel:close()
+  multi_panel = nil
 end
 
 ---Check if theme picker is open
 ---@return boolean
 function ThemePicker.is_open()
-  return state ~= nil
+  return multi_panel ~= nil
 end
 
 return ThemePicker
