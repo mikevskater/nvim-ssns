@@ -1311,6 +1311,11 @@ function UiFloat.create_multi_panel(config)
       rect = rect,
       namespace = vim.api.nvim_create_namespace("ssns_panel_" .. def.name),
     }
+
+    -- Call on_create callback if provided (e.g., to set buffer variables)
+    if def.on_create and float.bufnr then
+      def.on_create(float.bufnr, float.winid)
+    end
   end
 
   -- Create footer if specified

@@ -51,6 +51,13 @@ function SemanticHighlighter.setup_buffer(bufnr)
     return
   end
 
+  -- Skip if buffer has requested to skip semantic highlighting
+  -- (e.g., theme preview uses pre-defined highlights)
+  local skip = vim.b[bufnr].ssns_skip_semantic_highlight
+  if skip then
+    return
+  end
+
   -- Already enabled for this buffer
   if enabled_buffers[bufnr] then
     return

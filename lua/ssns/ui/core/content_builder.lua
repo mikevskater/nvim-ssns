@@ -227,7 +227,16 @@ function ContentBuilder:spans(spans)
     local span_text = span.text or ""
     table.insert(text_parts, span_text)
     
-    if span.style and STYLE_MAPPINGS[span.style] then
+    -- Support both style (mapped) and hl_group (direct)
+    if span.hl_group then
+      -- Direct highlight group (bypasses STYLE_MAPPINGS)
+      table.insert(highlights, {
+        col_start = pos,
+        col_end = pos + #span_text,
+        hl_group = span.hl_group,
+      })
+    elseif span.style and STYLE_MAPPINGS[span.style] then
+      -- Mapped style
       table.insert(highlights, {
         col_start = pos,
         col_end = pos + #span_text,
@@ -501,13 +510,14 @@ function ContentBuilder:build_lines()
   return lines
 end
 
----Build and return highlight data
+---Build and return highlight data (mapped styles only)
 ---@return table[] highlights Array of { line = number, col_start = number, col_end = number, hl_group = string }
 function ContentBuilder:build_highlights()
   local highlights = {}
   for line_idx, line in ipairs(self._lines) do
     for _, hl in ipairs(line.highlights) do
-      local hl_group = STYLE_MAPPINGS[hl.style]
+      -- Use direct hl_group if set, otherwise map from style
+      local hl_group = hl.hl_group or STYLE_MAPPINGS[hl.style]
       if hl_group then
         table.insert(highlights, {
           line = line_idx - 1,  -- 0-indexed
@@ -519,6 +529,13 @@ function ContentBuilder:build_highlights()
     end
   end
   return highlights
+end
+
+---Build and return highlight data (alias for build_highlights)
+---Supports both mapped styles and direct hl_group values
+---@return table[] highlights Array of { line = number, col_start = number, col_end = number, hl_group = string }
+function ContentBuilder:build_raw_highlights()
+  return self:build_highlights()
 end
 
 ---Apply highlights to a buffer
