@@ -1324,22 +1324,22 @@ function UiFloat.create_multi_panel(config)
     vim.api.nvim_buf_set_option(state.footer_buf, 'buftype', 'nofile')
     vim.api.nvim_buf_set_option(state.footer_buf, 'modifiable', false)
 
-    -- Center the footer text
-    local footer_text = config.footer
-    local text_len = vim.fn.strdisplaywidth(footer_text)
-    local padding = math.floor((total_width - text_len) / 2)
-    local centered_text = string.rep(" ", math.max(0, padding)) .. footer_text
+    -- Footer text with minimal padding
+    local footer_text = " " .. config.footer .. " "
+    local footer_width = vim.fn.strdisplaywidth(footer_text)
+    -- Center the footer window within the total layout width
+    local footer_col = start_col + math.floor((total_width - footer_width) / 2)
 
     vim.api.nvim_buf_set_option(state.footer_buf, 'modifiable', true)
-    vim.api.nvim_buf_set_lines(state.footer_buf, 0, -1, false, {centered_text})
+    vim.api.nvim_buf_set_lines(state.footer_buf, 0, -1, false, {footer_text})
     vim.api.nvim_buf_set_option(state.footer_buf, 'modifiable', false)
 
     state.footer_win = vim.api.nvim_open_win(state.footer_buf, false, {
       relative = "editor",
-      width = total_width,
+      width = footer_width,
       height = 1,
-      row = start_row + total_height + 2,
-      col = start_col,
+      row = start_row + total_height + 1,  -- Position on bottom border
+      col = footer_col,  -- Centered within the layout
       style = "minimal",
       border = "none",
       zindex = 52,
@@ -1667,24 +1667,23 @@ function MultiPanelWindow:_recalculate_layout()
 
   -- Update footer if present
   if self.footer_win and vim.api.nvim_win_is_valid(self.footer_win) then
-    -- Recenter footer text
-    if self.footer_buf and vim.api.nvim_buf_is_valid(self.footer_buf) then
-      local footer_text = self.config.footer or ""
-      local text_len = vim.fn.strdisplaywidth(footer_text)
-      local padding = math.floor((total_width - text_len) / 2)
-      local centered_text = string.rep(" ", math.max(0, padding)) .. footer_text
+    -- Recenter footer with minimal width
+    local footer_text = " " .. (self.config.footer or "") .. " "
+    local footer_width = vim.fn.strdisplaywidth(footer_text)
+    local footer_col = start_col + math.floor((total_width - footer_width) / 2)
 
+    if self.footer_buf and vim.api.nvim_buf_is_valid(self.footer_buf) then
       vim.api.nvim_buf_set_option(self.footer_buf, 'modifiable', true)
-      vim.api.nvim_buf_set_lines(self.footer_buf, 0, -1, false, {centered_text})
+      vim.api.nvim_buf_set_lines(self.footer_buf, 0, -1, false, {footer_text})
       vim.api.nvim_buf_set_option(self.footer_buf, 'modifiable', false)
     end
 
     vim.api.nvim_win_set_config(self.footer_win, {
       relative = "editor",
-      width = total_width,
+      width = footer_width,
       height = 1,
-      row = start_row + total_height + 2,
-      col = start_col,
+      row = start_row + total_height + 1,  -- Position on bottom border
+      col = footer_col,  -- Centered within the layout
     })
   end
 end
