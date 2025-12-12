@@ -415,7 +415,11 @@ local function export_history()
     cb:line("")
     cb:line("  Export query history to file:", "SsnsUiTitle")
     cb:line("")
-    cb:labeled_input("  File: ", "filepath", default_path, 50)
+    cb:labeled_input("filepath", "  File", {
+      value = default_path,
+      placeholder = "(enter path)",
+      width = 50,  -- Default width, expands for longer paths
+    })
     cb:line("")
     cb:line("  Use .json extension for JSON format, otherwise plain text.", "Comment")
     cb:line("")
@@ -467,7 +471,11 @@ local function search_history()
     cb:line("")
     cb:line("  Search query history:", "SsnsUiTitle")
     cb:line("")
-    cb:labeled_input("  Pattern: ", "pattern", "", 40)
+    cb:labeled_input("pattern", "  Pattern", {
+      value = "",
+      placeholder = "(enter search term)",
+      width = 40,  -- Default width, expands for longer patterns
+    })
     cb:line("")
     cb:line("  <Enter>=Search | <Esc>=Cancel", "SsnsUiHint")
     search_win:render()
