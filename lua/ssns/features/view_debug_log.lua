@@ -205,7 +205,11 @@ function ViewDebugLog.view_log(filter)
         if filter_win then
           local cb = filter_win:get_content_builder()
           cb:line("")
-          cb:labeled_input("  Filter: ", "filter", current_filter or "", 35)
+          cb:labeled_input("filter", "  Filter", {
+            value = current_filter or "",
+            placeholder = "(enter filter text)",
+            width = 35,  -- Default width, expands for longer filters
+          })
           cb:line("")
           cb:line("  <Enter>=Apply | <Esc>=Cancel", "SsnsUiHint")
           filter_win:render()
