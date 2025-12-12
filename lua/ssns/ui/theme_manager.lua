@@ -387,6 +387,7 @@ function ThemeManager.apply_colors(colors)
   -- Input field highlights
   vim.api.nvim_set_hl(0, "SsnsFloatInput", colors.ui_input or { bg = "#2D2D2D", fg = "#CCCCCC" })
   vim.api.nvim_set_hl(0, "SsnsFloatInputActive", colors.ui_input_active or { bg = "#3C3C3C", fg = "#FFFFFF", bold = true })
+  vim.api.nvim_set_hl(0, "SsnsFloatInputPlaceholder", colors.ui_input_placeholder or { bg = "#2D2D2D", fg = "#666666", italic = true })
 
   -- Scrollbar highlights
   vim.api.nvim_set_hl(0, "SsnsScrollbar", colors.scrollbar or { bg = "NONE", fg = "#4A4A4A" })

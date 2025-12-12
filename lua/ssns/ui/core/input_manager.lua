@@ -17,11 +17,15 @@ InputManager.__index = InputManager
 ---@field key string Unique identifier for the input
 ---@field line number 1-indexed line number
 ---@field col_start number 0-indexed start column of input value area
----@field col_end number 0-indexed end column of input value area
----@field width number Total width of input field
+---@field col_end number 0-indexed end column of input value area (dynamic, updates based on content)
+---@field width number Current effective width of input field
+---@field default_width number Default/minimum display width (pads with spaces, expands if text longer)
+---@field min_width number? Minimum display width override
 ---@field value string Current value
 ---@field default string Default/initial value
 ---@field placeholder string Placeholder text when empty
+---@field is_showing_placeholder boolean Whether currently displaying placeholder text
+---@field prefix_len number? Length of label prefix (for line reconstruction)
 
 ---@class InputManagerState
 ---@field in_input_mode boolean Whether currently in input mode
@@ -51,9 +55,11 @@ function InputManager.new(config)
   self._namespace = vim.api.nvim_create_namespace("ssns_input_manager")
   self._autocmd_group = nil
   
-  -- Initialize values from input definitions
+  -- Initialize values from input definitions and track placeholder state
   for key, input in pairs(self.inputs) do
     self.values[key] = input.value or ""
+    -- Track if this input is showing placeholder
+    input.is_showing_placeholder = (self.values[key] == "" and (input.placeholder or "") ~= "")
   end
   
   return self
@@ -89,13 +95,15 @@ function InputManager:setup()
     end,
   })
   
-  -- Handle text changes in insert mode
+  -- Handle text changes in insert mode - sync value and adjust width in real-time
   vim.api.nvim_create_autocmd("TextChangedI", {
     group = self._autocmd_group,
     buffer = self.bufnr,
     callback = function()
       if self.in_input_mode and self.active_input then
         self:_sync_input_value()
+        -- Re-render to adjust width in real-time as user types
+        self:_render_input_realtime(self.active_input)
       end
     end,
   })
@@ -148,8 +156,17 @@ function InputManager:enter_input_mode(key)
   -- Make buffer modifiable
   vim.api.nvim_buf_set_option(self.bufnr, 'modifiable', true)
   
-  -- Position cursor at end of current value
+  -- If showing placeholder, clear it to blank spaces for editing
   local value = self.values[key] or ""
+  if input.is_showing_placeholder then
+    -- Clear the placeholder - replace with spaces
+    self:_clear_input_to_spaces(key)
+    value = ""
+    self.values[key] = ""
+    input.is_showing_placeholder = false
+  end
+  
+  -- Position cursor at end of current value (or start if empty)
   local cursor_col = input.col_start + #value
   cursor_col = math.min(cursor_col, input.col_end - 1)
   
@@ -179,6 +196,22 @@ function InputManager:_exit_input_mode()
   self.in_input_mode = false
   self.active_input = nil
   
+  -- Always re-render to normalize width (removes extra spaces, restores placeholder if empty)
+  if exited_key then
+    local input = self.inputs[exited_key]
+    local value = self.values[exited_key] or ""
+    if input then
+      -- Track placeholder state
+      if value == "" and (input.placeholder or "") ~= "" then
+        input.is_showing_placeholder = true
+      else
+        input.is_showing_placeholder = false
+      end
+      -- Re-render to normalize display width
+      self:_render_input(exited_key)
+    end
+  end
+  
   -- Make buffer non-modifiable again
   vim.api.nvim_buf_set_option(self.bufnr, 'modifiable', false)
   
@@ -191,6 +224,43 @@ function InputManager:_exit_input_mode()
   if self.on_input_exit and exited_key then
     self.on_input_exit(exited_key)
   end
+end
+
+---Clear an input field to blank spaces (for placeholder clearing)
+---Resets to default_width when clearing
+---@param key string Input key
+function InputManager:_clear_input_to_spaces(key)
+  local input = self.inputs[key]
+  if not input then return end
+  
+  local default_width = input.default_width or input.width or 20
+  local min_width = input.min_width or default_width
+  local effective_width = math.max(default_width, min_width)
+  
+  -- Replace with spaces at default width
+  local blank_text = string.rep(" ", effective_width)
+  
+  -- Get current line
+  local lines = vim.api.nvim_buf_get_lines(self.bufnr, input.line - 1, input.line, false)
+  if #lines == 0 then return end
+  
+  local line = lines[1]
+  
+  -- Find the actual closing bracket position
+  local bracket_pos = line:find("%]", input.col_start + 1)
+  if not bracket_pos then return end
+  
+  -- Reconstruct line with blank content at default width
+  local before = line:sub(1, input.col_start)  -- Up to and including "["
+  local after = line:sub(bracket_pos + 1)  -- Everything after "]"
+  
+  -- Build new line and update col_end
+  local new_line = before .. blank_text .. "]" .. after
+  input.col_end = input.col_start + effective_width
+  input.width = effective_width
+  
+  -- Update buffer (already modifiable when entering input mode)
+  vim.api.nvim_buf_set_lines(self.bufnr, input.line - 1, input.line, false, {new_line})
 end
 
 ---Sync the current input's value from the buffer
@@ -206,15 +276,27 @@ function InputManager:_sync_input_value()
   
   local line_text = lines[1]
   
-  -- Extract value from input area (between col_start and col_end)
-  local raw_value = line_text:sub(input.col_start + 1, input.col_end)
+  -- Find the closing bracket to determine actual input end
+  -- Start searching from col_start
+  local bracket_pos = line_text:find("%]", input.col_start + 1)
+  local actual_col_end = bracket_pos and (bracket_pos - 1) or input.col_end
+  
+  -- Extract value from input area (between col_start and closing bracket)
+  local raw_value = line_text:sub(input.col_start + 1, actual_col_end)
   
   -- Trim trailing spaces (but preserve leading spaces if user wants them)
   local value = raw_value:gsub("%s+$", "")
   
-  -- Update stored value
+  -- Update stored value and col_end
   local old_value = self.values[self.active_input]
   self.values[self.active_input] = value
+  
+  -- Update col_end based on new content
+  local default_width = input.default_width or input.width or 20
+  local min_width = input.min_width or default_width
+  local effective_width = math.max(default_width, min_width, #value)
+  input.col_end = input.col_start + effective_width
+  input.width = effective_width
   
   -- Callback if changed
   if self.on_value_change and value ~= old_value then
@@ -371,7 +453,8 @@ function InputManager:_setup_input_keymaps()
     if input then
       local value = self.values[self.active_input] or ""
       local max_col = input.col_start + #value
-      if cursor[2] < max_col and cursor[2] < input.col_end - 1 then
+      -- Allow cursor to move up to end of actual value (not padded spaces)
+      if cursor[2] < max_col then
         vim.api.nvim_win_set_cursor(self.winid, {cursor[1], cursor[2] + 1})
       end
     end
@@ -407,7 +490,7 @@ end
 
 ---Highlight an input field
 ---@param key string Input key
----@param active boolean Whether input is active
+---@param active boolean Whether input is active/focused
 function InputManager:_highlight_input(key, active)
   local input = self.inputs[key]
   if not input then return end
@@ -415,8 +498,16 @@ function InputManager:_highlight_input(key, active)
   -- Clear existing highlights first
   vim.api.nvim_buf_clear_namespace(self.bufnr, self._namespace, input.line - 1, input.line)
   
-  -- Apply active/inactive highlight
-  local hl_group = active and "SsnsFloatInputActive" or "SsnsFloatInput"
+  -- Determine highlight group based on state
+  local hl_group
+  if active then
+    hl_group = "SsnsFloatInputActive"
+  elseif input.is_showing_placeholder then
+    hl_group = "SsnsFloatInputPlaceholder"
+  else
+    hl_group = "SsnsFloatInput"
+  end
+  
   vim.api.nvim_buf_add_highlight(
     self.bufnr, self._namespace, hl_group,
     input.line - 1, input.col_start, input.col_end
@@ -481,7 +572,7 @@ function InputManager:set_value(key, value)
   end
 end
 
----Render an input field's value to the buffer
+---Render an input field's value to the buffer (with dynamic width support)
 ---@param key string Input key
 function InputManager:_render_input(key)
   local input = self.inputs[key]
@@ -489,19 +580,24 @@ function InputManager:_render_input(key)
   
   local value = self.values[key] or ""
   local placeholder = input.placeholder or ""
-  local width = input.width
+  local default_width = input.default_width or input.width or 20
+  local min_width = input.min_width or default_width
   
-  -- Determine display text
+  -- Determine display text and track placeholder state
   local display_text = value
   if value == "" and placeholder ~= "" then
     display_text = placeholder
+    input.is_showing_placeholder = true
+  else
+    input.is_showing_placeholder = false
   end
   
-  -- Pad to width
-  if #display_text < width then
-    display_text = display_text .. string.rep(" ", width - #display_text)
-  elseif #display_text > width then
-    display_text = display_text:sub(1, width)
+  -- Calculate effective width: at least default_width, but expands for longer text
+  local effective_width = math.max(default_width, min_width, #display_text)
+  
+  -- Pad to effective width (no truncation - expands if needed)
+  if #display_text < effective_width then
+    display_text = display_text .. string.rep(" ", effective_width - #display_text)
   end
   
   -- Get current line
@@ -510,16 +606,94 @@ function InputManager:_render_input(key)
   
   local line = lines[1]
   
-  -- Replace input area in line
-  local before = line:sub(1, input.col_start)
-  local after = line:sub(input.col_end + 1)
-  local new_line = before .. display_text .. after
+  -- Find the actual closing bracket position in the current line
+  local bracket_pos = line:find("%]", input.col_start + 1)
+  if not bracket_pos then
+    -- No bracket found, something is wrong - just return
+    return
+  end
+  
+  -- Update input's col_end and width for dynamic sizing
+  input.col_end = input.col_start + effective_width
+  input.width = effective_width
+  
+  -- Reconstruct the line with new input content
+  local before = line:sub(1, input.col_start)  -- Everything up to and including "["
+  local after = line:sub(bracket_pos + 1)  -- Everything after the "]"
+  
+  -- Build new line: before + display_text + "]" + after
+  local new_line = before .. display_text .. "]" .. after
   
   -- Update buffer
   local was_modifiable = vim.api.nvim_buf_get_option(self.bufnr, 'modifiable')
   vim.api.nvim_buf_set_option(self.bufnr, 'modifiable', true)
   vim.api.nvim_buf_set_lines(self.bufnr, input.line - 1, input.line, false, {new_line})
   vim.api.nvim_buf_set_option(self.bufnr, 'modifiable', was_modifiable)
+  
+  -- Re-apply highlight for this input after width change
+  local current_key = self.input_order[self.current_input_idx]
+  self:_highlight_input(key, key == current_key)
+end
+
+---Render an input field in real-time while typing (preserves cursor position)
+---@param key string Input key
+function InputManager:_render_input_realtime(key)
+  local input = self.inputs[key]
+  if not input then return end
+  
+  local value = self.values[key] or ""
+  local default_width = input.default_width or input.width or 20
+  local min_width = input.min_width or default_width
+  
+  -- Calculate effective width: at least default_width, but expands for longer text
+  local effective_width = math.max(default_width, min_width, #value)
+  
+  -- Pad value with spaces to effective width
+  local display_text = value
+  if #display_text < effective_width then
+    display_text = display_text .. string.rep(" ", effective_width - #display_text)
+  end
+  
+  -- Save cursor position (relative to input start)
+  local cursor = vim.api.nvim_win_get_cursor(self.winid)
+  local cursor_offset = cursor[2] - input.col_start
+  
+  -- Get current line
+  local lines = vim.api.nvim_buf_get_lines(self.bufnr, input.line - 1, input.line, false)
+  if #lines == 0 then return end
+  
+  local line = lines[1]
+  
+  -- Find the actual closing bracket position in the current line
+  local bracket_pos = line:find("%]", input.col_start + 1)
+  if not bracket_pos then
+    -- No bracket found, something is wrong - just return
+    return
+  end
+  
+  -- Update input's col_end and width for dynamic sizing
+  input.col_end = input.col_start + effective_width
+  input.width = effective_width
+  
+  -- Reconstruct the line with new input content
+  local before = line:sub(1, input.col_start)  -- Everything up to and including "["
+  local after = line:sub(bracket_pos + 1)  -- Everything after the "]"
+  
+  -- Build new line: before + display_text + "]" + after
+  local new_line = before .. display_text .. "]" .. after
+  
+  -- Update buffer (already modifiable in insert mode)
+  vim.api.nvim_buf_set_lines(self.bufnr, input.line - 1, input.line, false, {new_line})
+  
+  -- Restore cursor position
+  local new_cursor_col = input.col_start + cursor_offset
+  -- Clamp cursor to valid range (don't go past end of actual value)
+  new_cursor_col = math.min(new_cursor_col, input.col_start + #value)
+  new_cursor_col = math.max(new_cursor_col, input.col_start)
+  vim.api.nvim_win_set_cursor(self.winid, {cursor[1], new_cursor_col})
+  
+  -- Re-apply highlight
+  self:_highlight_input(key, true)
 end
 
 ---Update input definitions (e.g., after re-render)
@@ -529,11 +703,14 @@ function InputManager:update_inputs(inputs, input_order)
   self.inputs = inputs or {}
   self.input_order = input_order or {}
   
-  -- Preserve existing values, add new ones
+  -- Preserve existing values, add new ones, and track placeholder state
   for key, input in pairs(self.inputs) do
     if not self.values[key] then
       self.values[key] = input.value or ""
     end
+    -- Update placeholder state based on current value
+    local value = self.values[key] or ""
+    input.is_showing_placeholder = (value == "" and (input.placeholder or "") ~= "")
   end
 end
 
