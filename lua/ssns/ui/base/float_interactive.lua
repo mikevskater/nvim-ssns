@@ -6,6 +6,9 @@ local UiFloatInteractive = {}
 local UiFloatBase = require('ssns.ui.base.float_base')
 local KeymapManager = require('ssns.keymap_manager')
 
+-- Namespace for highlights
+local HIGHLIGHT_NS = vim.api.nvim_create_namespace("ssns_float_interactive")
+
 ---@class FloatInteractiveConfig
 ---@field title string Window title
 ---@field footer string? Footer text (default: "<CR> Select | <Esc> Cancel | j/k Navigate")
@@ -13,7 +16,7 @@ local KeymapManager = require('ssns.keymap_manager')
 ---@field height number? Window height (default: 20)
 ---@field header_lines number? Number of header lines before selectable items (default: 0)
 ---@field item_count number? Number of selectable items (if not provided, calculated from lines - header - 1)
----@field on_render fun(state: FloatInteractiveState): string[] Function to render current content
+---@field on_render fun(state: FloatInteractiveState): string[], table[]? Function to render current content (returns lines, optional highlights)
 ---@field on_select fun(state: FloatInteractiveState) Function called when item is selected
 ---@field on_navigate fun(state: FloatInteractiveState, direction: string)? Called after navigation (optional)
 ---@field on_close fun(state: FloatInteractiveState)? Called when picker closes (optional)
@@ -85,8 +88,9 @@ function UiFloatInteractive.render(state)
     return
   end
 
-  -- Get lines from render callback
-  local lines = state.config.on_render(state)
+  -- Get lines and optional highlights from render callback
+  local lines, highlights = state.config.on_render(state)
+  highlights = highlights or {}
   
   -- Use item_count from config if provided, otherwise calculate from lines
   if state.config.item_count then
@@ -107,6 +111,26 @@ function UiFloatInteractive.render(state)
 
   -- Write to buffer using base
   UiFloatBase.set_buffer_lines(state.bufnr, lines)
+
+  -- Apply highlights if provided
+  if #highlights > 0 then
+    vim.api.nvim_buf_clear_namespace(state.bufnr, HIGHLIGHT_NS, 0, -1)
+    for _, hl in ipairs(highlights) do
+      -- Support both array format {line, col_start, col_end, hl_group} 
+      -- and named format {line=, col_start=, col_end=, hl_group=} from ContentBuilder
+      local line = hl.line or hl[1]
+      local col_start = hl.col_start or hl[2]
+      local col_end = hl.col_end or hl[3]
+      local hl_group = hl.hl_group or hl[4]
+      
+      if line and col_start and hl_group then
+        vim.api.nvim_buf_add_highlight(
+          state.bufnr, HIGHLIGHT_NS,
+          hl_group, line, col_start, col_end or -1
+        )
+      end
+    end
+  end
 
   -- Position cursor on the correct line (header_lines + selected_idx)
   if state.total_items > 0 then
