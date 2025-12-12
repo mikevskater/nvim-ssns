@@ -8,6 +8,51 @@ local Cache = require('ssns.cache')
 local Connections = require('ssns.connections')
 local Config = require('ssns.config')
 local KeymapManager = require('ssns.keymap_manager')
+local QueryParser = require('ssns.query_parser')
+
+---Get the default database name for a server type
+---@param db_type string Database type (sqlserver, postgres, mysql, sqlite)
+---@return string default_db Default database name
+local function get_default_database(db_type)
+  if db_type == "sqlserver" then
+    return "master"
+  elseif db_type == "postgres" or db_type == "postgresql" then
+    return "postgres"
+  elseif db_type == "mysql" then
+    return "mysql"
+  elseif db_type == "sqlite" then
+    return "main"
+  else
+    return "master"  -- fallback
+  end
+end
+
+---Parse buffer content to find the last USE statement database
+---@param bufnr number Buffer number
+---@return string? database Database name from last USE statement, or nil
+local function get_database_from_buffer_context(bufnr)
+  -- Get buffer content
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local content = table.concat(lines, "\n")
+
+  if content == "" then
+    return nil
+  end
+
+  -- Parse USE statements from the buffer
+  local chunks = QueryParser.parse_use_statements(content)
+
+  -- Find the last chunk with a database set (from USE statement)
+  local last_database = nil
+  for _, chunk in ipairs(chunks) do
+    if chunk.database then
+      last_database = chunk.database
+    end
+  end
+
+  return last_database
+end
+
 ---@return table[] servers List of server entries
 local function get_all_servers()
   local servers = {}
@@ -94,23 +139,72 @@ local function attach_connection_to_buffer(bufnr, connection, callback)
     connection.connected = true
   end
 
-  -- If database is specified, find it; otherwise use nil (context parsing will determine)
+  -- Determine database to use
   local database = connection.database
-  if connection.db_name and not database then
+  local db_name = connection.db_name
+  local database_source = "explicit"  -- Track how we determined the database
+
+  -- If database is specified in connection, find it
+  if db_name and not database then
     for _, db in ipairs(server.databases or {}) do
-      if db.db_name == connection.db_name then
+      if db.db_name == db_name then
         database = db
         break
       end
     end
   end
 
-  -- Set the ssns_db_key buffer variable (server only, or server:database if specified)
+  -- If no database specified, determine from buffer context or use default
+  if not database and not db_name then
+    -- First, try to parse USE statements from buffer content
+    local context_db = get_database_from_buffer_context(bufnr)
+
+    if context_db then
+      db_name = context_db
+      database_source = "context"
+
+      -- Load databases if not yet loaded (to find the database object)
+      if not server.databases or #server.databases == 0 then
+        server:load()
+      end
+
+      -- Find the database object
+      for _, db in ipairs(server.databases or {}) do
+        if db.db_name:lower() == context_db:lower() then
+          database = db
+          db_name = db.db_name  -- Use proper casing from server
+          break
+        end
+      end
+    end
+
+    -- If still no database, use server type default (master, postgres, etc.)
+    if not db_name then
+      local db_type = server:get_db_type() or "sqlserver"
+      db_name = get_default_database(db_type)
+      database_source = "default"
+
+      -- Load databases if not yet loaded
+      if not server.databases or #server.databases == 0 then
+        server:load()
+      end
+
+      -- Find the default database object
+      for _, db in ipairs(server.databases or {}) do
+        if db.db_name:lower() == db_name:lower() then
+          database = db
+          db_name = db.db_name  -- Use proper casing from server
+          break
+        end
+      end
+    end
+  end
+
+  -- Set the ssns_db_key buffer variable
   local db_key
-  if database then
-    db_key = string.format("%s:%s", connection.server_name, database.db_name)
+  if db_name then
+    db_key = string.format("%s:%s", connection.server_name, db_name)
   else
-    -- Server-only key - context parsing will determine database from USE statements
     db_key = connection.server_name
   end
   vim.api.nvim_buf_set_var(bufnr, 'ssns_db_key', db_key)
@@ -118,8 +212,8 @@ local function attach_connection_to_buffer(bufnr, connection, callback)
   -- Track in query_buffers
   UiQuery.query_buffers[bufnr] = {
     server = server,
-    database = database,  -- May be nil for server-only attachment
-    last_database = database and database.db_name or nil,
+    database = database,
+    last_database = db_name,
   }
 
   -- Setup query keymaps for this buffer
@@ -129,10 +223,13 @@ local function attach_connection_to_buffer(bufnr, connection, callback)
   local SemanticHighlighter = require('ssns.highlighting.semantic')
   SemanticHighlighter.setup_buffer(bufnr)
 
-  if database then
-    vim.notify(string.format("SSNS: Buffer attached to %s → %s", connection.server_name, database.db_name), vim.log.levels.INFO)
+  -- Notify based on how database was determined
+  if database_source == "explicit" then
+    vim.notify(string.format("SSNS: Buffer attached to %s → %s", connection.server_name, db_name), vim.log.levels.INFO)
+  elseif database_source == "context" then
+    vim.notify(string.format("SSNS: Buffer attached to %s → %s (from USE statement)", connection.server_name, db_name), vim.log.levels.INFO)
   else
-    vim.notify(string.format("SSNS: Buffer attached to %s (database from context)", connection.server_name), vim.log.levels.INFO)
+    vim.notify(string.format("SSNS: Buffer attached to %s → %s (default)", connection.server_name, db_name), vim.log.levels.INFO)
   end
 
   -- Refresh statusline to show connection info

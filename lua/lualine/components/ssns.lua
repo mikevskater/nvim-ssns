@@ -238,13 +238,10 @@ function M.ssns()
   end
 
   -- Determine current database context
-  -- Priority: last_database (from USE) > database.db_name (from tree) > parsed.database (from connection string)
+  -- Priority: last_database (from attachment) > database.db_name (from tree)
   local current_db = last_database
   if not current_db and database then
     current_db = database.db_name
-  end
-  if not current_db and parsed.database and parsed.database ~= '' then
-    current_db = parsed.database
   end
 
   -- Add database if we have one

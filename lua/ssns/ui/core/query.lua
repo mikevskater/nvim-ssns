@@ -239,19 +239,19 @@ function UiQuery.setup_query_keymaps(bufnr)
     end, desc = "Toggle results window" },
 
     -- Attach connection (flat list)
-    { mode = "n", lhs = km.attach_connection or "<Leader>a", rhs = function()
+    { mode = "n", lhs = km.attach_connection or "<Leader>cs", rhs = function()
       local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
       ConnectionPicker.show(bufnr)
     end, desc = "Attach buffer to connection" },
 
     -- Change connection (hierarchical picker)
-    { mode = "n", lhs = km.change_connection or "<Leader>A", rhs = function()
+    { mode = "n", lhs = km.change_connection or "<Leader>cA", rhs = function()
       local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
       ConnectionPicker.show_hierarchical(bufnr)
     end, desc = "Change connection (server then database)" },
 
     -- Change database only
-    { mode = "n", lhs = km.change_database or "<Leader>d", rhs = function()
+    { mode = "n", lhs = km.change_database or "<Leader>cd", rhs = function()
       local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
       ConnectionPicker.show_database_picker(bufnr)
     end, desc = "Change database" },
