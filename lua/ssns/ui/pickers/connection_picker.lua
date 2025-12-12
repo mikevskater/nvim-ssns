@@ -3,11 +3,11 @@
 local UiConnectionPicker = {}
 
 local UiFloatInteractive = require('ssns.ui.base.float_interactive')
+local ContentBuilder = require('ssns.ui.core.content_builder')
 local UiQuery = require('ssns.ui.core.query')
 local Cache = require('ssns.cache')
 local Connections = require('ssns.connections')
 local Config = require('ssns.config')
-local KeymapManager = require('ssns.keymap_manager')
 local QueryParser = require('ssns.query_parser')
 
 ---Get the default database name for a server type
@@ -63,7 +63,6 @@ local function get_all_servers()
     if not seen[server.name] then
       seen[server.name] = true
       table.insert(servers, {
-        display = server:is_connected() and string.format("● %s", server.name) or string.format("○ %s", server.name),
         server_name = server.name,
         server = server,
         connected = server:is_connected(),
@@ -77,7 +76,6 @@ local function get_all_servers()
     if not seen[conn.name] then
       seen[conn.name] = true
       table.insert(servers, {
-        display = string.format("○ %s", conn.name),
         server_name = conn.name,
         connection_config = conn,
         connected = false,
@@ -91,7 +89,6 @@ local function get_all_servers()
     if not seen[name] then
       seen[name] = true
       table.insert(servers, {
-        display = string.format("○ %s", name),
         server_name = name,
         connection_config = cfg,
         connected = false,
@@ -245,6 +242,70 @@ local function attach_connection_to_buffer(bufnr, connection, callback)
   end
 end
 
+---Render server list using ContentBuilder
+---@param servers table[] Server list
+---@param selected_idx number Selected index
+---@param current_key string? Current connection key
+---@return string[] lines
+---@return table[] highlights
+local function render_server_list(servers, selected_idx, current_key)
+  local cb = ContentBuilder.new()
+
+  -- Header
+  cb:blank()
+  cb:spans({
+    { text = " ", style = "text" },
+    { text = "●", style = "success" },
+    { text = " = Connected   ", style = "muted" },
+    { text = "○", style = "muted" },
+    { text = " = Saved", style = "muted" },
+  })
+  cb:styled(" Database from context (USE statements)", "muted")
+  cb:blank()
+
+  -- Current connection info
+  if current_key then
+    cb:spans({
+      { text = " Current: ", style = "label" },
+      { text = current_key, style = "server" },
+    })
+  else
+    cb:spans({
+      { text = " Current: ", style = "label" },
+      { text = "(none)", style = "muted" },
+    })
+  end
+
+  cb:styled(" ─────────────────────────────────────────", "muted")
+  cb:blank()
+
+  -- Server list
+  for i, srv in ipairs(servers) do
+    local is_selected = i == selected_idx
+    local prefix = is_selected and "▶ " or "  "
+    local status_icon = srv.connected and "● " or "○ "
+    local status_style = srv.connected and "success" or "muted"
+
+    if is_selected then
+      cb:spans({
+        { text = prefix, style = "emphasis" },
+        { text = status_icon, style = status_style },
+        { text = srv.server_name, style = "server" },
+      })
+    else
+      cb:spans({
+        { text = prefix, style = "text" },
+        { text = status_icon, style = status_style },
+        { text = srv.server_name, style = "text" },
+      })
+    end
+  end
+
+  cb:blank()
+
+  return cb:build_lines(), cb:build_highlights()
+end
+
 ---Show the server picker for the current buffer (database determined by context)
 ---@param bufnr number? Buffer number (defaults to current)
 function UiConnectionPicker.show(bufnr)
@@ -284,51 +345,7 @@ function UiConnectionPicker.show(bufnr)
       current_key = current_key,
     },
     on_render = function(st)
-      local lines = {}
-      local ns_id = vim.api.nvim_create_namespace("ssns_connection_picker")
-
-      -- Header
-      table.insert(lines, "")
-      table.insert(lines, " ● = Connected   ○ = Saved")
-      table.insert(lines, " Database from context (USE statements)")
-      table.insert(lines, "")
-
-      -- Current connection info
-      if st.data.current_key then
-        table.insert(lines, string.format(" Current: %s", st.data.current_key))
-      else
-        table.insert(lines, " Current: (none)")
-      end
-
-      table.insert(lines, " ─────────────────────────────────────────")
-      table.insert(lines, "")
-
-      -- Server list
-      for i, srv in ipairs(st.data.servers) do
-        local line = UiFloatInteractive.add_indicator(srv.display, i == st.selected_idx)
-        table.insert(lines, line)
-      end
-
-      table.insert(lines, "")
-
-      -- Apply highlights
-      vim.schedule(function()
-        if vim.api.nvim_buf_is_valid(st.bufnr) then
-          vim.api.nvim_buf_clear_namespace(st.bufnr, ns_id, 0, -1)
-          for line_idx, line in ipairs(lines) do
-            if line:match("─────") or line:match("● =") or line:match("Database from") then
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "Comment", line_idx - 1, 0, -1)
-            elseif line:match("Current:") then
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "Title", line_idx - 1, 0, 9)
-            elseif line:match("▶") then
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "SsnsFloatSelected", line_idx - 1, 0, -1)
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "Special", line_idx - 1, 1, 4)
-            end
-          end
-        end
-      end)
-
-      return lines
+      return render_server_list(st.data.servers, st.selected_idx, st.data.current_key)
     end,
     on_select = function(st)
       if st.selected_idx < 1 or st.selected_idx > #st.data.servers then
@@ -347,10 +364,87 @@ function UiConnectionPicker.show(bufnr)
 
   if state then
     -- Window options
-    vim.api.nvim_set_option_value('cursorline', true, { win = state.winid })
+    vim.api.nvim_set_option_value('cursorline', false, { win = state.winid })
     vim.api.nvim_set_option_value('number', false, { win = state.winid })
     vim.api.nvim_set_option_value('relativenumber', false, { win = state.winid })
   end
+end
+
+---Render hierarchical picker content using ContentBuilder
+---@param st table State
+---@return string[] lines
+---@return table[] highlights
+local function render_hierarchical(st)
+  local cb = ContentBuilder.new()
+
+  if st.data.mode == "server" then
+    -- Server list header
+    cb:blank()
+    cb:spans({
+      { text = " ", style = "text" },
+      { text = "●", style = "success" },
+      { text = " = Connected   ", style = "muted" },
+      { text = "○", style = "muted" },
+      { text = " = Saved", style = "muted" },
+    })
+    cb:styled(" ─────────────────────────────", "muted")
+    cb:blank()
+
+    -- Server list
+    for i, srv in ipairs(st.data.servers) do
+      local is_selected = i == st.selected_idx
+      local prefix = is_selected and "▶ " or "  "
+      local status_icon = srv.connected and "● " or "○ "
+      local status_style = srv.connected and "success" or "muted"
+
+      if is_selected then
+        cb:spans({
+          { text = prefix, style = "emphasis" },
+          { text = status_icon, style = status_style },
+          { text = srv.server_name, style = "server" },
+        })
+      else
+        cb:spans({
+          { text = prefix, style = "text" },
+          { text = status_icon, style = status_style },
+          { text = srv.server_name, style = "text" },
+        })
+      end
+    end
+
+    cb:blank()
+  else
+    -- Database list header
+    cb:blank()
+    cb:spans({
+      { text = " Server: ", style = "label" },
+      { text = st.data.server_info.server_name, style = "server" },
+    })
+    cb:styled(" ─────────────────────────────", "muted")
+    cb:blank()
+
+    -- Database list
+    for i, db in ipairs(st.data.databases) do
+      local is_selected = i == st.selected_idx
+      local prefix = is_selected and "▶ " or "  "
+
+      if is_selected then
+        cb:spans({
+          { text = prefix, style = "emphasis" },
+          { text = db.db_name, style = "database" },
+        })
+      else
+        cb:spans({
+          { text = prefix, style = "text" },
+          { text = db.db_name, style = "text" },
+        })
+      end
+    end
+
+    cb:blank()
+  end
+
+  return cb:build_lines(), cb:build_highlights()
 end
 
 ---Show hierarchical server→database picker
@@ -385,55 +479,7 @@ function UiConnectionPicker.show_hierarchical(bufnr)
       servers = servers,
       target_bufnr = bufnr,
     },
-    on_render = function(st)
-      local lines = {}
-      local ns_id = vim.api.nvim_create_namespace("ssns_hierarchical_picker")
-
-      if st.data.mode == "server" then
-        -- Server list
-        table.insert(lines, "")
-        table.insert(lines, " ● = Connected   ○ = Saved")
-        table.insert(lines, " ─────────────────────────────")
-        table.insert(lines, "")
-
-        for i, srv in ipairs(st.data.servers) do
-          local line = UiFloatInteractive.add_indicator(srv.display, i == st.selected_idx)
-          table.insert(lines, line)
-        end
-
-        table.insert(lines, "")
-      else
-        -- Database list
-        table.insert(lines, "")
-        table.insert(lines, string.format(" Server: %s", st.data.server_info.server_name))
-        table.insert(lines, " ─────────────────────────────")
-        table.insert(lines, "")
-
-        for i, db in ipairs(st.data.databases) do
-          local line = UiFloatInteractive.add_indicator(db.db_name, i == st.selected_idx)
-          table.insert(lines, line)
-        end
-
-        table.insert(lines, "")
-      end
-
-      -- Apply highlights
-      vim.schedule(function()
-        if vim.api.nvim_buf_is_valid(st.bufnr) then
-          vim.api.nvim_buf_clear_namespace(st.bufnr, ns_id, 0, -1)
-          for line_idx, line in ipairs(lines) do
-            if line:match("─────") or line:match("● =") or line:match("Server:") then
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "Comment", line_idx - 1, 0, -1)
-            elseif line:match("▶") then
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "SsnsFloatSelected", line_idx - 1, 0, -1)
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "Special", line_idx - 1, 1, 4)
-            end
-          end
-        end
-      end)
-
-      return lines
-    end,
+    on_render = render_hierarchical,
     on_select = function(st)
       if st.data.mode == "server" then
         -- Server selected - show databases
@@ -535,7 +581,7 @@ function UiConnectionPicker.show_hierarchical(bufnr)
   })
 
   if state then
-    vim.api.nvim_set_option_value('cursorline', true, { win = state.winid })
+    vim.api.nvim_set_option_value('cursorline', false, { win = state.winid })
     vim.api.nvim_set_option_value('number', false, { win = state.winid })
     vim.api.nvim_set_option_value('relativenumber', false, { win = state.winid })
   end
@@ -562,6 +608,44 @@ function UiConnectionPicker.detach(bufnr)
   UiQuery.query_buffers[bufnr] = nil
 
   vim.notify("SSNS: Connection detached from buffer", vim.log.levels.INFO)
+end
+
+---Render database picker using ContentBuilder
+---@param st table State
+---@param server table Server object
+---@return string[] lines
+---@return table[] highlights
+local function render_database_picker(st, server)
+  local cb = ContentBuilder.new()
+
+  cb:blank()
+  cb:spans({
+    { text = " Server: ", style = "label" },
+    { text = server.name, style = "server" },
+  })
+  cb:styled(" ─────────────────────────────────────", "muted")
+  cb:blank()
+
+  for i, db in ipairs(st.data.databases) do
+    local is_selected = i == st.selected_idx
+    local is_current = st.data.current_db and db.db_name == st.data.current_db.db_name
+    local prefix = is_selected and "▶ " or "  "
+
+    local spans = {
+      { text = prefix, style = is_selected and "emphasis" or "text" },
+      { text = db.db_name, style = is_selected and "database" or "text" },
+    }
+
+    if is_current then
+      table.insert(spans, { text = " ●", style = "success" })
+    end
+
+    cb:spans(spans)
+  end
+
+  cb:blank()
+
+  return cb:build_lines(), cb:build_highlights()
 end
 
 ---Show database picker for current server connection
@@ -640,42 +724,7 @@ function UiConnectionPicker.show_database_picker(bufnr)
       initial_idx = initial_idx,
     },
     on_render = function(st)
-      local lines = {}
-      local ns_id = vim.api.nvim_create_namespace("ssns_db_picker")
-
-      table.insert(lines, "")
-      table.insert(lines, string.format(" Server: %s", server.name))
-      table.insert(lines, " ─────────────────────────────────────")
-      table.insert(lines, "")
-
-      for i, db in ipairs(st.data.databases) do
-        local is_current = st.data.current_db and db.db_name == st.data.current_db.db_name
-        local suffix = is_current and " ●" or ""
-        local line = UiFloatInteractive.add_indicator(db.db_name .. suffix, i == st.selected_idx)
-        table.insert(lines, line)
-      end
-
-      table.insert(lines, "")
-
-      -- Apply highlights
-      vim.schedule(function()
-        if vim.api.nvim_buf_is_valid(st.bufnr) then
-          vim.api.nvim_buf_clear_namespace(st.bufnr, ns_id, 0, -1)
-          for line_idx, line in ipairs(lines) do
-            if line:match("─────") or line:match("Server:") then
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "Comment", line_idx - 1, 0, -1)
-            elseif line:match("▶") then
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "SsnsFloatSelected", line_idx - 1, 0, -1)
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "Special", line_idx - 1, 1, 4)
-            end
-            if line:match("●") then
-              vim.api.nvim_buf_add_highlight(st.bufnr, ns_id, "DiagnosticOk", line_idx - 1, #line - 2, -1)
-            end
-          end
-        end
-      end)
-
-      return lines
+      return render_database_picker(st, server)
     end,
     on_select = function(st)
       if st.selected_idx < 1 or st.selected_idx > #st.data.databases then
@@ -704,7 +753,7 @@ function UiConnectionPicker.show_database_picker(bufnr)
     state.selected_idx = initial_idx
     UiFloatInteractive.render(state)
 
-    vim.api.nvim_set_option_value('cursorline', true, { win = state.winid })
+    vim.api.nvim_set_option_value('cursorline', false, { win = state.winid })
     vim.api.nvim_set_option_value('number', false, { win = state.winid })
     vim.api.nvim_set_option_value('relativenumber', false, { win = state.winid })
   end
