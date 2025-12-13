@@ -238,7 +238,7 @@ local function build_search_settings_line()
   local word_state = ui_state.search_whole_word and "On" or "Off"
 
   -- Format: " A-c Case:Off | A-r Regex:On | A-w Word:Off"
-  local line = string.format(" A-c:%s | A-r:%s | A-w:%s", case_state, regex_state, word_state)
+  local line = string.format(" A-c Case:%s | A-r Regex:%s | A-w Word:%s", case_state, regex_state, word_state)
 
   -- Simple highlight - just highlight the whole line as Comment
   -- States will be highlighted based on their value
@@ -985,7 +985,8 @@ function UiHistory.show_history(options)
             {
               name = "search",
               title = "Search",
-              ratio = 0.12,  -- Ratio for 2 lines (search + settings hints)
+              ratio = 0.01,
+              min_height = 2,  -- Ensure search + settings line always visible
               focusable = false,  -- NOT in TAB cycle
               cursorline = false,
               on_render = render_search,
@@ -993,7 +994,7 @@ function UiHistory.show_history(options)
             {
               name = "buffers",
               title = "Buffers",
-              ratio = 0.35,
+              ratio = 0.55,  -- Taller buffers list
               on_render = render_buffers,
               on_focus = function()
                 if multi_panel then
@@ -1007,7 +1008,7 @@ function UiHistory.show_history(options)
             {
               name = "history",
               title = "History",
-              ratio = 0.53,
+              ratio = 0.44,  -- Shorter history list
               on_render = render_history,
               on_focus = function()
                 if multi_panel then

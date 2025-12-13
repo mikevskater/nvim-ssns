@@ -1080,6 +1080,8 @@ end
 ---A node in the layout tree - either a split or a panel
 ---@field split "horizontal"|"vertical"? Split direction (nil = leaf panel)
 ---@field ratio number? Size ratio relative to siblings (default: 1.0)
+---@field min_height number? Minimum height in lines (for vertical splits)
+---@field min_width number? Minimum width in columns (for horizontal splits)
 ---@field children LayoutNode[]? Child nodes for splits
 ---@field name string? Panel name (required for leaf nodes)
 ---@field title string? Panel title
@@ -1265,17 +1267,69 @@ local function calculate_layout_recursive(node, rect, border_pos, results, sibli
       end
     else
       -- Split vertically (children stacked)
-      local available_height = rect.height - (#children - 1)  -- Account for shared borders
-      local current_y = rect.y
+      local shared_borders = #children - 1
+      local available_height = rect.height - shared_borders  -- Account for shared borders
+
+      -- First pass: calculate minimum heights and remaining ratio-based space
+      local total_min_height = 0
+      local ratio_children = {}
+      local fixed_children = {}
 
       for i, child in ipairs(children) do
-        local child_ratio = (child.ratio or 1.0) / total_ratio
-        local child_height = math.floor(available_height * child_ratio)
-
-        -- Last child gets remaining height
-        if i == #children then
-          child_height = rect.y + rect.height - current_y
+        if child.min_height and child.min_height > 0 then
+          -- This child has a minimum height requirement
+          local min_h = child.min_height
+          total_min_height = total_min_height + min_h
+          table.insert(fixed_children, { index = i, child = child, min_height = min_h })
+        else
+          table.insert(ratio_children, { index = i, child = child })
         end
+      end
+
+      -- Calculate heights respecting minimums
+      local remaining_height = available_height - total_min_height
+      local child_heights = {}
+
+      -- Calculate ratio total for non-fixed children
+      local ratio_total = 0
+      for _, rc in ipairs(ratio_children) do
+        ratio_total = ratio_total + (rc.child.ratio or 1.0)
+      end
+
+      -- Assign heights to all children
+      for i, child in ipairs(children) do
+        local height
+        if child.min_height and child.min_height > 0 then
+          -- Use minimum height (or more if space allows based on ratio)
+          local ratio_height = 0
+          if ratio_total > 0 then
+            local child_ratio = (child.ratio or 1.0) / total_ratio
+            ratio_height = math.floor(available_height * child_ratio)
+          end
+          height = math.max(child.min_height, ratio_height)
+        else
+          -- Distribute remaining space by ratio
+          if ratio_total > 0 and remaining_height > 0 then
+            local child_ratio = (child.ratio or 1.0) / ratio_total
+            height = math.floor(remaining_height * child_ratio)
+          else
+            height = math.floor(available_height / #children)
+          end
+        end
+        child_heights[i] = math.max(1, height)  -- Ensure at least 1 line
+      end
+
+      -- Adjust last child to fill remaining space
+      local total_assigned = 0
+      for i = 1, #children - 1 do
+        total_assigned = total_assigned + child_heights[i]
+      end
+      child_heights[#children] = math.max(1, available_height - total_assigned)
+
+      -- Second pass: create child rectangles
+      local current_y = rect.y
+      for i, child in ipairs(children) do
+        local child_height = child_heights[i]
 
         -- Calculate border position for child
         local child_border = {
