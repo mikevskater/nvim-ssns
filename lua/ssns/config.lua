@@ -77,6 +77,7 @@
 ---@field common CommonKeymaps Common keymaps shared across multiple UIs
 ---@field tree TreeKeymaps Tree buffer keymaps
 ---@field query QueryKeymaps Query buffer keymaps
+---@field results ResultsKeymaps Results buffer keymaps
 ---@field history HistoryKeymaps History UI keymaps
 ---@field filter FilterKeymaps Filter UI keymaps
 ---@field param ParamKeymaps Parameter input keymaps
@@ -127,6 +128,12 @@
 ---@field attach_connection string Attach buffer to connection (default: "<Leader>cs")
 ---@field change_connection string Change connection (hierarchical picker) (default: "<Leader>cA")
 ---@field change_database string Change database only (default: "<Leader>cd")
+
+---@class ResultsKeymaps Results buffer specific keymaps
+---@field close string Close results window (default: "q")
+---@field toggle string Toggle results window (default: "<C-r>")
+---@field export_csv string Export results to CSV (default: "e")
+---@field yank_csv string Yank results as CSV to clipboard (default: "y")
 
 ---@class HistoryKeymaps History UI specific keymaps
 ---@field switch_panel string Switch between panels (default: "<Tab>")
@@ -598,6 +605,14 @@ local default_config = {
       attach_connection = "<Leader>cs", -- Attach buffer to connection
       change_connection = "<Leader>cA", -- Change connection (hierarchical picker)
       change_database = "<Leader>cd", -- Change database only
+    },
+
+    -- Results buffer keymaps
+    results = {
+      close = "q",           -- Close results window
+      toggle = "<C-r>",      -- Toggle results window (show/hide)
+      export_csv = "e",      -- Export results to CSV file and open
+      yank_csv = "y",        -- Yank results as CSV to clipboard
     },
 
     -- History UI keymaps

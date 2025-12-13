@@ -13,6 +13,10 @@ UiQuery.query_buffers = {}
 ---@type table<string, number>
 UiQuery.buffer_counter = {}
 
+---Store last query results for export and re-display
+---@type {resultSets: table[]?, sql: string?, execution_time_ms: number?, metadata: table?}?
+UiQuery.last_results = nil
+
 ---Generate a unique buffer name
 ---@param object_name string? The object name (table, view, etc.)
 ---@param server ServerClass? The server
@@ -580,6 +584,14 @@ end
 ---@param sql string The SQL that was executed
 ---@param execution_time_ms number? Execution time in milliseconds
 function UiQuery.display_results(result, sql, execution_time_ms)
+  -- Store results for later export and re-display
+  UiQuery.last_results = {
+    resultSets = result.resultSets,
+    sql = sql,
+    execution_time_ms = execution_time_ms,
+    metadata = result.metadata,
+  }
+
   -- Try to find existing results buffer
   local result_buf = nil
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
@@ -627,13 +639,8 @@ function UiQuery.display_results(result, sql, execution_time_ms)
     vim.api.nvim_set_current_win(result_win)
   end
 
-  -- Setup close keymap and toggle keymap
-  local common = KeymapManager.get_group("common")
-  local query_km = KeymapManager.get_group("query")
-  vim.api.nvim_buf_set_keymap(result_buf, 'n', common.close or 'q', ':close<CR>', { noremap = true, silent = true })
-  vim.api.nvim_buf_set_keymap(result_buf, 'n', query_km.toggle_results or '<C-r>',
-    "<Cmd>lua require('ssns.ui.core.query').toggle_results()<CR>",
-    { noremap = true, silent = true, desc = "Toggle results window" })
+  -- Setup keymaps for results buffer
+  UiQuery.setup_results_keymaps(result_buf)
 end
 
 ---Toggle the results window (show if hidden, hide if visible)
@@ -650,10 +657,28 @@ function UiQuery.toggle_results()
     end
   end
 
-  -- If no results buffer exists, nothing to toggle
+  -- If no results buffer exists, try to recreate from stored results
   if not result_buf then
-    vim.notify("SSNS: No results to show", vim.log.levels.INFO)
-    return
+    if not UiQuery.last_results or not UiQuery.last_results.resultSets then
+      vim.notify("SSNS: No results to show", vim.log.levels.INFO)
+      return
+    end
+
+    -- Recreate the results buffer from stored data
+    result_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(result_buf, "SSNS Results")
+    vim.api.nvim_buf_set_option(result_buf, 'buftype', 'nofile')
+
+    -- Re-format and populate with stored results
+    local lines = UiQuery.format_results(
+      UiQuery.last_results.resultSets,
+      UiQuery.last_results.sql,
+      UiQuery.last_results.execution_time_ms,
+      UiQuery.last_results.metadata
+    )
+    vim.api.nvim_buf_set_option(result_buf, 'modifiable', true)
+    vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, lines)
+    vim.api.nvim_buf_set_option(result_buf, 'modifiable', false)
   end
 
   -- Check if buffer is visible in a window
@@ -675,13 +700,8 @@ function UiQuery.toggle_results()
     local new_win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_height(new_win, 10)
 
-    -- Re-setup keymaps on the buffer (in case they were lost)
-    local common = KeymapManager.get_group("common")
-    local query_km = KeymapManager.get_group("query")
-    vim.api.nvim_buf_set_keymap(result_buf, 'n', common.close or 'q', ':close<CR>', { noremap = true, silent = true })
-    vim.api.nvim_buf_set_keymap(result_buf, 'n', query_km.toggle_results or '<C-r>',
-      "<Cmd>lua require('ssns.ui.core.query').toggle_results()<CR>",
-      { noremap = true, silent = true, desc = "Toggle results window" })
+    -- Setup keymaps for results buffer
+    UiQuery.setup_results_keymaps(result_buf)
   end
 end
 
