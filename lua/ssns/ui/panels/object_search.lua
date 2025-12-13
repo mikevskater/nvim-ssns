@@ -401,6 +401,8 @@ local function load_objects_for_databases(callback)
 
     -- Bulk load objects for this database
     vim.schedule(function()
+      local definitions_map = {}
+
       -- Load all object types
       local ok, err = pcall(function()
         -- First, ensure schemas are loaded (required for schema-based DBs like SQL Server)
@@ -415,6 +417,12 @@ local function load_objects_for_databases(callback)
         if db.load_all_synonyms_bulk then
           db:load_all_synonyms_bulk()
         end
+
+        -- Bulk load definitions for views, procedures, functions
+        -- (Tables require complex CREATE TABLE generation, so they're loaded on-demand)
+        if db.load_all_definitions_bulk then
+          definitions_map = db:load_all_definitions_bulk()
+        end
       end)
 
       if not ok then
@@ -424,6 +432,16 @@ local function load_objects_for_databases(callback)
       -- Flatten objects from this database
       local db_objects = flatten_database_objects(db, server)
       for _, obj in ipairs(db_objects) do
+        -- Apply bulk-loaded definition if available
+        if obj.object_type ~= "table" and obj.object_type ~= "schema" then
+          local def_key = string.format("%s.%s.%s", obj.schema_name or "dbo", obj.object_type, obj.name)
+          if definitions_map[def_key] then
+            obj.definition = definitions_map[def_key]
+            obj.definition_loaded = true
+            -- Also cache it
+            ui_state.definitions_cache[obj.unique_id] = definitions_map[def_key]
+          end
+        end
         table.insert(ui_state.loaded_objects, obj)
       end
 

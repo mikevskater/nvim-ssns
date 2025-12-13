@@ -563,6 +563,65 @@ function SqlServerAdapter:parse_definition(result)
   return nil
 end
 
+---Get query to retrieve ALL definitions for views, procedures, functions in a database
+---Uses sys.sql_modules for efficient bulk loading (does NOT include tables - those need CREATE TABLE scripts)
+---@param database_name string
+---@param schema_name string? Optional schema filter
+---@return string query
+function SqlServerAdapter:get_all_definitions_bulk_query(database_name, schema_name)
+  local schema_filter = schema_name and string.format("AND s.name = '%s'", schema_name) or ""
+
+  return string.format([[
+USE [%s];
+SET NOCOUNT ON;
+
+SELECT
+    s.name AS schema_name,
+    o.name AS object_name,
+    CASE o.[type]
+        WHEN 'V' THEN 'view'
+        WHEN 'P' THEN 'procedure'
+        WHEN 'FN' THEN 'function'
+        WHEN 'IF' THEN 'function'
+        WHEN 'TF' THEN 'function'
+        WHEN 'TR' THEN 'trigger'
+        ELSE o.[type]
+    END AS object_type,
+    m.[definition] AS definition
+FROM sys.sql_modules m WITH (NOWAIT)
+JOIN sys.objects o WITH (NOWAIT) ON m.[object_id] = o.[object_id]
+JOIN sys.schemas s WITH (NOWAIT) ON o.[schema_id] = s.[schema_id]
+WHERE o.[type] IN ('V', 'P', 'FN', 'IF', 'TF')
+    AND o.is_ms_shipped = 0
+    %s
+ORDER BY s.name, o.name;
+]], database_name, schema_filter)
+end
+
+---Parse bulk definitions result
+---@param result table Node.js result object
+---@return table<string, string> definitions Map of "schema.object_type.name" -> definition
+function SqlServerAdapter:parse_definitions_bulk(result)
+  local definitions = {}
+
+  if result and result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      if row.schema_name and row.object_name and row.definition then
+        local key = string.format("%s.%s.%s", row.schema_name, row.object_type, row.object_name)
+        local definition = row.definition
+        -- Normalize line endings
+        if definition then
+          definition = definition:gsub('\r', '')
+        end
+        definitions[key] = definition
+      end
+    end
+  end
+
+  return definitions
+end
+
 -- ============================================================================
 -- Result Parsing Methods
 -- ============================================================================

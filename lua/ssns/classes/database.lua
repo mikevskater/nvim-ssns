@@ -473,6 +473,28 @@ function DbClass:load_all_synonyms_bulk()
   return true
 end
 
+---Bulk load all definitions for views, procedures, functions in this database
+---@return table<string, string> definitions Map of "schema.object_type.name" -> definition
+function DbClass:load_all_definitions_bulk()
+  local adapter = self:get_adapter()
+
+  -- Check if adapter supports bulk definition loading
+  if not adapter.get_all_definitions_bulk_query then
+    return {}
+  end
+
+  -- Execute bulk query
+  local query = adapter:get_all_definitions_bulk_query(self.db_name, nil)
+  local results = adapter:execute(self:_get_db_connection_config(), query)
+
+  -- Parse results
+  if adapter.parse_definitions_bulk then
+    return adapter:parse_definitions_bulk(results)
+  end
+
+  return {}
+end
+
 ---Get all tables (server-type aware - aggregates from schemas if needed)
 ---Uses bulk loading when tables haven't been loaded yet
 ---Supports lazy loading based on config.completion.eager_load setting
