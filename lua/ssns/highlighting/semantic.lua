@@ -195,7 +195,9 @@ end
 ---@param bufnr number Buffer number
 ---@return table? connection Connection with {server, database, connection_config}
 function SemanticHighlighter._get_connection(bufnr)
-  -- Try to get from UiQuery.query_buffers
+  local Cache = require('ssns.cache')
+
+  -- Try to get from UiQuery.query_buffers first
   local success, UiQuery = pcall(require, 'ssns.ui.query')
   if success and UiQuery.query_buffers[bufnr] then
     local buffer_info = UiQuery.query_buffers[bufnr]
@@ -214,8 +216,35 @@ function SemanticHighlighter._get_connection(bufnr)
     end
   end
 
+  -- Fallback: Try to get from ssns_db_key buffer variable (like completion source does)
+  local db_key = vim.b[bufnr].ssns_db_key
+  if db_key then
+    -- Parse db_key format: "server_name:database_name"
+    local server_name, db_name = db_key:match("^([^:]+):(.+)$")
+    if server_name and db_name then
+      local server = Cache.find_server(server_name)
+      if server then
+        local database = server:find_database(db_name)
+        return {
+          server = server,
+          database = database,
+          connection_config = server.connection_config,
+        }
+      end
+    elseif db_key and not db_key:match(":") then
+      -- Server-only key (no database)
+      local server = Cache.find_server(db_key)
+      if server then
+        return {
+          server = server,
+          database = nil,
+          connection_config = server.connection_config,
+        }
+      end
+    end
+  end
+
   -- Fallback to active database from cache
-  local Cache = require('ssns.cache')
   local active_db = Cache.get_active_database()
   if active_db then
     local server = active_db:get_server()
