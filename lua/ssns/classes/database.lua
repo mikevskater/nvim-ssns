@@ -473,26 +473,37 @@ function DbClass:load_all_synonyms_bulk()
   return true
 end
 
----Bulk load all definitions for views, procedures, functions in this database
+---Bulk load all definitions for views, procedures, functions, and tables in this database
 ---@return table<string, string> definitions Map of "schema.object_type.name" -> definition
 function DbClass:load_all_definitions_bulk()
   local adapter = self:get_adapter()
+  local definitions = {}
 
-  -- Check if adapter supports bulk definition loading
-  if not adapter.get_all_definitions_bulk_query then
-    return {}
+  -- Load views, procedures, functions definitions (from sys.sql_modules)
+  if adapter.get_all_definitions_bulk_query then
+    local query = adapter:get_all_definitions_bulk_query(self.db_name, nil)
+    local results = adapter:execute(self:_get_db_connection_config(), query)
+    if adapter.parse_definitions_bulk then
+      local module_defs = adapter:parse_definitions_bulk(results)
+      for k, v in pairs(module_defs) do
+        definitions[k] = v
+      end
+    end
   end
 
-  -- Execute bulk query
-  local query = adapter:get_all_definitions_bulk_query(self.db_name, nil)
-  local results = adapter:execute(self:_get_db_connection_config(), query)
-
-  -- Parse results
-  if adapter.parse_definitions_bulk then
-    return adapter:parse_definitions_bulk(results)
+  -- Load table definitions (generated CREATE TABLE scripts)
+  if adapter.get_all_table_definitions_bulk_query then
+    local query = adapter:get_all_table_definitions_bulk_query(self.db_name, nil)
+    local results = adapter:execute(self:_get_db_connection_config(), query)
+    if adapter.parse_table_definitions_bulk then
+      local table_defs = adapter:parse_table_definitions_bulk(results)
+      for k, v in pairs(table_defs) do
+        definitions[k] = v
+      end
+    end
   end
 
-  return {}
+  return definitions
 end
 
 ---Get all tables (server-type aware - aggregates from schemas if needed)

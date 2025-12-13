@@ -622,6 +622,94 @@ function SqlServerAdapter:parse_definitions_bulk(result)
   return definitions
 end
 
+---Get query to retrieve CREATE TABLE scripts for ALL tables in a database
+---This is a set-based version of get_table_definition_query that processes all tables at once
+---@param database_name string
+---@param schema_name string? Optional schema filter
+---@return string query
+function SqlServerAdapter:get_all_table_definitions_bulk_query(database_name, schema_name)
+  local schema_filter = schema_name and string.format("AND s.name = '%s'", schema_name) or ""
+
+  return string.format([[
+USE [%s];
+SET NOCOUNT ON;
+
+-- Build CREATE TABLE scripts for all user tables
+SELECT
+    s.name AS schema_name,
+    t.name AS table_name,
+    'table' AS object_type,
+    N'CREATE TABLE [' + s.name + N'].[' + t.name + N']' + CHAR(10) + N'(' + CHAR(10)
+    + STUFF((
+        SELECT CHAR(9) + N', [' + c.name + N'] '
+            + CASE WHEN c.is_computed = 1 THEN N'AS ' + ISNULL(cc.[definition], N'')
+                ELSE UPPER(tp.name)
+                    + CASE
+                        WHEN tp.name IN ('varchar', 'char', 'varbinary', 'binary', 'text') THEN N'(' + CASE WHEN c.max_length = -1 THEN N'MAX' ELSE CAST(c.max_length AS NVARCHAR(5)) END + N')'
+                        WHEN tp.name IN ('nvarchar', 'nchar', 'ntext') THEN N'(' + CASE WHEN c.max_length = -1 THEN N'MAX' ELSE CAST(c.max_length / 2 AS NVARCHAR(5)) END + N')'
+                        WHEN tp.name IN ('datetime2', 'time2', 'datetimeoffset') THEN N'(' + CAST(c.scale AS NVARCHAR(5)) + N')'
+                        WHEN tp.name IN ('decimal', 'numeric') THEN N'(' + CAST(c.[precision] AS NVARCHAR(5)) + N',' + CAST(c.scale AS NVARCHAR(5)) + N')'
+                        ELSE N''
+                    END
+                    + CASE WHEN c.collation_name IS NOT NULL AND c.collation_name <> DATABASEPROPERTYEX(DB_NAME(), 'Collation') THEN N' COLLATE ' + c.collation_name ELSE N'' END
+                    + CASE WHEN c.is_nullable = 1 THEN N' NULL' ELSE N' NOT NULL' END
+                    + CASE WHEN dc.[definition] IS NOT NULL THEN N' DEFAULT' + dc.[definition] ELSE N'' END
+                    + CASE WHEN ic.is_identity = 1 THEN N' IDENTITY(' + CAST(ISNULL(ic.seed_value, 0) AS NVARCHAR(10)) + N',' + CAST(ISNULL(ic.increment_value, 1) AS NVARCHAR(10)) + N')' ELSE N'' END
+            END + CHAR(10)
+        FROM sys.columns c WITH (NOWAIT)
+        JOIN sys.types tp WITH (NOWAIT) ON c.user_type_id = tp.user_type_id
+        LEFT JOIN sys.computed_columns cc WITH (NOWAIT) ON c.[object_id] = cc.[object_id] AND c.column_id = cc.column_id
+        LEFT JOIN sys.default_constraints dc WITH (NOWAIT) ON c.default_object_id != 0 AND c.[object_id] = dc.parent_object_id AND c.column_id = dc.parent_column_id
+        LEFT JOIN sys.identity_columns ic WITH (NOWAIT) ON c.is_identity = 1 AND c.[object_id] = ic.[object_id] AND c.column_id = ic.column_id
+        WHERE c.[object_id] = t.[object_id]
+        ORDER BY c.column_id
+        FOR XML PATH(''), TYPE
+    ).value('.', 'NVARCHAR(MAX)'), 1, 2, CHAR(9) + N' ')
+    + ISNULL((
+        SELECT CHAR(9) + N', CONSTRAINT [' + k.name + N'] PRIMARY KEY (' +
+            STUFF((
+                SELECT N', [' + col.name + N'] ' + CASE WHEN ixc.is_descending_key = 1 THEN N'DESC' ELSE N'ASC' END
+                FROM sys.index_columns ixc WITH (NOWAIT)
+                JOIN sys.columns col WITH (NOWAIT) ON col.[object_id] = ixc.[object_id] AND col.column_id = ixc.column_id
+                WHERE ixc.is_included_column = 0 AND ixc.[object_id] = k.parent_object_id AND ixc.index_id = k.unique_index_id
+                FOR XML PATH(N''), TYPE
+            ).value('.', 'NVARCHAR(MAX)'), 1, 2, N'') + N')' + CHAR(10)
+        FROM sys.key_constraints k WITH (NOWAIT)
+        WHERE k.parent_object_id = t.[object_id] AND k.[type] = 'PK'
+    ), N'')
+    + N')' AS definition
+FROM sys.tables t WITH (NOWAIT)
+JOIN sys.schemas s WITH (NOWAIT) ON t.[schema_id] = s.[schema_id]
+WHERE t.is_ms_shipped = 0
+    %s
+ORDER BY s.name, t.name;
+]], database_name, schema_filter)
+end
+
+---Parse bulk table definitions result
+---@param result table Node.js result object
+---@return table<string, string> definitions Map of "schema.table.name" -> definition
+function SqlServerAdapter:parse_table_definitions_bulk(result)
+  local definitions = {}
+
+  if result and result.success and result.resultSets and #result.resultSets > 0 then
+    local rows = result.resultSets[1].rows or {}
+    for _, row in ipairs(rows) do
+      if row.schema_name and row.table_name and row.definition then
+        local key = string.format("%s.table.%s", row.schema_name, row.table_name)
+        local definition = row.definition
+        -- Normalize line endings
+        if definition then
+          definition = definition:gsub('\r', '')
+        end
+        definitions[key] = definition
+      end
+    end
+  end
+
+  return definitions
+end
+
 -- ============================================================================
 -- Result Parsing Methods
 -- ============================================================================

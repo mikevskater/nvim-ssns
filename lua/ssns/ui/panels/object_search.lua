@@ -418,8 +418,7 @@ local function load_objects_for_databases(callback)
           db:load_all_synonyms_bulk()
         end
 
-        -- Bulk load definitions for views, procedures, functions
-        -- (Tables require complex CREATE TABLE generation, so they're loaded on-demand)
+        -- Bulk load definitions for all object types (tables, views, procedures, functions)
         if db.load_all_definitions_bulk then
           definitions_map = db:load_all_definitions_bulk()
         end
@@ -432,8 +431,9 @@ local function load_objects_for_databases(callback)
       -- Flatten objects from this database
       local db_objects = flatten_database_objects(db, server)
       for _, obj in ipairs(db_objects) do
-        -- Apply bulk-loaded definition if available
-        if obj.object_type ~= "table" and obj.object_type ~= "schema" then
+        -- Apply bulk-loaded definition if available (tables, views, procedures, functions)
+        -- Skip schemas as they don't have definitions
+        if obj.object_type ~= "schema" then
           local def_key = string.format("%s.%s.%s", obj.schema_name or "dbo", obj.object_type, obj.name)
           if definitions_map[def_key] then
             obj.definition = definitions_map[def_key]
