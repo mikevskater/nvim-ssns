@@ -125,15 +125,15 @@
 ---@field view_metadata string View object metadata (default: "M")
 ---@field new_query string New query buffer (default: "<C-n>")
 ---@field show_history string Show query history (default: "<Leader>@")
----@field attach_connection string Attach buffer to connection (default: "<Leader>cs")
----@field change_connection string Change connection (hierarchical picker) (default: "<Leader>cA")
----@field change_database string Change database only (default: "<Leader>cd")
+---@field attach_connection string Attach buffer to connection (default: "<A-s>")
+---@field change_connection string Change connection (hierarchical picker) (default: "<A-S>")
+---@field change_database string Change database only (default: "<A-d>")
 
 ---@class ResultsKeymaps Results buffer specific keymaps
 ---@field close string Close results window (default: "q")
 ---@field toggle string Toggle results window (default: "<C-r>")
----@field export_csv string Export results to CSV (default: "e")
----@field yank_csv string Yank results as CSV to clipboard (default: "y")
+---@field export_csv string Export results to CSV (default: "<A-e>")
+---@field yank_csv string Yank results as CSV to clipboard (default: "<A-y>")
 
 ---@class HistoryKeymaps History UI specific keymaps
 ---@field switch_panel string Switch between panels (default: "<Tab>")
@@ -602,17 +602,17 @@ local default_config = {
       view_metadata = "M",   -- View object metadata
       new_query = "<C-n>",   -- New query buffer
       show_history = "<Leader>@", -- Show query history
-      attach_connection = "<Leader>cs", -- Attach buffer to connection
-      change_connection = "<Leader>cA", -- Change connection (hierarchical picker)
-      change_database = "<Leader>cd", -- Change database only
+      attach_connection = "<A-s>", -- Attach buffer to connection (server picker)
+      change_connection = "<A-S>", -- Change connection (hierarchical server then database)
+      change_database = "<A-d>", -- Change database only
     },
 
     -- Results buffer keymaps
     results = {
       close = "q",           -- Close results window
       toggle = "<C-r>",      -- Toggle results window (show/hide)
-      export_csv = "e",      -- Export results to CSV file and open
-      yank_csv = "y",        -- Yank results as CSV to clipboard
+      export_csv = "<A-e>",  -- Export results to CSV file and open
+      yank_csv = "<A-y>",    -- Yank results as CSV to clipboard
     },
 
     -- History UI keymaps

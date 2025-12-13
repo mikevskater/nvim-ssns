@@ -243,19 +243,19 @@ function UiQuery.setup_query_keymaps(bufnr)
     end, desc = "Toggle results window" },
 
     -- Attach connection (flat list)
-    { mode = "n", lhs = km.attach_connection or "<Leader>cs", rhs = function()
+    { mode = "n", lhs = km.attach_connection or "<A-s>", rhs = function()
       local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
       ConnectionPicker.show(bufnr)
     end, desc = "Attach buffer to connection" },
 
     -- Change connection (hierarchical picker)
-    { mode = "n", lhs = km.change_connection or "<Leader>cA", rhs = function()
+    { mode = "n", lhs = km.change_connection or "<A-S>", rhs = function()
       local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
       ConnectionPicker.show_hierarchical(bufnr)
     end, desc = "Change connection (server then database)" },
 
     -- Change database only
-    { mode = "n", lhs = km.change_database or "<Leader>cd", rhs = function()
+    { mode = "n", lhs = km.change_database or "<A-d>", rhs = function()
       local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
       ConnectionPicker.show_database_picker(bufnr)
     end, desc = "Change database" },
@@ -1292,12 +1292,12 @@ function UiQuery.setup_results_keymaps(result_buf)
     end, desc = "Toggle results window" },
 
     -- Export to CSV
-    { mode = "n", lhs = km.export_csv or "e", rhs = function()
+    { mode = "n", lhs = km.export_csv or "<A-e>", rhs = function()
       UiQuery.export_results_to_csv()
     end, desc = "Export results to CSV" },
 
     -- Yank as CSV to clipboard
-    { mode = "n", lhs = km.yank_csv or "y", rhs = function()
+    { mode = "n", lhs = km.yank_csv or "<A-y>", rhs = function()
       UiQuery.yank_results_as_csv()
     end, desc = "Yank results as CSV" },
   }

@@ -130,7 +130,7 @@ function Ssns.setup(user_config)
         -- Attach connection keymap
         {
           mode = "n",
-          lhs = query_keymaps.attach_connection or "<Leader>cs",
+          lhs = query_keymaps.attach_connection or "<A-s>",
           rhs = function()
             local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
             ConnectionPicker.show(bufnr)
@@ -140,7 +140,7 @@ function Ssns.setup(user_config)
         -- Change connection keymap (hierarchical picker)
         {
           mode = "n",
-          lhs = query_keymaps.change_connection or "<Leader>cA",
+          lhs = query_keymaps.change_connection or "<A-S>",
           rhs = function()
             local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
             ConnectionPicker.show_hierarchical(bufnr)
