@@ -64,6 +64,7 @@
 ---@field default_limit number Default LIMIT for SELECT queries (0 = no limit)
 ---@field timeout number Query timeout in milliseconds (0 = no timeout)
 ---@field auto_execute_on_open boolean Auto-execute query when opening action (default: false)
+---@field export_directory string? Directory for CSV exports (nil = system temp, "" = prompt)
 
 ---@class QueryHistoryConfig
 ---@field enabled boolean Enable query history tracking (default: true)
@@ -538,6 +539,7 @@ local default_config = {
     default_limit = 100,  -- Default LIMIT for SELECT queries (0 = no limit)
     timeout = 30000,  -- Query timeout in milliseconds (30 seconds, 0 = no timeout)
     auto_execute_on_open = false,  -- Auto-execute query when opening action
+    export_directory = nil,  -- Directory for CSV exports (nil = system temp, "" = prompt for location)
   },
 
   query_history = {

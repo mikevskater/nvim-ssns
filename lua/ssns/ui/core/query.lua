@@ -1445,8 +1445,20 @@ local function open_with_default_app(filepath)
   })
 end
 
+---Get the system temp directory
+---@return string temp_dir The temp directory path
+local function get_temp_dir()
+  -- Try common environment variables
+  local temp = os.getenv("TEMP")      -- Windows
+    or os.getenv("TMP")               -- Windows alternative
+    or os.getenv("TMPDIR")            -- macOS
+    or "/tmp"                         -- Linux/Unix fallback
+
+  return temp
+end
+
 ---Export results to CSV file and open in default application
----@param filepath string? Optional file path (will prompt if not provided)
+---@param filepath string? Optional file path (uses config export_directory if not provided)
 function UiQuery.export_results_to_csv(filepath)
   if not UiQuery.last_results or not UiQuery.last_results.resultSets then
     vim.notify("SSNS: No results to export", vim.log.levels.WARN)
@@ -1459,25 +1471,49 @@ function UiQuery.export_results_to_csv(filepath)
     return
   end
 
-  -- Generate default filename with timestamp
-  local default_name = os.date("ssns_results_%Y%m%d_%H%M%S.csv")
+  -- Generate filename with timestamp
+  local filename = os.date("ssns_results_%Y%m%d_%H%M%S.csv")
 
   if not filepath then
-    -- Prompt for filename
-    filepath = vim.fn.input({
-      prompt = "Export CSV to: ",
-      default = default_name,
-      completion = "file",
-    })
+    local Config = require('ssns.config')
+    local query_config = Config.get_query()
+    local export_dir = query_config.export_directory
 
-    if filepath == "" then
-      vim.notify("SSNS: Export cancelled", vim.log.levels.INFO)
-      return
+    if export_dir == "" then
+      -- Empty string means prompt for location
+      filepath = vim.fn.input({
+        prompt = "Export CSV to: ",
+        default = filename,
+        completion = "file",
+      })
+
+      if filepath == "" then
+        vim.notify("SSNS: Export cancelled", vim.log.levels.INFO)
+        return
+      end
+
+      filepath = vim.fn.expand(filepath)
+    else
+      -- Use configured directory or fall back to temp
+      local dir = export_dir or get_temp_dir()
+      dir = vim.fn.expand(dir)  -- Handle ~ and env vars
+
+      -- Ensure directory exists
+      if vim.fn.isdirectory(dir) == 0 then
+        vim.fn.mkdir(dir, "p")
+      end
+
+      filepath = dir .. "/" .. filename
+
+      -- Normalize path separators for Windows
+      if vim.fn.has("win32") == 1 or vim.fn.has("win64") == 1 then
+        filepath = filepath:gsub("/", "\\")
+      end
     end
+  else
+    -- Expand provided path (handle ~, etc.)
+    filepath = vim.fn.expand(filepath)
   end
-
-  -- Expand path (handle ~, etc.)
-  filepath = vim.fn.expand(filepath)
 
   -- Write to file
   local file, err = io.open(filepath, "w")
