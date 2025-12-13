@@ -1270,4 +1270,268 @@ function UiQuery.new_query_from_buffer(source_bufnr)
   UiQuery.create_query_buffer(server, database, "", "Query")
 end
 
+-- ============================================================================
+-- Results Buffer Keymaps and Export
+-- ============================================================================
+
+---Setup keymaps for the results buffer
+---@param result_buf number The results buffer number
+function UiQuery.setup_results_keymaps(result_buf)
+  local km = KeymapManager.get_group("results")
+  local query_km = KeymapManager.get_group("query")
+
+  local keymaps = {
+    -- Close results window
+    { mode = "n", lhs = km.close or "q", rhs = function()
+      vim.cmd('close')
+    end, desc = "Close results window" },
+
+    -- Toggle results window
+    { mode = "n", lhs = km.toggle or query_km.toggle_results or "<C-r>", rhs = function()
+      UiQuery.toggle_results()
+    end, desc = "Toggle results window" },
+
+    -- Export to CSV
+    { mode = "n", lhs = km.export_csv or "e", rhs = function()
+      UiQuery.export_results_to_csv()
+    end, desc = "Export results to CSV" },
+
+    -- Yank as CSV to clipboard
+    { mode = "n", lhs = km.yank_csv or "y", rhs = function()
+      UiQuery.yank_results_as_csv()
+    end, desc = "Yank results as CSV" },
+  }
+
+  KeymapManager.set_multiple(result_buf, keymaps, true)
+  KeymapManager.mark_group_active(result_buf, "results")
+end
+
+---Escape a value for CSV format
+---@param value any The value to escape
+---@return string escaped The escaped CSV value
+local function escape_csv_value(value)
+  if value == nil or value == vim.NIL then
+    return ""
+  end
+
+  local str = tostring(value)
+
+  -- Check if quoting is needed (contains comma, quote, newline, or leading/trailing whitespace)
+  if str:match('[,"\n\r]') or str:match("^%s") or str:match("%s$") then
+    -- Escape double quotes by doubling them
+    str = str:gsub('"', '""')
+    -- Wrap in quotes
+    str = '"' .. str .. '"'
+  end
+
+  return str
+end
+
+---Convert result sets to CSV format
+---@param resultSets table[] Array of result sets
+---@param result_set_index number? Which result set to export (nil = first, 0 = all)
+---@return string csv The CSV content
+function UiQuery.results_to_csv(resultSets, result_set_index)
+  if not resultSets or #resultSets == 0 then
+    return ""
+  end
+
+  local csv_lines = {}
+
+  -- Determine which result sets to export
+  local sets_to_export = {}
+  if result_set_index == 0 then
+    -- Export all result sets
+    sets_to_export = resultSets
+  else
+    -- Export specific result set (default to first)
+    local idx = result_set_index or 1
+    if resultSets[idx] then
+      sets_to_export = { resultSets[idx] }
+    end
+  end
+
+  for set_idx, resultSet in ipairs(sets_to_export) do
+    local rows = resultSet.rows or {}
+    local columns_metadata = resultSet.columns
+
+    -- Get column names in order
+    local columns = {}
+    local has_columns = false
+
+    if columns_metadata and type(columns_metadata) == "table" then
+      for col_name, col_info in pairs(columns_metadata) do
+        if col_name ~= vim.NIL then
+          table.insert(columns, { name = col_name, index = col_info.index or 0 })
+          has_columns = true
+        end
+      end
+
+      if has_columns then
+        table.sort(columns, function(a, b) return a.index < b.index end)
+        local col_names = {}
+        for _, col in ipairs(columns) do
+          table.insert(col_names, col.name)
+        end
+        columns = col_names
+      end
+    end
+
+    if not has_columns and #rows > 0 then
+      -- Fallback: get column names from first row
+      for key, _ in pairs(rows[1]) do
+        table.insert(columns, key)
+      end
+      table.sort(columns)
+      has_columns = true
+    end
+
+    if not has_columns then
+      goto continue
+    end
+
+    -- Add separator comment for multiple result sets
+    if #sets_to_export > 1 and set_idx > 1 then
+      table.insert(csv_lines, "")
+      table.insert(csv_lines, string.format("# Result Set %d", set_idx))
+    end
+
+    -- Add header row
+    local header_parts = {}
+    for _, col in ipairs(columns) do
+      table.insert(header_parts, escape_csv_value(col))
+    end
+    table.insert(csv_lines, table.concat(header_parts, ","))
+
+    -- Add data rows
+    for _, row in ipairs(rows) do
+      local row_parts = {}
+      for _, col in ipairs(columns) do
+        table.insert(row_parts, escape_csv_value(row[col]))
+      end
+      table.insert(csv_lines, table.concat(row_parts, ","))
+    end
+
+    ::continue::
+  end
+
+  return table.concat(csv_lines, "\n")
+end
+
+---Open a file with the system default application
+---@param filepath string The file path to open
+local function open_with_default_app(filepath)
+  local cmd
+  if vim.fn.has("win32") == 1 or vim.fn.has("win64") == 1 then
+    -- Windows: use start command
+    cmd = { "cmd", "/c", "start", "", filepath }
+  elseif vim.fn.has("mac") == 1 then
+    -- macOS: use open command
+    cmd = { "open", filepath }
+  else
+    -- Linux/Unix: use xdg-open
+    cmd = { "xdg-open", filepath }
+  end
+
+  vim.fn.jobstart(cmd, {
+    detach = true,
+    on_exit = function(_, exit_code)
+      if exit_code ~= 0 then
+        vim.schedule(function()
+          vim.notify(string.format("SSNS: Failed to open %s", filepath), vim.log.levels.WARN)
+        end)
+      end
+    end,
+  })
+end
+
+---Export results to CSV file and open in default application
+---@param filepath string? Optional file path (will prompt if not provided)
+function UiQuery.export_results_to_csv(filepath)
+  if not UiQuery.last_results or not UiQuery.last_results.resultSets then
+    vim.notify("SSNS: No results to export", vim.log.levels.WARN)
+    return
+  end
+
+  local csv_content = UiQuery.results_to_csv(UiQuery.last_results.resultSets, 0)
+  if csv_content == "" then
+    vim.notify("SSNS: No data to export", vim.log.levels.WARN)
+    return
+  end
+
+  -- Generate default filename with timestamp
+  local default_name = os.date("ssns_results_%Y%m%d_%H%M%S.csv")
+
+  if not filepath then
+    -- Prompt for filename
+    filepath = vim.fn.input({
+      prompt = "Export CSV to: ",
+      default = default_name,
+      completion = "file",
+    })
+
+    if filepath == "" then
+      vim.notify("SSNS: Export cancelled", vim.log.levels.INFO)
+      return
+    end
+  end
+
+  -- Expand path (handle ~, etc.)
+  filepath = vim.fn.expand(filepath)
+
+  -- Write to file
+  local file, err = io.open(filepath, "w")
+  if not file then
+    vim.notify(string.format("SSNS: Failed to write file: %s", err or "unknown error"), vim.log.levels.ERROR)
+    return
+  end
+
+  file:write(csv_content)
+  file:close()
+
+  vim.notify(string.format("SSNS: Results exported to %s", filepath), vim.log.levels.INFO)
+
+  -- Open in default application
+  open_with_default_app(filepath)
+end
+
+---Yank results as CSV to clipboard
+function UiQuery.yank_results_as_csv()
+  if not UiQuery.last_results or not UiQuery.last_results.resultSets then
+    vim.notify("SSNS: No results to copy", vim.log.levels.WARN)
+    return
+  end
+
+  local csv_content = UiQuery.results_to_csv(UiQuery.last_results.resultSets, 0)
+  if csv_content == "" then
+    vim.notify("SSNS: No data to copy", vim.log.levels.WARN)
+    return
+  end
+
+  -- Copy to clipboard
+  vim.fn.setreg("+", csv_content)
+  vim.fn.setreg("*", csv_content)
+
+  -- Count rows for feedback
+  local row_count = 0
+  for _, resultSet in ipairs(UiQuery.last_results.resultSets) do
+    if resultSet.rows then
+      row_count = row_count + #resultSet.rows
+    end
+  end
+
+  vim.notify(string.format("SSNS: Copied %d rows as CSV to clipboard", row_count), vim.log.levels.INFO)
+end
+
+---Get the last results (for external access)
+---@return table? last_results The stored results or nil
+function UiQuery.get_last_results()
+  return UiQuery.last_results
+end
+
+---Clear stored results
+function UiQuery.clear_last_results()
+  UiQuery.last_results = nil
+end
+
 return UiQuery

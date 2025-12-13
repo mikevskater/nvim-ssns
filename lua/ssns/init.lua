@@ -332,6 +332,25 @@ function Ssns._register_commands()
     complete = "file",
   })
 
+  -- :SSNSExportResults - Export query results to CSV
+  vim.api.nvim_create_user_command("SSNSExportResults", function(opts)
+    local Query = require('ssns.ui.core.query')
+    Query.export_results_to_csv(opts.args ~= "" and opts.args or nil)
+  end, {
+    nargs = "?",
+    desc = "Export query results to CSV file and open in default app",
+    complete = "file",
+  })
+
+  -- :SSNSYankResultsCSV - Yank query results as CSV to clipboard
+  vim.api.nvim_create_user_command("SSNSYankResultsCSV", function()
+    local Query = require('ssns.ui.core.query')
+    Query.yank_results_as_csv()
+  end, {
+    nargs = 0,
+    desc = "Yank query results as CSV to clipboard",
+  })
+
   -- :SSNSCompletionStats - Show completion performance statistics
   vim.api.nvim_create_user_command("SSNSCompletionStats", function()
     Ssns.show_completion_stats()
