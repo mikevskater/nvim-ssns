@@ -203,13 +203,20 @@ end
 ---@param object_type string
 ---@param database DbClass
 ---@param server ServerClass
+---@param parent_schema SchemaClass? Optional parent schema for non-schema objects
 ---@return SearchableObject
-local function create_searchable(obj, object_type, database, server)
+local function create_searchable(obj, object_type, database, server, parent_schema)
+  -- For schema objects, schema_name should be nil (they don't belong to another schema)
+  -- For other objects, use the parent schema name
   local schema_name = nil
-  if obj.schema_name then
-    schema_name = obj.schema_name
-  elseif obj.parent and obj.parent.object_type == "schema" then
-    schema_name = obj.parent.name
+  if object_type ~= "schema" then
+    if parent_schema then
+      schema_name = parent_schema.name
+    elseif obj.schema_name then
+      schema_name = obj.schema_name
+    elseif obj.parent and obj.parent.object_type == "schema" then
+      schema_name = obj.parent.name
+    end
   end
 
   local searchable = {
@@ -242,76 +249,76 @@ local function flatten_database_objects(database, server)
   if schemas and #schemas > 0 then
     -- Schema-based database
     for _, schema in ipairs(schemas) do
-      -- Add schema itself as searchable
-      table.insert(searchables, create_searchable(schema, "schema", database, server))
+      -- Add schema itself as searchable (pass nil for parent_schema since schemas don't have parent schemas)
+      table.insert(searchables, create_searchable(schema, "schema", database, server, nil))
 
-      -- Add tables
+      -- Add tables (pass schema as parent)
       local tables = schema:get_tables({ skip_load = true })
       if tables then
         for _, tbl in ipairs(tables) do
-          table.insert(searchables, create_searchable(tbl, "table", database, server))
+          table.insert(searchables, create_searchable(tbl, "table", database, server, schema))
         end
       end
 
-      -- Add views
+      -- Add views (pass schema as parent)
       local views = schema:get_views({ skip_load = true })
       if views then
         for _, view in ipairs(views) do
-          table.insert(searchables, create_searchable(view, "view", database, server))
+          table.insert(searchables, create_searchable(view, "view", database, server, schema))
         end
       end
 
-      -- Add procedures
+      -- Add procedures (pass schema as parent)
       local procedures = schema:get_procedures({ skip_load = true })
       if procedures then
         for _, proc in ipairs(procedures) do
-          table.insert(searchables, create_searchable(proc, "procedure", database, server))
+          table.insert(searchables, create_searchable(proc, "procedure", database, server, schema))
         end
       end
 
-      -- Add functions
+      -- Add functions (pass schema as parent)
       local functions = schema:get_functions({ skip_load = true })
       if functions then
         for _, func in ipairs(functions) do
-          table.insert(searchables, create_searchable(func, "function", database, server))
+          table.insert(searchables, create_searchable(func, "function", database, server, schema))
         end
       end
 
-      -- Add synonyms
+      -- Add synonyms (pass schema as parent)
       local synonyms = schema:get_synonyms({ skip_load = true })
       if synonyms then
         for _, syn in ipairs(synonyms) do
-          table.insert(searchables, create_searchable(syn, "synonym", database, server))
+          table.insert(searchables, create_searchable(syn, "synonym", database, server, schema))
         end
       end
     end
   else
-    -- Non-schema database (MySQL, SQLite)
+    -- Non-schema database (MySQL, SQLite) - no parent schema
     local tables = database:get_tables({ skip_load = true })
     if tables then
       for _, tbl in ipairs(tables) do
-        table.insert(searchables, create_searchable(tbl, "table", database, server))
+        table.insert(searchables, create_searchable(tbl, "table", database, server, nil))
       end
     end
 
     local views = database:get_views({ skip_load = true })
     if views then
       for _, view in ipairs(views) do
-        table.insert(searchables, create_searchable(view, "view", database, server))
+        table.insert(searchables, create_searchable(view, "view", database, server, nil))
       end
     end
 
     local procedures = database:get_procedures({ skip_load = true })
     if procedures then
       for _, proc in ipairs(procedures) do
-        table.insert(searchables, create_searchable(proc, "procedure", database, server))
+        table.insert(searchables, create_searchable(proc, "procedure", database, server, nil))
       end
     end
 
     local functions = database:get_functions({ skip_load = true })
     if functions then
       for _, func in ipairs(functions) do
-        table.insert(searchables, create_searchable(func, "function", database, server))
+        table.insert(searchables, create_searchable(func, "function", database, server, nil))
       end
     end
   end
@@ -396,6 +403,11 @@ local function load_objects_for_databases(callback)
     vim.schedule(function()
       -- Load all object types
       local ok, err = pcall(function()
+        -- First, ensure schemas are loaded (required for schema-based DBs like SQL Server)
+        -- This populates db.schemas so bulk load can distribute objects to them
+        db:load()
+
+        -- Now bulk load all object types (these distribute to existing schemas)
         db:load_all_tables_bulk()
         db:load_all_views_bulk()
         db:load_all_procedures_bulk()
