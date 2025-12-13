@@ -119,8 +119,9 @@ end
 ---@param database DbClass? The database to associate with this query
 ---@param sql string? Optional SQL to populate the buffer
 ---@param object_name string? The object name for the buffer title
+---@param history_buffer_id string? Optional history buffer ID to continue existing history
 ---@return number bufnr The buffer number
-function UiQuery.create_query_buffer(server, database, sql, object_name)
+function UiQuery.create_query_buffer(server, database, sql, object_name, history_buffer_id)
   -- Focus or create query window
   UiQuery.focus_query_window()
 
@@ -151,6 +152,11 @@ function UiQuery.create_query_buffer(server, database, sql, object_name)
     local server_name = type(server) == "string" and server or server.name
     local db_name = type(database) == "string" and database or database.db_name
     vim.api.nvim_buf_set_var(bufnr, 'ssns_db_key', string.format("%s:%s", server_name, db_name))
+  end
+
+  -- Set history buffer ID if provided (for continuing history from loaded queries)
+  if history_buffer_id then
+    vim.api.nvim_buf_set_var(bufnr, 'ssns_history_buffer_id', history_buffer_id)
   end
 
   -- Set buffer-local keymaps

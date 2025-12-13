@@ -743,11 +743,20 @@ local function load_query()
     database = Cache.find_database(buffer_history.server_name, buffer_history.database)
   end
 
+  -- Capture buffer_id before closing (to continue history)
+  local history_buffer_id = buffer_history.buffer_id
+
   -- Close history window
   UiHistory.close()
 
-  -- Create new query buffer
-  UiQuery.create_query_buffer(server or buffer_history.server_name, database or buffer_history.database)
+  -- Create new query buffer with original history buffer_id to continue the same history
+  UiQuery.create_query_buffer(
+    server or buffer_history.server_name,
+    database or buffer_history.database,
+    nil,  -- sql (we'll set it below)
+    nil,  -- object_name
+    history_buffer_id  -- Continue this history
+  )
 
   -- Populate with query
   vim.schedule(function()

@@ -71,17 +71,36 @@ function QueryHistory.init()
   return true
 end
 
----Generate a unique buffer ID
+---@type number Counter for generating unique buffer IDs within same millisecond
+local buffer_id_counter = 0
+
+---Generate a unique buffer ID (timestamp + counter based)
+---This ensures uniqueness across sessions and prevents collisions
+---@return string buffer_id Unique ID like "hist_1702500000000_1"
+local function generate_unique_buffer_id()
+  local timestamp = vim.loop.hrtime() / 1000000  -- Milliseconds
+  buffer_id_counter = buffer_id_counter + 1
+  return string.format("hist_%d_%d", timestamp, buffer_id_counter)
+end
+
+---Get buffer ID for a buffer, checking metadata first
+---If buffer has stored history_buffer_id, use that; otherwise generate new one
 ---@param bufnr number Buffer number
----@param buffer_name string? Optional buffer name/path
 ---@return string buffer_id
-local function generate_buffer_id(bufnr, buffer_name)
-  -- Use buffer name if provided, otherwise use buffer number
-  if buffer_name and buffer_name ~= "" then
-    return buffer_name
-  else
-    return string.format("buffer_%d", bufnr)
+local function get_buffer_id(bufnr)
+  -- Check for stored buffer_id in buffer metadata
+  local ok, stored_id = pcall(vim.api.nvim_buf_get_var, bufnr, 'ssns_history_buffer_id')
+  if ok and stored_id and stored_id ~= "" then
+    return stored_id
   end
+
+  -- Generate new unique ID
+  local new_id = generate_unique_buffer_id()
+
+  -- Store in buffer metadata for future use
+  pcall(vim.api.nvim_buf_set_var, bufnr, 'ssns_history_buffer_id', new_id)
+
+  return new_id
 end
 
 ---Update LRU list when buffer is accessed
@@ -107,12 +126,13 @@ end
 
 ---Get or create buffer history
 ---@param bufnr number Buffer number
----@param buffer_name string? Buffer name/path
+---@param buffer_name string? Buffer display name (for UI)
 ---@param server_name string Server name
 ---@param database string? Database name
 ---@return QueryBufferHistory
 local function get_or_create_buffer_history(bufnr, buffer_name, server_name, database)
-  local buffer_id = generate_buffer_id(bufnr, buffer_name)
+  -- Get unique buffer_id (from metadata or generate new)
+  local buffer_id = get_buffer_id(bufnr)
 
   -- Create new buffer history if doesn't exist
   if not QueryHistory.buffers[buffer_id] then
@@ -127,8 +147,11 @@ local function get_or_create_buffer_history(bufnr, buffer_name, server_name, dat
       next_entry_id = 1,
     }
   else
-    -- Update last accessed time
+    -- Update last accessed time and buffer_name (in case it changed)
     QueryHistory.buffers[buffer_id].last_accessed = os.date("%Y-%m-%d %H:%M:%S")
+    if buffer_name then
+      QueryHistory.buffers[buffer_id].buffer_name = buffer_name
+    end
   end
 
   -- Update LRU
