@@ -7,6 +7,7 @@ local UiFloat = require('ssns.ui.core.float')
 local Cache = require('ssns.cache')
 local KeymapManager = require('ssns.keymap_manager')
 local UiQuery = require('ssns.ui.core.query')
+local ContentBuilder = require('ssns.ui.core.content_builder')
 
 -- ============================================================================
 -- Type Definitions
@@ -836,14 +837,28 @@ local function render_search(state)
 end
 
 ---Render the results panel
+---Get object type style name for ContentBuilder
+---@param object_type string
+---@return string style
+local function get_object_style(object_type)
+  local styles = {
+    table = "table",
+    view = "view",
+    procedure = "procedure",
+    ["function"] = "func",
+    synonym = "muted",
+    schema = "schema",
+  }
+  return styles[object_type] or "normal"
+end
+
 ---@param state MultiPanelState
 ---@return string[] lines, table[] highlights
 local function render_results(state)
-  local lines = {}
-  local highlights = {}
+  local cb = ContentBuilder.new()
 
   -- Header: Server and database info
-  table.insert(lines, "")
+  cb:blank()
 
   if ui_state.selected_server then
     local db_count = 0
@@ -855,112 +870,125 @@ local function render_results(state)
     for name, _ in pairs(ui_state.selected_databases) do
       table.insert(db_names, name)
     end
+    table.sort(db_names)
 
     local db_display = db_count > 2
       and string.format("%s (+%d)", db_names[1], db_count - 1)
       or table.concat(db_names, ", ")
 
-    table.insert(lines, string.format(" Server: %s", ui_state.selected_server.name))
-    table.insert(highlights, {1, 0, -1, "SsnsServer"})
+    cb:spans({
+      { text = " Server: ", style = "label" },
+      { text = ui_state.selected_server.name, style = "server" },
+    })
 
-    table.insert(lines, string.format(" Databases: %s", db_display))
-    table.insert(highlights, {2, 0, -1, "SsnsDatabase"})
+    cb:spans({
+      { text = " Databases: ", style = "label" },
+      { text = db_display, style = "database" },
+    })
 
-    table.insert(lines, string.format(" Objects: %d | Results: %d",
-      #ui_state.loaded_objects, #ui_state.filtered_results))
-    table.insert(highlights, {3, 0, -1, "SsnsUiHint"})
+    cb:spans({
+      { text = " Objects: ", style = "muted" },
+      { text = tostring(#ui_state.loaded_objects), style = "value" },
+      { text = " | Results: ", style = "muted" },
+      { text = tostring(#ui_state.filtered_results), style = "value" },
+    })
   else
-    table.insert(lines, " No server selected")
-    table.insert(highlights, {1, 0, -1, "Comment"})
-    table.insert(lines, " Press 's' to select a server")
-    table.insert(highlights, {2, 0, -1, "Comment"})
+    cb:styled(" No server selected", "muted")
+    cb:styled(" Press 's' to select a server", "comment")
   end
 
-  table.insert(lines, "")
+  cb:blank()
 
   -- Loading indicator
   if ui_state.loading_status == "loading" then
-    local progress_bar = string.rep("█", math.floor(ui_state.loading_progress / 10))
-    progress_bar = progress_bar .. string.rep("░", 10 - #progress_bar)
-    table.insert(lines, string.format(" [%s] %d%%", progress_bar, ui_state.loading_progress))
-    table.insert(highlights, {#lines - 1, 0, -1, "SsnsUiHint"})
-    table.insert(lines, " " .. ui_state.loading_message)
-    table.insert(highlights, {#lines - 1, 0, -1, "Comment"})
-    return lines, highlights
+    local filled = math.floor(ui_state.loading_progress / 10)
+    local progress_bar = string.rep("█", filled) .. string.rep("░", 10 - filled)
+    cb:spans({
+      { text = " [", style = "muted" },
+      { text = progress_bar, style = "success" },
+      { text = "] ", style = "muted" },
+      { text = string.format("%d%%", ui_state.loading_progress), style = "value" },
+    })
+    cb:styled(" " .. ui_state.loading_message, "comment")
+    return cb:build_lines(), cb:build_highlights()
   end
 
   -- Results list
-  local header_lines = #lines
-
   for i, result in ipairs(ui_state.filtered_results) do
-    local prefix = i == ui_state.selected_result_idx and " ▶ " or "   "
+    local is_selected = (i == ui_state.selected_result_idx)
+    local prefix = is_selected and " ▶ " or "   "
     local icon = get_object_icon(result.searchable.object_type)
-    local badge = result.match_type ~= "none" and string.format("[%s]", result.match_type) or ""
+    local obj_style = get_object_style(result.searchable.object_type)
+    local badge = result.match_type ~= "none" and string.format(" [%s]", result.match_type) or ""
 
-    local line = string.format("%s%s %s.%s %s",
-      prefix,
-      icon,
-      result.searchable.database_name,
-      result.display_name,
-      badge
-    )
-    table.insert(lines, line)
+    local spans = {
+      { text = prefix, style = is_selected and "highlight" or "normal" },
+      { text = icon .. " ", style = obj_style },
+      { text = result.searchable.database_name, style = "database" },
+      { text = ".", style = "muted" },
+      { text = result.display_name, style = is_selected and "strong" or obj_style },
+    }
 
-    local line_idx = #lines - 1
-    if i == ui_state.selected_result_idx then
-      table.insert(highlights, {line_idx, 0, -1, "SsnsFloatSelected"})
+    if badge ~= "" then
+      table.insert(spans, { text = badge, style = "muted" })
     end
 
-    -- Highlight icon based on type
-    local icon_col = i == ui_state.selected_result_idx and 4 or 3
-    local type_hl = "Ssns" .. result.searchable.object_type:sub(1, 1):upper() .. result.searchable.object_type:sub(2)
-    table.insert(highlights, {line_idx, icon_col, icon_col + 1, type_hl})
+    cb:spans(spans)
   end
 
   if #ui_state.filtered_results == 0 then
     if #ui_state.loaded_objects == 0 then
-      table.insert(lines, "   Press 'd' to select databases and load objects")
+      cb:styled("   Press 'd' to select databases and load objects", "comment")
     else
-      table.insert(lines, "   (No matches)")
+      cb:styled("   (No matches)", "comment")
     end
-    table.insert(highlights, {#lines - 1, 0, -1, "Comment"})
   end
 
-  return lines, highlights
+  return cb:build_lines(), cb:build_highlights()
 end
 
 ---Render the metadata panel
 ---@param state MultiPanelState
 ---@return string[] lines, table[] highlights
 local function render_metadata(state)
-  local lines = {}
-  local highlights = {}
+  local cb = ContentBuilder.new()
 
   if ui_state.selected_result_idx < 1 or ui_state.selected_result_idx > #ui_state.filtered_results then
-    table.insert(lines, "")
-    table.insert(lines, " Select an object to view metadata")
-    table.insert(highlights, {1, 0, -1, "Comment"})
-    return lines, highlights
+    cb:blank()
+    cb:styled(" Select an object to view metadata", "comment")
+    return cb:build_lines(), cb:build_highlights()
   end
 
   local result = ui_state.filtered_results[ui_state.selected_result_idx]
   local searchable = result.searchable
   local obj = searchable.object
+  local obj_style = get_object_style(searchable.object_type)
 
   -- Header
-  table.insert(lines, "")
-  table.insert(lines, string.format(" %s: %s", searchable.object_type:upper(), searchable.name))
-  table.insert(highlights, {1, 0, -1, "SsnsUiTitle"})
+  cb:blank()
+  cb:spans({
+    { text = " ", style = "normal" },
+    { text = searchable.object_type:upper(), style = "muted" },
+    { text = ": ", style = "muted" },
+    { text = searchable.name, style = obj_style },
+  })
 
-  table.insert(lines, string.format(" Schema: %s", searchable.schema_name or "N/A"))
-  table.insert(lines, string.format(" Database: %s", searchable.database_name))
-  table.insert(lines, "")
+  cb:spans({
+    { text = " Schema: ", style = "label" },
+    { text = searchable.schema_name or "N/A", style = "schema" },
+  })
+
+  cb:spans({
+    { text = " Database: ", style = "label" },
+    { text = searchable.database_name, style = "database" },
+  })
+
+  cb:blank()
 
   -- Object-specific metadata
   if searchable.object_type == "table" or searchable.object_type == "view" then
     -- Show columns
-    table.insert(lines, " Columns:")
-    table.insert(highlights, {#lines - 1, 0, -1, "SsnsUiTitle"})
+    cb:section(" Columns:")
 
     if obj and obj.get_columns then
       local ok, columns = pcall(function()
@@ -969,19 +997,24 @@ local function render_metadata(state)
 
       if ok and columns and #columns > 0 then
         for _, col in ipairs(columns) do
-          local nullable = col.nullable and "NULL" or "NOT NULL"
-          local line = string.format("   %s (%s) %s", col.name, col.data_type or "?", nullable)
-          table.insert(lines, line)
+          local nullable_style = col.nullable and "muted" or "warning"
+          local nullable_text = col.nullable and "NULL" or "NOT NULL"
+          cb:spans({
+            { text = "   ", style = "normal" },
+            { text = col.name, style = "column" },
+            { text = " (", style = "muted" },
+            { text = col.data_type or "?", style = "keyword" },
+            { text = ") ", style = "muted" },
+            { text = nullable_text, style = nullable_style },
+          })
         end
       else
-        table.insert(lines, "   (Load object to see columns)")
-        table.insert(highlights, {#lines - 1, 0, -1, "Comment"})
+        cb:styled("   (Load object to see columns)", "comment")
       end
     end
   elseif searchable.object_type == "procedure" or searchable.object_type == "function" then
     -- Show parameters
-    table.insert(lines, " Parameters:")
-    table.insert(highlights, {#lines - 1, 0, -1, "SsnsUiTitle"})
+    cb:section(" Parameters:")
 
     if obj and obj.get_parameters then
       local ok, params = pcall(function()
@@ -991,28 +1024,40 @@ local function render_metadata(state)
       if ok and params and #params > 0 then
         for _, param in ipairs(params) do
           local direction = param.is_output and "OUT" or "IN"
-          local line = string.format("   %s %s (%s)", direction, param.name, param.data_type or "?")
-          table.insert(lines, line)
+          local dir_style = param.is_output and "warning" or "success"
+          cb:spans({
+            { text = "   ", style = "normal" },
+            { text = direction, style = dir_style },
+            { text = " ", style = "normal" },
+            { text = param.name, style = "param" },
+            { text = " (", style = "muted" },
+            { text = param.data_type or "?", style = "keyword" },
+            { text = ")", style = "muted" },
+          })
         end
       else
-        table.insert(lines, "   (Load object to see parameters)")
-        table.insert(highlights, {#lines - 1, 0, -1, "Comment"})
+        cb:styled("   (Load object to see parameters)", "comment")
       end
     end
   elseif searchable.object_type == "synonym" then
     -- Show synonym target
-    table.insert(lines, " Target:")
-    table.insert(highlights, {#lines - 1, 0, -1, "SsnsUiTitle"})
+    cb:section(" Target:")
 
     if obj and obj.base_object_name then
-      table.insert(lines, "   " .. obj.base_object_name)
+      cb:spans({
+        { text = "   ", style = "normal" },
+        { text = obj.base_object_name, style = "table" },
+      })
     else
-      table.insert(lines, "   (Unknown)")
-      table.insert(highlights, {#lines - 1, 0, -1, "Comment"})
+      cb:styled("   (Unknown)", "comment")
     end
+  elseif searchable.object_type == "schema" then
+    -- Schema info
+    cb:section(" Schema Info:")
+    cb:styled("   Schema object - no additional metadata", "comment")
   end
 
-  return lines, highlights
+  return cb:build_lines(), cb:build_highlights()
 end
 
 ---Render the definition panel
