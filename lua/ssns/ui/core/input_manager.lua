@@ -1232,16 +1232,36 @@ function InputManager:_update_dropdown_display(key)
     end
   end
 
-  -- Calculate dimensions
+  -- Calculate dimensions (text_width is in display columns)
   local arrow = " ▼"
-  local arrow_len = #arrow
-  local text_width = dropdown.text_width or (dropdown.width - arrow_len)
+  local text_width = dropdown.text_width or 18
 
-  -- Pad or truncate
-  if #display_text < text_width then
-    display_text = display_text .. string.rep(" ", text_width - #display_text)
-  elseif #display_text > text_width then
-    display_text = display_text:sub(1, text_width - 1) .. "…"
+  -- Pad or truncate using display width
+  local display_len = vim.fn.strdisplaywidth(display_text)
+  if display_len < text_width then
+    display_text = display_text .. string.rep(" ", text_width - display_len)
+  elseif display_len > text_width then
+    -- Truncate with ellipsis - use vim.fn.strcharpart for proper UTF-8 handling
+    local truncated = ""
+    local current_width = 0
+    local char_idx = 0
+    while current_width < text_width - 1 do
+      local char = vim.fn.strcharpart(display_text, char_idx, 1)
+      if char == "" then break end
+      local char_width = vim.fn.strdisplaywidth(char)
+      if current_width + char_width > text_width - 1 then
+        break
+      end
+      truncated = truncated .. char
+      current_width = current_width + char_width
+      char_idx = char_idx + 1
+    end
+    -- Pad to exact width and add ellipsis
+    local pad_needed = text_width - 1 - vim.fn.strdisplaywidth(truncated)
+    if pad_needed > 0 then
+      truncated = truncated .. string.rep(" ", pad_needed)
+    end
+    display_text = truncated .. "…"
   end
 
   -- Get current line

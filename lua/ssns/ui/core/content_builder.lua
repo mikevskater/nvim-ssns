@@ -490,25 +490,54 @@ function ContentBuilder:dropdown(key, opts)
     prefix = label .. separator
   end
 
-  -- Calculate effective width (must fit display text + arrow)
-  -- Arrow takes 2 chars: " ▼"
+  -- Calculate effective width (fixed to specified width)
+  -- Arrow takes 4 bytes: " ▼" (space + 3-byte unicode char)
   local arrow = " ▼"
-  local arrow_len = #arrow
-  local text_width = math.max(width - arrow_len, #display_text)
-  local effective_width = text_width + arrow_len
+  local arrow_byte_len = #arrow  -- 4 bytes
+  local arrow_display_len = 2    -- 2 display columns (space + arrow)
 
-  -- Pad or truncate display text
-  if #display_text < text_width then
-    display_text = display_text .. string.rep(" ", text_width - #display_text)
-  elseif #display_text > text_width then
-    display_text = display_text:sub(1, text_width - 1) .. "…"
+  -- text_width is the area for the label text (excluding arrow)
+  local text_width = width - arrow_display_len
+  text_width = math.max(text_width, 1)  -- At least 1 char for text
+
+  local effective_width = text_width + arrow_display_len
+
+  -- Pad or truncate display text to fit text_width
+  local display_len = vim.fn.strdisplaywidth(display_text)
+  if display_len < text_width then
+    display_text = display_text .. string.rep(" ", text_width - display_len)
+  elseif display_len > text_width then
+    -- Truncate with ellipsis - use vim.fn.strcharpart for proper UTF-8 handling
+    local truncated = ""
+    local current_width = 0
+    local char_idx = 0
+    while current_width < text_width - 1 do
+      local char = vim.fn.strcharpart(display_text, char_idx, 1)
+      if char == "" then break end
+      local char_width = vim.fn.strdisplaywidth(char)
+      if current_width + char_width > text_width - 1 then
+        break
+      end
+      truncated = truncated .. char
+      current_width = current_width + char_width
+      char_idx = char_idx + 1
+    end
+    -- Pad to exact width and add ellipsis
+    local pad_needed = text_width - 1 - vim.fn.strdisplaywidth(truncated)
+    if pad_needed > 0 then
+      truncated = truncated .. string.rep(" ", pad_needed)
+    end
+    display_text = truncated .. "…"
   end
 
   -- Build full line: "Label: [Selected Value ▼]"
-  local input_start = #prefix
+  local input_start = #prefix  -- Byte position
   local text = prefix .. "[" .. display_text .. arrow .. "]"
-  local input_value_start = input_start + 1  -- After "["
-  local input_value_end = input_value_start + effective_width  -- Before "]"
+  local input_value_start = input_start + 1  -- After "[" (byte position)
+
+  -- Calculate byte lengths for highlight positions
+  local display_text_bytes = #display_text
+  local input_value_end = input_value_start + display_text_bytes + arrow_byte_len  -- Before "]"
 
   local line = {
     text = text,
@@ -536,17 +565,17 @@ function ContentBuilder:dropdown(key, opts)
     style = "muted",
   })
 
-  -- Highlight dropdown value area
+  -- Highlight dropdown value area (excluding arrow)
   local value_style = is_placeholder and "input_placeholder" or "dropdown"
   table.insert(line.highlights, {
     col_start = input_value_start,
-    col_end = input_value_end - arrow_len,  -- Exclude arrow from value highlight
+    col_end = input_value_start + display_text_bytes,
     style = value_style,
   })
 
   -- Highlight arrow separately
   table.insert(line.highlights, {
-    col_start = input_value_end - arrow_len,
+    col_start = input_value_start + display_text_bytes,
     col_end = input_value_end,
     style = "dropdown_arrow",
   })
@@ -558,10 +587,10 @@ function ContentBuilder:dropdown(key, opts)
   self._dropdowns[key] = {
     key = key,
     line = line_num,
-    col_start = input_value_start,
-    col_end = input_value_end,
-    width = effective_width,
-    text_width = text_width,  -- Width without arrow
+    col_start = input_value_start,      -- Byte position after "["
+    col_end = input_value_end,          -- Byte position before "]"
+    width = effective_width,            -- Display width (text + arrow)
+    text_width = text_width,            -- Display width for text only (excluding arrow)
     value = value,
     default = value,
     options = options,
