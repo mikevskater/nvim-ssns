@@ -1405,6 +1405,36 @@ function InputManager:_update_dropdown_display(key)
 
   -- Update placeholder state
   dropdown.is_placeholder = is_placeholder
+
+  -- Update col_end based on new line content (find the closing bracket)
+  local new_bracket_pos = new_line:find("%]", dropdown.col_start + 1)
+  if new_bracket_pos then
+    dropdown.col_end = new_bracket_pos
+  end
+
+  -- Re-apply highlights (they get lost when buffer line is replaced)
+  local hl_group
+  if is_placeholder then
+    hl_group = "SsnsFloatInputPlaceholder"
+  else
+    hl_group = "SsnsFloatInput"
+  end
+
+  -- Clear existing highlights for this line
+  vim.api.nvim_buf_clear_namespace(self.bufnr, self._namespace, dropdown.line - 1, dropdown.line)
+
+  -- Highlight the dropdown value area (excluding arrow)
+  local arrow_len = 4  -- " ▼" is 4 bytes
+  vim.api.nvim_buf_add_highlight(
+    self.bufnr, self._namespace, hl_group,
+    dropdown.line - 1, dropdown.col_start, dropdown.col_end - arrow_len
+  )
+
+  -- Arrow always gets hint color
+  vim.api.nvim_buf_add_highlight(
+    self.bufnr, self._namespace, "SsnsUiHint",
+    dropdown.line - 1, dropdown.col_end - arrow_len, dropdown.col_end
+  )
 end
 
 ---Setup keymaps for dropdown window
@@ -1931,6 +1961,36 @@ function InputManager:_update_multi_dropdown_display(key)
 
   -- Update placeholder state
   multi_dropdown.is_placeholder = is_placeholder
+
+  -- Update col_end based on new line content (find the closing bracket)
+  local new_bracket_pos = new_line:find("%]", multi_dropdown.col_start + 1)
+  if new_bracket_pos then
+    multi_dropdown.col_end = new_bracket_pos
+  end
+
+  -- Re-apply highlights (they get lost when buffer line is replaced)
+  local hl_group
+  if is_placeholder then
+    hl_group = "SsnsFloatInputPlaceholder"
+  else
+    hl_group = "SsnsFloatInput"
+  end
+
+  -- Clear existing highlights for this line
+  vim.api.nvim_buf_clear_namespace(self.bufnr, self._namespace, multi_dropdown.line - 1, multi_dropdown.line)
+
+  -- Highlight the multi-dropdown value area (excluding arrow)
+  local arrow_len = 4  -- " ▾" is 4 bytes
+  vim.api.nvim_buf_add_highlight(
+    self.bufnr, self._namespace, hl_group,
+    multi_dropdown.line - 1, multi_dropdown.col_start, multi_dropdown.col_end - arrow_len
+  )
+
+  -- Arrow always gets hint color
+  vim.api.nvim_buf_add_highlight(
+    self.bufnr, self._namespace, "SsnsUiHint",
+    multi_dropdown.line - 1, multi_dropdown.col_end - arrow_len, multi_dropdown.col_end
+  )
 end
 
 ---Setup keymaps for multi-dropdown
