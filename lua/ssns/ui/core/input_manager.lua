@@ -69,8 +69,8 @@ function InputManager.new(config)
   -- Dropdown state
   self._dropdown_open = false
   self._dropdown_key = nil
-  self._dropdown_winid = nil
-  self._dropdown_bufnr = nil
+  self._dropdown_float = nil  -- FloatWindow instance
+  self._dropdown_ns = nil     -- Highlight namespace for dropdown content
   self._dropdown_selected_idx = 1
   self._dropdown_original_value = nil
   self._dropdown_filtered_options = nil
@@ -915,46 +915,58 @@ function InputManager:_open_dropdown(key)
   local parent_row = win_info.winrow
   local parent_col = win_info.wincol
 
-  -- Dropdown position: directly below the field
+  -- Dropdown position: directly below the field, aligned with the "[" bracket
+  -- col_start points to after "[", so we subtract 1 to align with the bracket
   local dropdown_row = parent_row + dropdown.line
-  local dropdown_col = parent_col + dropdown.col_start
+  local dropdown_col = parent_col + dropdown.col_start - 1
 
-  -- Dropdown dimensions
-  local width = dropdown.width + 2  -- Add padding
+  -- Dropdown dimensions - match the dropdown field width (including brackets)
+  -- text_width is the content width, add 2 for brackets
+  local width = (dropdown.text_width or dropdown.width) + 2
   local height = math.min(#dropdown.options, dropdown.max_height or 6)
 
-  -- Create dropdown buffer
-  self._dropdown_bufnr = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_option(self._dropdown_bufnr, 'buftype', 'nofile')
-  vim.api.nvim_buf_set_option(self._dropdown_bufnr, 'bufhidden', 'wipe')
-  vim.api.nvim_buf_set_option(self._dropdown_bufnr, 'swapfile', false)
+  -- Build initial content using ContentBuilder
+  local cb = self:_build_dropdown_content()
+  local lines = cb:build_lines()
 
-  -- Get UiFloat for ZINDEX constant
+  -- Get UiFloat for creating the dropdown
   local UiFloat = require('ssns.ui.core.float')
 
-  -- Create dropdown window
-  self._dropdown_winid = vim.api.nvim_open_win(self._dropdown_bufnr, true, {
+  -- Create dropdown using UiFloat for proper theming and scrollbar
+  self._dropdown_float = UiFloat.create(lines, {
+    -- Explicit positioning (no centering)
+    centered = false,
     relative = "editor",
-    width = width,
-    height = height,
     row = dropdown_row,
     col = dropdown_col,
-    style = "minimal",
+    width = width,
+    height = height,
+    -- Styling
     border = "rounded",
     zindex = UiFloat.ZINDEX.DROPDOWN,
+    -- Window options
+    cursorline = true,
     focusable = true,
+    enter = true,
+    -- Disable default keymaps (we set our own)
+    default_keymaps = false,
+    -- Scrollbar for long lists
+    scrollbar = true,
   })
 
-  -- Window options
-  vim.api.nvim_set_option_value('cursorline', true, { win = self._dropdown_winid })
-  vim.api.nvim_set_option_value('winhighlight', 'Normal:SsnsFloatNormal,CursorLine:SsnsFloatSelected', { win = self._dropdown_winid })
+  if not self._dropdown_float or not self._dropdown_float:is_valid() then
+    self._dropdown_open = false
+    self._dropdown_key = nil
+    return
+  end
 
-  -- Render options
-  self:_render_dropdown()
+  -- Apply highlights from ContentBuilder
+  self._dropdown_ns = vim.api.nvim_create_namespace("ssns_dropdown_content")
+  cb:apply_to_buffer(self._dropdown_float.bufnr, self._dropdown_ns)
 
   -- Position cursor on selected item
   if self._dropdown_selected_idx <= height then
-    vim.api.nvim_win_set_cursor(self._dropdown_winid, {self._dropdown_selected_idx, 0})
+    self._dropdown_float:set_cursor(self._dropdown_selected_idx, 0)
   end
 
   -- Setup dropdown keymaps
@@ -962,6 +974,52 @@ function InputManager:_open_dropdown(key)
 
   -- Setup autocmds for focus-lost detection
   self:_setup_dropdown_autocmds()
+end
+
+---Build dropdown content using ContentBuilder
+---@return ContentBuilder cb
+function InputManager:_build_dropdown_content()
+  local ContentBuilder = require('ssns.ui.core.content_builder')
+  local cb = ContentBuilder.new()
+
+  local key = self._dropdown_key
+  local dropdown = self.dropdowns[key]
+  if not dropdown then return cb end
+
+  local filtered = self._dropdown_filtered_options or dropdown.options
+
+  -- Calculate max label width for proper padding
+  local max_label_len = 0
+  for _, opt in ipairs(filtered) do
+    max_label_len = math.max(max_label_len, #opt.label)
+  end
+
+  for _, opt in ipairs(filtered) do
+    local is_original = (opt.value == self._dropdown_original_value)
+    -- Pad label for alignment
+    local padded_label = opt.label .. string.rep(" ", max_label_len - #opt.label)
+
+    if is_original then
+      -- Original value gets special styling with indicator
+      cb:spans({
+        { text = " ", style = "normal" },
+        { text = padded_label, style = "emphasis" },
+        { text = " *", style = "success" },
+      })
+    else
+      -- Regular option
+      cb:spans({
+        { text = " ", style = "normal" },
+        { text = padded_label, style = "value" },
+      })
+    end
+  end
+
+  if #filtered == 0 then
+    cb:styled(" (no matches)", "muted")
+  end
+
+  return cb
 end
 
 ---Close dropdown window
@@ -972,7 +1030,7 @@ function InputManager:_close_dropdown(cancel)
   local key = self._dropdown_key
 
   -- Cancel = restore original value
-  if cancel and key and self._dropdown_original_value then
+  if cancel and key and self._dropdown_original_value ~= nil then
     self.dropdown_values[key] = self._dropdown_original_value
     self:_update_dropdown_display(key)
   end
@@ -983,16 +1041,16 @@ function InputManager:_close_dropdown(cancel)
     self._dropdown_autocmd_group = nil
   end
 
-  -- Close dropdown window
-  if self._dropdown_winid and vim.api.nvim_win_is_valid(self._dropdown_winid) then
-    vim.api.nvim_win_close(self._dropdown_winid, true)
+  -- Close dropdown FloatWindow (handles window and buffer cleanup)
+  if self._dropdown_float then
+    pcall(function() self._dropdown_float:close() end)
   end
 
   -- Reset state
   self._dropdown_open = false
   self._dropdown_key = nil
-  self._dropdown_winid = nil
-  self._dropdown_bufnr = nil
+  self._dropdown_float = nil
+  self._dropdown_ns = nil
   self._dropdown_selected_idx = 1
   self._dropdown_original_value = nil
   self._dropdown_filtered_options = nil
@@ -1036,28 +1094,19 @@ end
 
 ---Render dropdown options
 function InputManager:_render_dropdown()
-  if not self._dropdown_bufnr or not vim.api.nvim_buf_is_valid(self._dropdown_bufnr) then return end
+  if not self._dropdown_float or not self._dropdown_float:is_valid() then return end
 
-  local key = self._dropdown_key
-  local dropdown = self.dropdowns[key]
-  if not dropdown then return end
+  -- Build content with ContentBuilder
+  local cb = self:_build_dropdown_content()
+  local lines = cb:build_lines()
 
-  local filtered = self._dropdown_filtered_options or dropdown.options
-  local lines = {}
+  -- Update lines
+  self._dropdown_float:update_lines(lines)
 
-  for _, opt in ipairs(filtered) do
-    -- Add indicator for original value
-    local indicator = (opt.value == self._dropdown_original_value) and " ●" or "  "
-    table.insert(lines, " " .. opt.label .. indicator)
+  -- Reapply highlights
+  if self._dropdown_ns then
+    cb:apply_to_buffer(self._dropdown_float.bufnr, self._dropdown_ns)
   end
-
-  if #lines == 0 then
-    lines = {" (no matches)"}
-  end
-
-  vim.api.nvim_buf_set_option(self._dropdown_bufnr, 'modifiable', true)
-  vim.api.nvim_buf_set_lines(self._dropdown_bufnr, 0, -1, false, lines)
-  vim.api.nvim_buf_set_option(self._dropdown_bufnr, 'modifiable', false)
 end
 
 ---Navigate dropdown selection
@@ -1079,8 +1128,8 @@ function InputManager:_navigate_dropdown(direction)
   end
 
   -- Move cursor in dropdown window
-  if self._dropdown_winid and vim.api.nvim_win_is_valid(self._dropdown_winid) then
-    vim.api.nvim_win_set_cursor(self._dropdown_winid, {self._dropdown_selected_idx, 0})
+  if self._dropdown_float and self._dropdown_float:is_valid() then
+    self._dropdown_float:set_cursor(self._dropdown_selected_idx, 0)
   end
 
   -- Live preview: update parent display
@@ -1121,14 +1170,14 @@ function InputManager:_filter_dropdown(char)
   local height = math.min(#self._dropdown_filtered_options, dropdown.max_height or 6)
   height = math.max(height, 1)  -- At least 1 line
 
-  if self._dropdown_winid and vim.api.nvim_win_is_valid(self._dropdown_winid) then
-    vim.api.nvim_win_set_config(self._dropdown_winid, {
+  if self._dropdown_float and self._dropdown_float:is_valid() then
+    vim.api.nvim_win_set_config(self._dropdown_float.winid, {
       height = height,
     })
 
     -- Position cursor
     if #self._dropdown_filtered_options > 0 then
-      vim.api.nvim_win_set_cursor(self._dropdown_winid, {1, 0})
+      self._dropdown_float:set_cursor(1, 0)
 
       -- Live preview first match
       local first_opt = self._dropdown_filtered_options[1]
@@ -1156,11 +1205,11 @@ function InputManager:_clear_dropdown_filter()
 
   -- Update window height
   local height = math.min(#dropdown.options, dropdown.max_height or 6)
-  if self._dropdown_winid and vim.api.nvim_win_is_valid(self._dropdown_winid) then
-    vim.api.nvim_win_set_config(self._dropdown_winid, {
+  if self._dropdown_float and self._dropdown_float:is_valid() then
+    vim.api.nvim_win_set_config(self._dropdown_float.winid, {
       height = height,
     })
-    vim.api.nvim_win_set_cursor(self._dropdown_winid, {1, 0})
+    self._dropdown_float:set_cursor(1, 0)
   end
 end
 
@@ -1222,9 +1271,10 @@ end
 
 ---Setup keymaps for dropdown window
 function InputManager:_setup_dropdown_keymaps()
-  if not self._dropdown_bufnr then return end
+  if not self._dropdown_float or not self._dropdown_float:is_valid() then return end
 
-  local opts = { buffer = self._dropdown_bufnr, noremap = true, silent = true, nowait = true }
+  local bufnr = self._dropdown_float.bufnr
+  local opts = { buffer = bufnr, noremap = true, silent = true, nowait = true }
 
   -- Navigation
   vim.keymap.set('n', 'j', function() self:_navigate_dropdown(1) end, opts)
@@ -1260,15 +1310,18 @@ end
 
 ---Setup autocmds for dropdown focus-lost detection
 function InputManager:_setup_dropdown_autocmds()
+  if not self._dropdown_float or not self._dropdown_float:is_valid() then return end
+
+  local bufnr = self._dropdown_float.bufnr
   self._dropdown_autocmd_group = vim.api.nvim_create_augroup(
-    "SSNSDropdown_" .. self._dropdown_bufnr,
+    "SSNSDropdown_" .. bufnr,
     { clear = true }
   )
 
   -- Close on WinLeave (focus lost)
   vim.api.nvim_create_autocmd("WinLeave", {
     group = self._dropdown_autocmd_group,
-    buffer = self._dropdown_bufnr,
+    buffer = bufnr,
     callback = function()
       -- Schedule to allow checking if we're going to parent window
       vim.schedule(function()
@@ -1284,7 +1337,7 @@ function InputManager:_setup_dropdown_autocmds()
   -- Close on BufLeave
   vim.api.nvim_create_autocmd("BufLeave", {
     group = self._dropdown_autocmd_group,
-    buffer = self._dropdown_bufnr,
+    buffer = bufnr,
     callback = function()
       vim.schedule(function()
         self:_close_dropdown(true)
