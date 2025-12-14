@@ -56,7 +56,12 @@ local STYLE_MAPPINGS = {
   input = "SsnsFloatInput",         -- Input field background
   input_active = "SsnsFloatInputActive", -- Active/focused input
   input_placeholder = "SsnsFloatInputPlaceholder", -- Placeholder text (italic, dimmer)
-  
+
+  -- Dropdown field styles
+  dropdown = "SsnsFloatInput",      -- Dropdown field background (same as input)
+  dropdown_active = "SsnsFloatInputActive", -- Active/focused dropdown
+  dropdown_arrow = "SsnsUiHint",    -- Dropdown arrow indicator
+
   -- Special
   normal = nil,                     -- No highlight, use default
   none = nil,                       -- Explicit no highlight
@@ -86,6 +91,24 @@ local STYLE_MAPPINGS = {
 ---@field label string? Optional label text before input
 ---@field prefix_len number Length of label prefix (for line reconstruction)
 
+---@class DropdownOption
+---@field value string The value to store when selected
+---@field label string The display text shown in dropdown
+
+---@class DropdownField
+---@field key string Unique identifier for the dropdown
+---@field line number 1-indexed line number
+---@field col_start number 0-indexed start column of dropdown value area
+---@field col_end number 0-indexed end column of dropdown value area
+---@field width number Display width of dropdown field
+---@field value string Current selected value
+---@field default string Default/initial value
+---@field options DropdownOption[] Available options
+---@field max_height number Maximum visible items in dropdown (default: 6)
+---@field label string? Optional label text before dropdown
+---@field prefix_len number Length of label prefix (for line reconstruction)
+---@field placeholder string? Placeholder text when no selection
+
 ---@class ContentBuilderState
 ---@field lines ContentLine[] Built content lines
 ---@field namespace number|nil Highlight namespace
@@ -99,6 +122,8 @@ function ContentBuilder.new()
   self._namespace = nil
   self._inputs = {}  -- Map of key -> InputField
   self._input_order = {}  -- Ordered list of input keys for Tab navigation
+  self._dropdowns = {}  -- Map of key -> DropdownField
+  self._dropdown_order = {}  -- Ordered list of dropdown keys
   return self
 end
 
@@ -108,6 +133,8 @@ function ContentBuilder:clear()
   self._lines = {}
   self._inputs = {}
   self._input_order = {}
+  self._dropdowns = {}
+  self._dropdown_order = {}
   return self
 end
 
@@ -427,6 +454,174 @@ function ContentBuilder:set_input_value(key, value)
   local input = self._inputs[key]
   if input then
     input.value = value
+  end
+  return self
+end
+
+---Add a dropdown field
+---@param key string Unique identifier for retrieving the value
+---@param opts table Options: { label = string?, options = DropdownOption[], value = string?, placeholder = string?, width = number?, max_height = number?, label_style = string? }
+---@return ContentBuilder self For chaining
+function ContentBuilder:dropdown(key, opts)
+  opts = opts or {}
+  local label = opts.label or ""
+  local options = opts.options or {}
+  local value = opts.value or ""
+  local placeholder = opts.placeholder or "(select)"
+  local width = opts.width or 20
+  local max_height = opts.max_height or 6
+  local label_style = opts.label_style or "label"
+  local separator = opts.separator or ": "
+
+  -- Find the label for the current value
+  local display_text = placeholder
+  local is_placeholder = true
+  for _, opt in ipairs(options) do
+    if opt.value == value then
+      display_text = opt.label
+      is_placeholder = false
+      break
+    end
+  end
+
+  -- Build the line text
+  local prefix = ""
+  if label ~= "" then
+    prefix = label .. separator
+  end
+
+  -- Calculate effective width (must fit display text + arrow)
+  -- Arrow takes 2 chars: " ▼"
+  local arrow = " ▼"
+  local arrow_len = #arrow
+  local text_width = math.max(width - arrow_len, #display_text)
+  local effective_width = text_width + arrow_len
+
+  -- Pad or truncate display text
+  if #display_text < text_width then
+    display_text = display_text .. string.rep(" ", text_width - #display_text)
+  elseif #display_text > text_width then
+    display_text = display_text:sub(1, text_width - 1) .. "…"
+  end
+
+  -- Build full line: "Label: [Selected Value ▼]"
+  local input_start = #prefix
+  local text = prefix .. "[" .. display_text .. arrow .. "]"
+  local input_value_start = input_start + 1  -- After "["
+  local input_value_end = input_value_start + effective_width  -- Before "]"
+
+  local line = {
+    text = text,
+    highlights = {},
+  }
+
+  -- Highlight label
+  if label ~= "" and STYLE_MAPPINGS[label_style] then
+    table.insert(line.highlights, {
+      col_start = 0,
+      col_end = #label,
+      style = label_style,
+    })
+  end
+
+  -- Highlight brackets
+  table.insert(line.highlights, {
+    col_start = input_start,
+    col_end = input_start + 1,
+    style = "muted",
+  })
+  table.insert(line.highlights, {
+    col_start = input_value_end,
+    col_end = input_value_end + 1,
+    style = "muted",
+  })
+
+  -- Highlight dropdown value area
+  local value_style = is_placeholder and "input_placeholder" or "dropdown"
+  table.insert(line.highlights, {
+    col_start = input_value_start,
+    col_end = input_value_end - arrow_len,  -- Exclude arrow from value highlight
+    style = value_style,
+  })
+
+  -- Highlight arrow separately
+  table.insert(line.highlights, {
+    col_start = input_value_end - arrow_len,
+    col_end = input_value_end,
+    style = "dropdown_arrow",
+  })
+
+  table.insert(self._lines, line)
+
+  -- Store dropdown field info
+  local line_num = #self._lines
+  self._dropdowns[key] = {
+    key = key,
+    line = line_num,
+    col_start = input_value_start,
+    col_end = input_value_end,
+    width = effective_width,
+    text_width = text_width,  -- Width without arrow
+    value = value,
+    default = value,
+    options = options,
+    max_height = max_height,
+    label = label,
+    prefix_len = #prefix,
+    placeholder = placeholder,
+    is_placeholder = is_placeholder,
+  }
+  table.insert(self._dropdown_order, key)
+
+  return self
+end
+
+---Add a dropdown field with label on same line (convenience method)
+---@param key string Unique identifier
+---@param label string Label text
+---@param opts table Options (same as dropdown)
+---@return ContentBuilder self For chaining
+function ContentBuilder:labeled_dropdown(key, label, opts)
+  opts = opts or {}
+  opts.label = label
+  return self:dropdown(key, opts)
+end
+
+---Get all dropdown field definitions
+---@return table<string, DropdownField> dropdowns Map of key -> DropdownField
+function ContentBuilder:get_dropdowns()
+  return self._dropdowns
+end
+
+---Get ordered list of dropdown keys
+---@return string[] keys Ordered dropdown keys
+function ContentBuilder:get_dropdown_order()
+  return self._dropdown_order
+end
+
+---Get a specific dropdown field
+---@param key string Dropdown key
+---@return DropdownField? field Dropdown field or nil
+function ContentBuilder:get_dropdown(key)
+  return self._dropdowns[key]
+end
+
+---Update a dropdown field's value
+---@param key string Dropdown key
+---@param value string New value
+---@return ContentBuilder self For chaining
+function ContentBuilder:set_dropdown_value(key, value)
+  local dropdown = self._dropdowns[key]
+  if dropdown then
+    dropdown.value = value
+    -- Update placeholder state
+    dropdown.is_placeholder = false
+    for _, opt in ipairs(dropdown.options) do
+      if opt.value == value then
+        dropdown.is_placeholder = false
+        break
+      end
+    end
   end
   return self
 end

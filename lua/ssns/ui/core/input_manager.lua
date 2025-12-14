@@ -9,9 +9,12 @@ InputManager.__index = InputManager
 ---@field winid number Window ID
 ---@field inputs table<string, InputField> Map of input key -> field info
 ---@field input_order string[] Ordered list of input keys
+---@field dropdowns table<string, DropdownField>? Map of dropdown key -> field info
+---@field dropdown_order string[]? Ordered list of dropdown keys
 ---@field on_value_change fun(key: string, value: string)? Called when input value changes
 ---@field on_input_enter fun(key: string)? Called when entering input mode
 ---@field on_input_exit fun(key: string)? Called when exiting input mode
+---@field on_dropdown_change fun(key: string, value: string)? Called when dropdown value changes
 
 ---@class InputField (from content_builder)
 ---@field key string Unique identifier for the input
@@ -38,31 +41,110 @@ InputManager.__index = InputManager
 ---@return InputManager
 function InputManager.new(config)
   local self = setmetatable({}, InputManager)
-  
+
   self.bufnr = config.bufnr
   self.winid = config.winid
   self.inputs = config.inputs or {}
   self.input_order = config.input_order or {}
+  self.dropdowns = config.dropdowns or {}
+  self.dropdown_order = config.dropdown_order or {}
   self.on_value_change = config.on_value_change
   self.on_input_enter = config.on_input_enter
   self.on_input_exit = config.on_input_exit
-  
+  self.on_dropdown_change = config.on_dropdown_change
+
+  -- Build combined field order (inputs and dropdowns interleaved by line number)
+  self._all_fields = {}  -- Array of { type = "input"|"dropdown", key = string, line = number }
+  self._field_order = {}  -- Ordered keys for navigation
+
   -- State
   self.in_input_mode = false
   self.active_input = nil
-  self.current_input_idx = 1  -- Track current input index for Tab navigation
+  self.current_field_idx = 1  -- Track current field index for Tab navigation
   self.values = {}
+  self.dropdown_values = {}
   self._namespace = vim.api.nvim_create_namespace("ssns_input_manager")
   self._autocmd_group = nil
-  
+
+  -- Dropdown state
+  self._dropdown_open = false
+  self._dropdown_key = nil
+  self._dropdown_winid = nil
+  self._dropdown_bufnr = nil
+  self._dropdown_selected_idx = 1
+  self._dropdown_original_value = nil
+  self._dropdown_filtered_options = nil
+  self._dropdown_filter_text = ""
+  self._dropdown_autocmd_group = nil
+
   -- Initialize values from input definitions and track placeholder state
   for key, input in pairs(self.inputs) do
     self.values[key] = input.value or ""
     -- Track if this input is showing placeholder
     input.is_showing_placeholder = (self.values[key] == "" and (input.placeholder or "") ~= "")
   end
-  
+
+  -- Initialize dropdown values
+  for key, dropdown in pairs(self.dropdowns) do
+    self.dropdown_values[key] = dropdown.value or ""
+  end
+
+  -- Build combined field order sorted by line number
+  self:_build_field_order()
+
   return self
+end
+
+---Build combined field order sorted by line number
+function InputManager:_build_field_order()
+  self._all_fields = {}
+
+  -- Add inputs
+  for _, key in ipairs(self.input_order) do
+    local input = self.inputs[key]
+    if input then
+      table.insert(self._all_fields, {
+        type = "input",
+        key = key,
+        line = input.line,
+      })
+    end
+  end
+
+  -- Add dropdowns
+  for _, key in ipairs(self.dropdown_order) do
+    local dropdown = self.dropdowns[key]
+    if dropdown then
+      table.insert(self._all_fields, {
+        type = "dropdown",
+        key = key,
+        line = dropdown.line,
+      })
+    end
+  end
+
+  -- Sort by line number
+  table.sort(self._all_fields, function(a, b)
+    return a.line < b.line
+  end)
+
+  -- Build ordered key list
+  self._field_order = {}
+  for _, field in ipairs(self._all_fields) do
+    table.insert(self._field_order, field.key)
+  end
+end
+
+---Get field info by key (input or dropdown)
+---@param key string Field key
+---@return table? field_info { type = "input"|"dropdown", field = InputField|DropdownField }
+function InputManager:_get_field(key)
+  if self.inputs[key] then
+    return { type = "input", field = self.inputs[key] }
+  elseif self.dropdowns[key] then
+    return { type = "dropdown", field = self.dropdowns[key] }
+  end
+  return nil
 end
 
 ---Setup input mode handling for the buffer
@@ -309,71 +391,85 @@ function InputManager:_sync_input_value()
   end
 end
 
----Navigate to next input field
+---Navigate to next field (input or dropdown)
 function InputManager:next_input()
-  if #self.input_order == 0 then return end
-  
-  -- Find next input index
-  local next_idx = (self.current_input_idx % #self.input_order) + 1
-  local next_key = self.input_order[next_idx]
-  
+  if #self._field_order == 0 then return end
+
+  -- Find next field index
+  local next_idx = (self.current_field_idx % #self._field_order) + 1
+  local next_key = self._field_order[next_idx]
+
   -- Update tracked index
-  self.current_input_idx = next_idx
-  
+  self.current_field_idx = next_idx
+
   -- Exit current input mode if active
   if self.in_input_mode then
-    -- Stop insert mode, then enter next
+    -- Stop insert mode, then move to next
     vim.cmd("stopinsert")
     vim.schedule(function()
-      self:enter_input_mode(next_key)
+      self:_focus_field(next_key)
     end)
   else
-    -- Move cursor and highlight
-    local input = self.inputs[next_key]
-    if input then
-      vim.api.nvim_win_set_cursor(self.winid, {input.line, input.col_start})
-      self:_highlight_current_input(next_key)
-    end
+    self:_focus_field(next_key)
   end
 end
 
----Navigate to previous input field
+---Navigate to previous field (input or dropdown)
 function InputManager:prev_input()
-  if #self.input_order == 0 then return end
-  
-  -- Find previous input index
-  local prev_idx = ((self.current_input_idx - 2) % #self.input_order) + 1
-  local prev_key = self.input_order[prev_idx]
-  
+  if #self._field_order == 0 then return end
+
+  -- Find previous field index
+  local prev_idx = ((self.current_field_idx - 2) % #self._field_order) + 1
+  local prev_key = self._field_order[prev_idx]
+
   -- Update tracked index
-  self.current_input_idx = prev_idx
-  
+  self.current_field_idx = prev_idx
+
   -- Exit current input mode if active
   if self.in_input_mode then
     vim.cmd("stopinsert")
     vim.schedule(function()
-      self:enter_input_mode(prev_key)
+      self:_focus_field(prev_key)
     end)
   else
-    -- Move cursor and highlight
-    local input = self.inputs[prev_key]
-    if input then
-      vim.api.nvim_win_set_cursor(self.winid, {input.line, input.col_start})
-      self:_highlight_current_input(prev_key)
-    end
+    self:_focus_field(prev_key)
+  end
+end
+
+---Focus a field (input or dropdown) without activating it
+---@param key string Field key
+function InputManager:_focus_field(key)
+  local field_info = self:_get_field(key)
+  if not field_info then return end
+
+  local field = field_info.field
+  vim.api.nvim_win_set_cursor(self.winid, {field.line, field.col_start})
+  self:_highlight_current_field(key)
+end
+
+---Activate a field (enter input mode or open dropdown)
+---@param key string Field key
+function InputManager:_activate_field(key)
+  local field_info = self:_get_field(key)
+  if not field_info then return end
+
+  if field_info.type == "input" then
+    self:enter_input_mode(key)
+  elseif field_info.type == "dropdown" then
+    self:_open_dropdown(key)
   end
 end
 
 ---Setup keymaps for input navigation
 function InputManager:_setup_input_keymaps()
   local opts = { buffer = self.bufnr, noremap = true, silent = true }
-  
-  -- Normal mode: Enter activates input under cursor (or at current index)
+
+  -- Normal mode: Enter activates field under cursor (or at current index)
   vim.keymap.set('n', '<CR>', function()
     local cursor = vim.api.nvim_win_get_cursor(self.winid)
     local row = cursor[1]
     local col = cursor[2]
-    
+
     -- First check if cursor is directly on an input
     for key, input in pairs(self.inputs) do
       if input.line == row and col >= input.col_start and col < input.col_end then
@@ -381,12 +477,20 @@ function InputManager:_setup_input_keymaps()
         return
       end
     end
-    
-    -- Otherwise, activate the current tracked input
-    if #self.input_order > 0 then
-      local current_key = self.input_order[self.current_input_idx]
+
+    -- Check if cursor is directly on a dropdown
+    for key, dropdown in pairs(self.dropdowns) do
+      if dropdown.line == row and col >= dropdown.col_start and col < dropdown.col_end then
+        self:_open_dropdown(key)
+        return
+      end
+    end
+
+    -- Otherwise, activate the current tracked field
+    if #self._field_order > 0 then
+      local current_key = self._field_order[self.current_field_idx]
       if current_key then
-        self:enter_input_mode(current_key)
+        self:_activate_field(current_key)
       end
     end
   end, opts)
