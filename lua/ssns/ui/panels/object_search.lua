@@ -70,6 +70,7 @@ local multi_panel = nil
 local search_augroup = nil
 
 
+
 ---@type ObjectSearchUIState
 local ui_state = {
   selected_server = nil,
@@ -778,10 +779,10 @@ function UiObjectSearch._apply_search(pattern)
   end
 end
 
+
 -- ============================================================================
 -- Render Functions
 -- ============================================================================
-
 
 ---Render the search panel (now just shows search input)
 ---@param state MultiPanelState
@@ -804,6 +805,69 @@ local function render_search(state)
   end
 
   return lines, highlights
+end
+
+---Render the filters panel (filter toggles + status/counts)
+---@param state MultiPanelState
+---@return string[] lines, table[] highlights
+local function render_filters(state)
+  local cb = ContentBuilder.new()
+
+  -- Row 1: Filter toggles
+  local name_icon = ui_state.search_names and "[N]" or "[ ]"
+  local defs_icon = ui_state.search_definitions and "[D]" or "[ ]"
+  local meta_icon = ui_state.search_metadata and "[M]" or "[ ]"
+
+  cb:spans({
+    { text = " ", style = "muted" },
+    { text = name_icon, style = ui_state.search_names and "success" or "muted" },
+    { text = " Name ", style = "muted" },
+    { text = "{1}", style = "comment" },
+    { text = "  ", style = "muted" },
+    { text = defs_icon, style = ui_state.search_definitions and "success" or "muted" },
+    { text = " Defs ", style = "muted" },
+    { text = "{2}", style = "comment" },
+    { text = "  ", style = "muted" },
+    { text = meta_icon, style = ui_state.search_metadata and "success" or "muted" },
+    { text = " Meta ", style = "muted" },
+    { text = "{3}", style = "comment" },
+  })
+
+  -- Row 2: Status/counts
+  if ui_state.loading_status == "loading" then
+    local filled = math.floor(ui_state.loading_progress / 10)
+    local progress_bar = string.rep("█", filled) .. string.rep("░", 10 - filled)
+    cb:spans({
+      { text = " [", style = "muted" },
+      { text = progress_bar, style = "success" },
+      { text = "] ", style = "muted" },
+      { text = string.format("%d%%", ui_state.loading_progress), style = "value" },
+      { text = " " .. ui_state.loading_message, style = "comment" },
+    })
+  elseif ui_state.selected_server then
+    -- Calculate visible object count (excluding system objects if filter is off)
+    local visible_object_count = 0
+    if ui_state.show_system then
+      visible_object_count = #ui_state.loaded_objects
+    else
+      for _, obj in ipairs(ui_state.loaded_objects) do
+        if not is_system_object(obj) then
+          visible_object_count = visible_object_count + 1
+        end
+      end
+    end
+
+    cb:spans({
+      { text = " Objects: ", style = "muted" },
+      { text = tostring(visible_object_count), style = "value" },
+      { text = " | Matches: ", style = "muted" },
+      { text = tostring(#ui_state.filtered_results), style = "value" },
+    })
+  else
+    cb:styled(" Select a server to search", "muted")
+  end
+
+  return cb:build_lines(), cb:build_highlights()
 end
 
 ---Build server dropdown options from cache and connections
@@ -984,49 +1048,8 @@ end
 local function render_results(state)
   local cb = ContentBuilder.new()
 
-  -- Sticky header: Search filter toggles (Name/Defs/Meta)
-  local name_icon = ui_state.search_names and "[N]" or "[ ]"
-  local defs_icon = ui_state.search_definitions and "[D]" or "[ ]"
-  local meta_icon = ui_state.search_metadata and "[M]" or "[ ]"
-
-  cb:spans({
-    { text = " ", style = "muted" },
-    { text = name_icon, style = ui_state.search_names and "success" or "muted" },
-    { text = " Name ", style = "muted" },
-    { text = "{1}", style = "comment" },
-    { text = "  ", style = "muted" },
-    { text = defs_icon, style = ui_state.search_definitions and "success" or "muted" },
-    { text = " Defs ", style = "muted" },
-    { text = "{2}", style = "comment" },
-    { text = "  ", style = "muted" },
-    { text = meta_icon, style = ui_state.search_metadata and "success" or "muted" },
-    { text = " Meta ", style = "muted" },
-    { text = "{3}", style = "comment" },
-  })
-
-  -- Header: Just show counts (server/database info is in settings panel)
-  if ui_state.selected_server then
-    cb:spans({
-      { text = " Objects: ", style = "muted" },
-      { text = tostring(#ui_state.loaded_objects), style = "value" },
-      { text = " | Matches: ", style = "muted" },
-      { text = tostring(#ui_state.filtered_results), style = "value" },
-    })
-  else
-    cb:styled(" Select a server to search", "muted")
-  end
-
-  -- Loading indicator
+  -- Don't show results while loading
   if ui_state.loading_status == "loading" then
-    local filled = math.floor(ui_state.loading_progress / 10)
-    local progress_bar = string.rep("█", filled) .. string.rep("░", 10 - filled)
-    cb:spans({
-      { text = " [", style = "muted" },
-      { text = progress_bar, style = "success" },
-      { text = "] ", style = "muted" },
-      { text = string.format("%d%%", ui_state.loading_progress), style = "value" },
-    })
-    cb:styled(" " .. ui_state.loading_message, "comment")
     return cb:build_lines(), cb:build_highlights()
   end
 
@@ -1270,14 +1293,18 @@ end
 
 ---Helper to apply search from current search term or buffer
 local function apply_current_search()
-  local search_buf = multi_panel and multi_panel:get_panel_buffer("search")
-  if search_buf and vim.api.nvim_buf_is_valid(search_buf) then
-    local lines = vim.api.nvim_buf_get_lines(search_buf, 0, 1, false)
-    local text = (lines[1] or ""):gsub("^%s+", "")
-    UiObjectSearch._apply_search(text)
-  else
-    UiObjectSearch._apply_search(ui_state.search_term)
+  -- Only read from buffer if we're actively editing the search
+  if ui_state.search_editing then
+    local search_buf = multi_panel and multi_panel:get_panel_buffer("search")
+    if search_buf and vim.api.nvim_buf_is_valid(search_buf) then
+      local lines = vim.api.nvim_buf_get_lines(search_buf, 0, 1, false)
+      local text = (lines[1] or ""):gsub("^%s+", "")
+      UiObjectSearch._apply_search(text)
+      return
+    end
   end
+  -- Use committed search term
+  UiObjectSearch._apply_search(ui_state.search_term)
 end
 
 ---Toggle functions for search settings
@@ -1315,6 +1342,7 @@ local function toggle_search_names()
   ui_state.search_names = not ui_state.search_names
   apply_current_search()
   if multi_panel then
+    multi_panel:render_panel("filters")
     multi_panel:render_panel("results")
   end
   vim.notify("Search names: " .. (ui_state.search_names and "ON" or "OFF"), vim.log.levels.INFO)
@@ -1324,6 +1352,7 @@ local function toggle_search_defs()
   ui_state.search_definitions = not ui_state.search_definitions
   apply_current_search()
   if multi_panel then
+    multi_panel:render_panel("filters")
     multi_panel:render_panel("results")
   end
   vim.notify("Search definitions: " .. (ui_state.search_definitions and "ON" or "OFF"), vim.log.levels.INFO)
@@ -1333,6 +1362,7 @@ local function toggle_search_meta()
   ui_state.search_metadata = not ui_state.search_metadata
   apply_current_search()
   if multi_panel then
+    multi_panel:render_panel("filters")
     multi_panel:render_panel("results")
   end
   vim.notify("Search metadata: " .. (ui_state.search_metadata and "ON" or "OFF"), vim.log.levels.INFO)
@@ -1343,6 +1373,7 @@ local function toggle_system()
   apply_current_search()
   if multi_panel then
     multi_panel:render_panel("settings")
+    multi_panel:render_panel("filters")
     multi_panel:render_panel("results")
   end
   vim.notify("Show system: " .. (ui_state.show_system and "ON" or "OFF"), vim.log.levels.INFO)
@@ -1460,7 +1491,7 @@ local function navigate_results(direction)
     local results_buf = multi_panel:get_panel_buffer("results")
     if results_buf and vim.api.nvim_buf_is_valid(results_buf) then
       local line_count = vim.api.nvim_buf_line_count(results_buf)
-      local target_line = math.min(ui_state.selected_result_idx + 2, line_count)
+      local target_line = math.min(ui_state.selected_result_idx, line_count)
       target_line = math.max(1, target_line)
       multi_panel:set_cursor("results", target_line, 0)
     end
@@ -1890,38 +1921,53 @@ function UiObjectSearch.show(options)
           },
         },
         {
-          -- Bottom section: results (left) + metadata/definition (right)
+          -- Bottom section: (filters + results) (left) + metadata/definition (right)
           split = "horizontal",
           ratio = 0.90,
           children = {
             {
-              name = "results",
-              title = "Results",
+              -- Left column: filters + results
+              split = "vertical",
               ratio = 0.40,
-              focusable = true,
-              cursorline = true,
-              on_render = render_results,
-              on_focus = function()
-                if multi_panel then
-                  multi_panel:update_panel_title("settings", "Settings")
-                  multi_panel:update_panel_title("results", "Results ●")
-                  multi_panel:update_panel_title("metadata", "Metadata")
-                  multi_panel:update_panel_title("definition", "Definition")
-                  -- Position cursor on currently selected result
-                  vim.schedule(function()
-                    if multi_panel and multi_panel:is_valid() then
-                      local results_buf = multi_panel:get_panel_buffer("results")
-                      if results_buf and vim.api.nvim_buf_is_valid(results_buf) then
-                        local line_count = vim.api.nvim_buf_line_count(results_buf)
-                        -- Results start at line 2 (line 1 is header)
-                        local target_line = math.min(ui_state.selected_result_idx + 2, line_count)
-                        target_line = math.max(1, target_line)
-                        multi_panel:set_cursor("results", target_line, 0)
-                      end
+              children = {
+                {
+                  name = "filters",
+                  title = "Filters",
+                  ratio = 0.08,
+                  min_height = 2,
+                  focusable = false,
+                  cursorline = false,
+                  on_render = render_filters,
+                },
+                {
+                  name = "results",
+                  title = "Results",
+                  ratio = 0.92,
+                  focusable = true,
+                  cursorline = true,
+                  on_render = render_results,
+                  on_focus = function()
+                    if multi_panel then
+                      multi_panel:update_panel_title("settings", "Settings")
+                      multi_panel:update_panel_title("results", "Results ●")
+                      multi_panel:update_panel_title("metadata", "Metadata")
+                      multi_panel:update_panel_title("definition", "Definition")
+                      -- Position cursor on currently selected result
+                      vim.schedule(function()
+                        if multi_panel and multi_panel:is_valid() then
+                          local results_buf = multi_panel:get_panel_buffer("results")
+                          if results_buf and vim.api.nvim_buf_is_valid(results_buf) then
+                            local line_count = vim.api.nvim_buf_line_count(results_buf)
+                            local target_line = math.min(ui_state.selected_result_idx, line_count)
+                            target_line = math.max(1, target_line)
+                            multi_panel:set_cursor("results", target_line, 0)
+                          end
+                        end
+                      end)
                     end
-                  end)
-                end
-              end,
+                  end,
+                },
+              },
             },
             {
               -- Right column: metadata + definition
