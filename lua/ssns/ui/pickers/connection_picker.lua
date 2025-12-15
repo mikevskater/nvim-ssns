@@ -4,11 +4,58 @@ local UiConnectionPicker = {}
 
 local UiFloatInteractive = require('ssns.ui.base.float_interactive')
 local ContentBuilder = require('ssns.ui.core.content_builder')
+local UiFloat = require('ssns.ui.core.float')
 local UiQuery = require('ssns.ui.core.query')
 local Cache = require('ssns.cache')
 local Connections = require('ssns.connections')
 local Config = require('ssns.config')
 local QueryParser = require('ssns.query_parser')
+
+---Show controls popup for server picker
+local function show_server_picker_controls()
+  local controls = {
+    {
+      header = "Server Picker",
+      keys = {
+        { key = "j/k", desc = "Navigate up/down" },
+        { key = "Enter", desc = "Select server / Attach" },
+        { key = "Esc", desc = "Cancel" },
+      },
+    },
+  }
+  UiFloat._show_controls_popup(controls)
+end
+
+---Show controls popup for hierarchical picker
+local function show_hierarchical_picker_controls()
+  local controls = {
+    {
+      header = "Connection Picker",
+      keys = {
+        { key = "j/k", desc = "Navigate up/down" },
+        { key = "Enter", desc = "Next step / Attach" },
+        { key = "Backspace", desc = "Go back (in database view)" },
+        { key = "Esc", desc = "Cancel" },
+      },
+    },
+  }
+  UiFloat._show_controls_popup(controls)
+end
+
+---Show controls popup for database picker
+local function show_database_picker_controls()
+  local controls = {
+    {
+      header = "Database Picker",
+      keys = {
+        { key = "j/k", desc = "Navigate up/down" },
+        { key = "Enter", desc = "Switch database" },
+        { key = "Esc", desc = "Cancel" },
+      },
+    },
+  }
+  UiFloat._show_controls_popup(controls)
+end
 
 ---Get the default database name for a server type
 ---@param db_type string Database type (sqlserver, postgres, mysql, sqlite)
@@ -334,7 +381,7 @@ function UiConnectionPicker.show(bufnr)
   -- Create picker using UiFloatInteractive
   local state = UiFloatInteractive.create({
     title = " Attach Server ",
-    footer = " <CR> Attach | <Esc> Cancel | j/k Navigate ",
+    footer = " <CR> Attach | j/k Navigate | ? Controls ",
     width = 50,
     height = math.min(#servers + 10, 25),
     header_lines = 7,  -- Number of lines before selectable items
@@ -360,6 +407,11 @@ function UiConnectionPicker.show(bufnr)
       -- Attach the connection
       attach_connection_to_buffer(target_bufnr, connection)
     end,
+    custom_keymaps = {
+      ["?"] = function(_)
+        show_server_picker_controls()
+      end,
+    },
   })
 
   if state then
@@ -469,7 +521,7 @@ function UiConnectionPicker.show_hierarchical(bufnr)
   -- Create picker using UiFloatInteractive
   local state = UiFloatInteractive.create({
     title = " Select Server ",
-    footer = " <CR> Next | <Esc> Cancel | j/k Navigate ",
+    footer = " <CR> Next | j/k Navigate | ? Controls ",
     width = 50,
     height = math.min(#servers + 8, 25),
     header_lines = 4,  -- Empty, legend, separator, empty
@@ -540,7 +592,7 @@ function UiConnectionPicker.show_hierarchical(bufnr)
 
         -- Update UI
         UiFloatInteractive.update_title(st, string.format(" %s - Select Database ", server_info.server_name))
-        UiFloatInteractive.update_footer(st, " <CR> Attach | <BS> Back | <Esc> Cancel | j/k Navigate ")
+        UiFloatInteractive.update_footer(st, " <CR> Attach | <BS> Back | j/k Navigate | ? Controls ")
         UiFloatInteractive.render(st)
       else
         -- Database selected - attach
@@ -573,9 +625,12 @@ function UiConnectionPicker.show_hierarchical(bufnr)
           st.config.item_count = #st.data.servers  -- Restore server item count
           st.config.header_lines = 4  -- Empty, legend, separator, empty
           UiFloatInteractive.update_title(st, " Select Server ")
-          UiFloatInteractive.update_footer(st, " <CR> Next | <Esc> Cancel | j/k Navigate ")
+          UiFloatInteractive.update_footer(st, " <CR> Next | j/k Navigate | ? Controls ")
           UiFloatInteractive.render(st)
         end
+      end,
+      ["?"] = function(_)
+        show_hierarchical_picker_controls()
       end,
     },
   })
@@ -711,7 +766,7 @@ function UiConnectionPicker.show_database_picker(bufnr)
   -- Create picker using UiFloatInteractive
   local state = UiFloatInteractive.create({
     title = string.format(" %s - Select Database ", server.name),
-    footer = " <CR> Switch | <Esc> Cancel | j/k Navigate ",
+    footer = " <CR> Switch | j/k Navigate | ? Controls ",
     width = 45,
     height = math.min(#databases + 8, 25),
     header_lines = 4,  -- Empty, server name, separator, empty
@@ -746,6 +801,11 @@ function UiConnectionPicker.show_database_picker(bufnr)
 
       attach_connection_to_buffer(target_bufnr, connection)
     end,
+    custom_keymaps = {
+      ["?"] = function(_)
+        show_database_picker_controls()
+      end,
+    },
   })
 
   if state then
