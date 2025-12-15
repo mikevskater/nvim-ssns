@@ -191,6 +191,51 @@ end
 
 ---Setup keymaps for query buffer
 ---@param bufnr number The buffer number
+---Show controls popup for query buffer
+function UiQuery.show_query_controls()
+  local UiFloat = require('ssns.ui.core.float')
+  local km = KeymapManager.get_group("query")
+
+  local controls = {
+    {
+      header = "Execute",
+      keys = {
+        { key = km.execute or "Leader-r", desc = "Execute query (buffer)" },
+        { key = km.execute or "Leader-r", desc = "Execute selection (visual)" },
+        { key = km.execute_statement or "Leader-R", desc = "Execute statement under cursor" },
+      },
+    },
+    {
+      header = "Navigation",
+      keys = {
+        { key = km.go_to or "gd", desc = "Go to object in tree" },
+        { key = km.view_definition or "K", desc = "View object definition" },
+        { key = km.view_metadata or "M", desc = "View object metadata" },
+      },
+    },
+    {
+      header = "Connection",
+      keys = {
+        { key = km.attach_connection or "A-s", desc = "Attach buffer to connection" },
+        { key = km.change_connection or "A-S", desc = "Change connection (hierarchical)" },
+        { key = km.change_database or "A-d", desc = "Change database" },
+      },
+    },
+    {
+      header = "Actions",
+      keys = {
+        { key = km.toggle_results or "C-r", desc = "Toggle results window" },
+        { key = km.save or "Leader-s", desc = "Save query" },
+        { key = km.expand_asterisk or "Leader-ce", desc = "Expand asterisk to columns" },
+        { key = km.new or "C-n", desc = "New query buffer" },
+        { key = km.show_history or "Leader-@", desc = "Show query history" },
+      },
+    },
+  }
+
+  UiFloat._show_controls_popup(controls)
+end
+
 function UiQuery.setup_query_keymaps(bufnr)
   local km = KeymapManager.get_group("query")
 
@@ -272,6 +317,11 @@ function UiQuery.setup_query_keymaps(bufnr)
       local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
       ConnectionPicker.show_database_picker(bufnr)
     end, desc = "Change database" },
+
+    -- Show controls
+    { mode = "n", lhs = "?", rhs = function()
+      UiQuery.show_query_controls()
+    end, desc = "Show controls" },
   }
 
   KeymapManager.set_multiple(bufnr, keymaps, true)
@@ -1386,6 +1436,27 @@ end
 
 ---Setup keymaps for the results buffer
 ---@param result_buf number The results buffer number
+---Show controls popup for results buffer
+function UiQuery.show_results_controls()
+  local UiFloat = require('ssns.ui.core.float')
+  local km = KeymapManager.get_group("results")
+  local query_km = KeymapManager.get_group("query")
+
+  local controls = {
+    {
+      header = "Results Buffer",
+      keys = {
+        { key = km.close or "q", desc = "Close results window" },
+        { key = km.toggle or query_km.toggle_results or "C-r", desc = "Toggle results window" },
+        { key = km.export_csv or "A-e", desc = "Export results to CSV file" },
+        { key = km.yank_csv or "A-y", desc = "Yank results as CSV to clipboard" },
+      },
+    },
+  }
+
+  UiFloat._show_controls_popup(controls)
+end
+
 function UiQuery.setup_results_keymaps(result_buf)
   local km = KeymapManager.get_group("results")
   local query_km = KeymapManager.get_group("query")
@@ -1410,6 +1481,11 @@ function UiQuery.setup_results_keymaps(result_buf)
     { mode = "n", lhs = km.yank_csv or "<A-y>", rhs = function()
       UiQuery.yank_results_as_csv()
     end, desc = "Yank results as CSV" },
+
+    -- Show controls
+    { mode = "n", lhs = "?", rhs = function()
+      UiQuery.show_results_controls()
+    end, desc = "Show controls" },
   }
 
   KeymapManager.set_multiple(result_buf, keymaps, true)
