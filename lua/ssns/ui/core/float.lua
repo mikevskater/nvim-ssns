@@ -1,3 +1,11 @@
+---@class ControlKeyDef
+---@field key string The key or key combination
+---@field desc string Description of what the key does
+
+---@class ControlsDefinition
+---@field header string? Section header text
+---@field keys ControlKeyDef[] Array of key definitions
+
 ---@class FloatConfig
 ---Configuration for floating window creation
 ---@field title string? Window title text
@@ -33,6 +41,7 @@
 ---@field content_builder ContentBuilder? ContentBuilder instance for styled content with inputs
 ---@field enable_inputs boolean? Enable input field mode for the window
 ---@field scrollbar boolean? Show scrollbar when content exceeds window height (default: true)
+---@field controls ControlsDefinition[]? Controls/keybindings to show in "?" popup
 
 ---Scrollbar characters
 local SCROLLBAR_CHARS = {
@@ -191,6 +200,11 @@ function FloatWindow:_apply_defaults()
   c.zindex = c.zindex or 50
   c.style = c.style or "minimal"
   c.scrollbar = c.scrollbar ~= false  -- Default true
+
+  -- Default footer to "? = Controls" when controls are defined
+  if not c.footer and c.controls and #c.controls > 0 then
+    c.footer = "? = Controls"
+  end
 end
 
 ---Create the buffer
@@ -384,6 +398,13 @@ function FloatWindow:_setup_keymaps()
     vim.keymap.set('n', '<Esc>', function()
       self:close()
     end, { buffer = bufnr, noremap = true, silent = true, desc = "Close window" })
+  end
+
+  -- Controls popup keymap (when controls are defined)
+  if self.config.controls and #self.config.controls > 0 then
+    vim.keymap.set('n', '?', function()
+      self:show_controls()
+    end, { buffer = bufnr, noremap = true, silent = true, desc = "Show controls" })
   end
 
   -- Custom keymaps
@@ -1119,11 +1140,11 @@ function FloatWindow:update_styled(content_builder)
   if not self:is_valid() then
     return
   end
-  
+
   -- Update lines
   local lines = content_builder:build_lines()
   self:update_lines(lines)
-  
+
   -- Reapply highlights
   local ns_id = self._content_ns or vim.api.nvim_create_namespace("ssns_float_content")
   content_builder:apply_to_buffer(self.bufnr, ns_id)
@@ -1131,10 +1152,68 @@ function FloatWindow:update_styled(content_builder)
   self._content_builder = content_builder
 end
 
+---Show controls popup
+---@param controls ControlsDefinition[]? Controls to show (uses config.controls if nil)
+function FloatWindow:show_controls(controls)
+  controls = controls or self.config.controls
+  if not controls or #controls == 0 then
+    vim.notify("No controls defined", vim.log.levels.INFO)
+    return
+  end
+
+  -- Use the shared helper to render controls popup
+  UiFloat._show_controls_popup(controls)
+end
+
 ---Get the ContentBuilder module for convenience
 ---@return ContentBuilder
 function UiFloat.ContentBuilder()
   return require('ssns.ui.core.content_builder')
+end
+
+---Helper to show controls popup (shared by FloatWindow and MultiPanelWindow)
+---@param controls ControlsDefinition[] Controls to display
+function UiFloat._show_controls_popup(controls)
+  local ContentBuilder = require('ssns.ui.core.content_builder')
+  local cb = ContentBuilder.new()
+
+  cb:header("Controls")
+  cb:blank()
+
+  -- Calculate max key width for alignment
+  local max_key_width = 0
+  for _, section in ipairs(controls) do
+    for _, keydef in ipairs(section.keys or {}) do
+      max_key_width = math.max(max_key_width, #keydef.key)
+    end
+  end
+
+  -- Render each section
+  for i, section in ipairs(controls) do
+    if section.header then
+      cb:section(section.header)
+    end
+
+    for _, keydef in ipairs(section.keys or {}) do
+      -- Pad key to max width for alignment
+      local padded_key = keydef.key .. string.rep(" ", max_key_width - #keydef.key)
+      cb:line(string.format("  %s  %s", padded_key, keydef.desc))
+    end
+
+    -- Add blank line between sections (but not after last)
+    if i < #controls then
+      cb:blank()
+    end
+  end
+
+  UiFloat.create({
+    title = "Controls",
+    content_builder = cb,
+    min_width = 40,
+    max_width = 60,
+    border = "rounded",
+    zindex = UiFloat.ZINDEX.MODAL,
+  })
 end
 
 -- ============================================================================
@@ -2440,47 +2519,8 @@ function MultiPanelWindow:show_controls(controls)
     return
   end
 
-  local ContentBuilder = require('ssns.ui.core.content_builder')
-  local cb = ContentBuilder.new()
-
-  cb:header("Controls")
-  cb:blank()
-
-  -- Calculate max key width for alignment
-  local max_key_width = 0
-  for _, section in ipairs(controls) do
-    for _, keydef in ipairs(section.keys or {}) do
-      max_key_width = math.max(max_key_width, #keydef.key)
-    end
-  end
-
-  -- Render each section
-  for i, section in ipairs(controls) do
-    if section.header then
-      cb:section(section.header)
-    end
-
-    for _, keydef in ipairs(section.keys or {}) do
-      -- Pad key to max width for alignment
-      local padded_key = keydef.key .. string.rep(" ", max_key_width - #keydef.key)
-      cb:line(string.format("  %s  %s", padded_key, keydef.desc))
-    end
-
-    -- Add blank line between sections (but not after last)
-    if i < #controls then
-      cb:blank()
-    end
-  end
-
-  -- Create popup
-  UiFloat.create({
-    title = "Controls",
-    content_builder = cb,
-    min_width = 40,
-    max_width = 60,
-    border = "rounded",
-    zindex = UiFloat.ZINDEX.MODAL,
-  })
+  -- Use the shared helper
+  UiFloat._show_controls_popup(controls)
 end
 
 return UiFloat
