@@ -1078,9 +1078,37 @@ function UiHistory.show_history(options)
     },
     total_width_ratio = 0.70,
     total_height_ratio = 0.70,
-    footer = " <Tab>=Switch | <CR>=Load | d=Delete | c=Clear | x=Export | /=Search | q=Close ",
     initial_focus = "buffers",
     augroup_name = "SSNSQueryHistory",
+    controls = {
+      {
+        header = "Navigation",
+        keys = {
+          { key = "j/k", desc = "Navigate up/down" },
+          { key = "Tab", desc = "Switch panels" },
+          { key = "S-Tab", desc = "Previous panel" },
+        },
+      },
+      {
+        header = "Search",
+        keys = {
+          { key = "/", desc = "Activate search" },
+          { key = "A-c", desc = "Toggle case sensitive (in search)" },
+          { key = "A-r", desc = "Toggle regex mode (in search)" },
+          { key = "A-w", desc = "Toggle whole word (in search)" },
+        },
+      },
+      {
+        header = "Actions",
+        keys = {
+          { key = "Enter", desc = "Load selected query" },
+          { key = "d", desc = "Delete entry/buffer" },
+          { key = "c", desc = "Clear all history" },
+          { key = "x", desc = "Export history" },
+          { key = "q/Esc", desc = "Close" },
+        },
+      },
+    },
     on_close = function()
       -- Clean up search autocmds
       if search_augroup then
