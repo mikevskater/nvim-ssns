@@ -1752,7 +1752,7 @@ function UiFloat.create_multi_panel(config)
       col = footer_col,  -- Centered within the layout
       style = "minimal",
       border = "none",
-      zindex = 52,
+      zindex = UiFloat.ZINDEX.OVERLAY + 10,  -- Above junction overlays
       focusable = false,
     })
 
