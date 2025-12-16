@@ -1,4 +1,5 @@
 local BaseDbObject = require('ssns.classes.base')
+local TypeFormatter = require('ssns.utils.type_formatter')
 
 ---@class ParameterClass : BaseDbObject
 ---@field parameter_name string The parameter name
@@ -43,30 +44,7 @@ end
 ---Get the full type string (e.g., "nvarchar(50)", "decimal(18,2)")
 ---@return string
 function ParameterClass:get_full_type()
-  local type_str = self.data_type
-
-  -- Add length/precision/scale based on type
-  if self.max_length and self.max_length > 0 then
-    -- Character and binary types
-    if self.max_length == -1 then
-      -- MAX length in SQL Server
-      type_str = type_str .. "(MAX)"
-    elseif self.data_type:match("^n") then
-      -- Unicode types (nvarchar, nchar) - divide by 2 for display
-      type_str = string.format("%s(%d)", type_str, self.max_length / 2)
-    else
-      type_str = string.format("%s(%d)", type_str, self.max_length)
-    end
-  elseif self.precision and self.precision > 0 then
-    -- Numeric types with precision
-    if self.scale and self.scale > 0 then
-      type_str = string.format("%s(%d,%d)", type_str, self.precision, self.scale)
-    else
-      type_str = string.format("%s(%d)", type_str, self.precision)
-    end
-  end
-
-  return type_str
+  return TypeFormatter.format_from_object(self)
 end
 
 ---Get the mode indicator (IN/OUT/INOUT)
