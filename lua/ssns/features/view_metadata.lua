@@ -3,27 +3,28 @@
 ---Uses standardized get_metadata_info() method from object classes
 local ViewMetadata = {}
 
+local BaseViewer = require('ssns.features.base_viewer')
 local GoTo = require('ssns.features.go_to')
-local UiFloat = require('ssns.ui.core.float')
-local ContentBuilder = require('ssns.ui.core.content_builder')
 
--- Store reference to current floating window for cleanup
-local current_float = nil
+-- Create viewer instance
+local viewer = BaseViewer.create({
+  title = "Metadata",
+  min_width = 50,
+  max_width = math.floor(vim.o.columns * 0.85),
+  max_height = math.floor(vim.o.lines * 0.7),
+  footer = " q/ESC/<CR>: close ",
+})
 
 ---Close the current floating window
 function ViewMetadata.close_current_float()
-  if current_float then
-    if current_float.bufnr then
-      local success, UiQuery = pcall(require, 'ssns.ui.query')
-      if success then
-        UiQuery.query_buffers[current_float.bufnr] = nil
-      end
-    end
-    if current_float.close then
-      pcall(function() current_float:close() end)
+  -- Clean up buffer registration from UiQuery if needed
+  if viewer.current_float and viewer.current_float.bufnr then
+    local success, UiQuery = pcall(require, 'ssns.ui.query')
+    if success then
+      UiQuery.query_buffers[viewer.current_float.bufnr] = nil
     end
   end
-  current_float = nil
+  viewer:close()
 end
 
 ---Pad string to width
@@ -95,22 +96,6 @@ local function format_section_styled(cb, section)
   end
 end
 
----Format metadata info into styled ContentBuilder
----@param metadata table Metadata with sections array
----@return ContentBuilder cb
-local function format_metadata_styled(metadata)
-  local cb = ContentBuilder.new()
-
-  for i, section in ipairs(metadata.sections or {}) do
-    if i > 1 then
-      cb:blank()  -- Blank line between sections
-    end
-    format_section_styled(cb, section)
-  end
-
-  return cb
-end
-
 ---Get display name for an object
 ---@param obj BaseDbObject
 ---@return string
@@ -123,8 +108,6 @@ end
 ---@param target_object BaseDbObject The resolved object
 ---@param identifier string The original identifier string
 function ViewMetadata.show_metadata_float(target_object, identifier)
-  ViewMetadata.close_current_float()
-
   -- Get metadata from object
   local metadata = target_object:get_metadata_info()
   if not metadata or not metadata.sections or #metadata.sections == 0 then
@@ -132,39 +115,28 @@ function ViewMetadata.show_metadata_float(target_object, identifier)
     return
   end
 
-  -- Format into styled ContentBuilder
-  local cb = format_metadata_styled(metadata)
-
   -- Build title
   local obj_type = (target_object.object_type or "object"):upper()
   local obj_name = get_object_display_name(target_object)
   local schema_name = target_object.schema_name
   local display_name = schema_name and (schema_name .. "." .. obj_name) or obj_name
-  local title = string.format(" %s: %s ", obj_type, display_name)
+  viewer.title = string.format(" %s: %s ", obj_type, display_name)
 
-  -- Create floating window
-  current_float = UiFloat.create_styled(cb, {
-    title = title,
-    title_pos = "center",
-    footer = " q/ESC/<CR>: close ",
-    footer_pos = "center",
-    border = "rounded",
-    readonly = true,
-    modifiable = false,
-    cursorline = true,
-    wrap = false,
-    centered = true,
-    max_width = math.floor(vim.o.columns * 0.85),
-    max_height = math.floor(vim.o.lines * 0.7),
-    min_width = 50,
-    min_height = 5,
-    default_keymaps = false,
-    keymaps = {
-      ["q"] = function() ViewMetadata.close_current_float() end,
-      ["<Esc>"] = function() ViewMetadata.close_current_float() end,
-      ["<CR>"] = function() ViewMetadata.close_current_float() end,
-    },
+  -- Set keymaps for closing
+  viewer:set_keymaps({
+    ["<Esc>"] = function() ViewMetadata.close_current_float() end,
+    ["<CR>"] = function() ViewMetadata.close_current_float() end,
   })
+
+  -- Show content (no JSON needed for metadata viewer)
+  viewer:show(function(cb)
+    for i, section in ipairs(metadata.sections or {}) do
+      if i > 1 then
+        cb:blank()  -- Blank line between sections
+      end
+      format_section_styled(cb, section)
+    end
+  end)
 end
 
 ---View the metadata of the object under cursor
