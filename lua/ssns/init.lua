@@ -117,6 +117,16 @@ function Ssns.setup(user_config)
 
       -- Build list of keymaps to set
       local sql_keymaps = {
+        -- Show controls popup
+        {
+          mode = "n",
+          lhs = "?",
+          rhs = function()
+            local UiQuery = require('ssns.ui.core.query')
+            UiQuery.show_query_controls()
+          end,
+          desc = "SSNS: Show controls",
+        },
         -- Expand asterisk keymap
         {
           mode = "n",
