@@ -73,9 +73,10 @@
 ---@field highlight_null boolean Show NULL values with distinct styling (default: true)
 ---@field null_display string How to display NULL values (default: "NULL")
 ---@field max_col_width number? Maximum column width before wrapping (nil = no limit, default: 50)
----@field wrap_mode string Text wrapping mode: "word" | "char" | "none" (default: "word")
+---@field wrap_mode string Text wrapping mode: "word" | "char" | "truncate" (default: "word")
 ---@field show_row_numbers boolean Show row number column (default: true)
 ---@field preserve_newlines boolean Honor newlines in values, rendering as multi-line cells (default: true)
+---@field row_separators boolean|string Show separators between data rows: true | false | "auto" (default: "auto" = on for multi-line, off for truncate)
 
 ---@class QueryHistoryConfig
 ---@field enabled boolean Enable query history tracking (default: true)
@@ -575,16 +576,22 @@ local default_config = {
     max_col_width = 50,
 
     -- Text wrapping mode when max_col_width is reached
-    -- "word" = wrap at word boundaries
-    -- "char" = wrap at exact character position
-    -- "none" = truncate with ellipsis instead of wrapping
+    -- "word" = wrap at word boundaries (multi-line cells)
+    -- "char" = wrap at exact character position (multi-line cells)
+    -- "truncate" = cut off at max_col_width or first newline with "..." (single-line cells)
     wrap_mode = "word",
 
     -- Show row number column on the left (SSMS style)
     show_row_numbers = true,
 
     -- Honor newlines in values, rendering as multi-line cells
+    -- (ignored when wrap_mode = "truncate")
     preserve_newlines = true,
+
+    -- Show separators between data rows (SSMS style boxes)
+    -- true = always show, false = never show
+    -- "auto" = show for multi-line modes (word/char), hide for truncate mode
+    row_separators = "auto",
   },
 
   query_history = {

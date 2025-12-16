@@ -1325,7 +1325,7 @@ end
 ---Wrap text to fit within a maximum width
 ---@param text string The text to wrap
 ---@param max_width number Maximum width per line
----@param mode string Wrap mode: "word" | "char" | "none"
+---@param mode string Wrap mode: "word" | "char" | "truncate"
 ---@param preserve_newlines boolean Whether to honor existing newlines
 ---@return string[] lines Array of wrapped lines
 function ContentBuilder.wrap_text(text, max_width, mode, preserve_newlines)
@@ -1336,14 +1336,35 @@ function ContentBuilder.wrap_text(text, max_width, mode, preserve_newlines)
   -- Convert to string if needed
   text = tostring(text)
 
-  -- Handle "none" mode - truncate with ellipsis
-  if mode == "none" then
-    -- First, collapse all newlines to spaces
-    local collapsed = text:gsub("\r\n", " "):gsub("\n", " "):gsub("\r", " ")
-    if #collapsed <= max_width then
-      return { collapsed }
+  -- Handle "truncate" mode - cut at first newline OR max_width, add "..."
+  -- This mode always returns a single line
+  if mode == "truncate" then
+    -- Find first newline position
+    local first_newline = text:find("[\r\n]")
+    local truncated = text
+
+    -- Cut at first newline if present
+    if first_newline then
+      truncated = text:sub(1, first_newline - 1)
     end
-    return { collapsed:sub(1, max_width - 3) .. "..." }
+
+    -- Now apply max_width truncation
+    if #truncated <= max_width then
+      -- Fits, but indicate truncation if there was more content
+      if first_newline or #text > #truncated then
+        if #truncated + 3 <= max_width then
+          return { truncated .. "..." }
+        elseif #truncated > 3 then
+          return { truncated:sub(1, max_width - 3) .. "..." }
+        else
+          return { truncated }
+        end
+      end
+      return { truncated }
+    else
+      -- Truncate at max_width
+      return { truncated:sub(1, max_width - 3) .. "..." }
+    end
   end
 
   local lines = {}

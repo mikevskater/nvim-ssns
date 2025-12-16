@@ -1328,6 +1328,23 @@ function UiQuery.format_single_result_set_styled(result_set, columns_metadata, b
   local wrap_mode = results_config.wrap_mode or "word"
   local show_row_numbers = results_config.show_row_numbers ~= false  -- default true
   local preserve_newlines = results_config.preserve_newlines ~= false  -- default true
+  local row_separators_config = results_config.row_separators
+  if row_separators_config == nil then row_separators_config = "auto" end
+
+  -- Determine whether to show row separators
+  -- "auto" = show for multi-line modes (word/char), hide for truncate
+  -- true/false = explicit override
+  local show_row_separators
+  if row_separators_config == "auto" then
+    show_row_separators = (wrap_mode ~= "truncate")
+  else
+    show_row_separators = (row_separators_config == true)
+  end
+
+  -- In truncate mode, preserve_newlines is ignored (always single line)
+  if wrap_mode == "truncate" then
+    preserve_newlines = false
+  end
 
   -- Get column names and types from metadata or first row
   -- Track both actual key (for row access) and display name (for UI)
@@ -1478,9 +1495,14 @@ function UiQuery.format_single_result_set_styled(result_set, columns_metadata, b
           value_str = tostring(value)
         end
 
-        -- Wrap the text if max_col_width is set
+        -- Wrap or truncate the text based on mode
         local lines
-        if max_col_width and widths[i] >= max_col_width then
+        if wrap_mode == "truncate" then
+          -- Truncate mode: always single line, cut at max_col_width or first newline
+          local effective_width = max_col_width or widths[i]
+          lines = ContentBuilder.wrap_text(value_str, effective_width, "truncate", false)
+        elseif max_col_width and widths[i] >= max_col_width then
+          -- Multi-line wrap mode with max width reached
           lines = ContentBuilder.wrap_text(value_str, widths[i], wrap_mode, preserve_newlines)
         elseif preserve_newlines and value_str:match("[\r\n]") then
           -- Just split by newlines, no wrapping needed
@@ -1497,8 +1519,8 @@ function UiQuery.format_single_result_set_styled(result_set, columns_metadata, b
         })
       end
 
-      -- Add row separator before each row (except first)
-      if row_idx > 1 then
+      -- Add row separator before each row (except first) if enabled
+      if show_row_separators and row_idx > 1 then
         builder:result_row_separator_with_rownum(col_info, border_style, row_num_width)
       end
 
