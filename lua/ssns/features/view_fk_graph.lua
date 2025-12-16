@@ -10,6 +10,7 @@ local JsonUtils = require('ssns.utils.json')
 local FKGraph = require('ssns.completion.fk_graph')
 local StatementContext = require('ssns.completion.statement_context')
 local Resolver = require('ssns.completion.metadata.resolver')
+local BufferConnection = require('ssns.utils.buffer_connection')
 
 -- Store reference to current floating window for cleanup
 local current_float = nil
@@ -22,42 +23,6 @@ function ViewFKGraph.close_current_float()
     end
   end
   current_float = nil
-end
-
----Get current connection context
----@return table? connection
-local function get_connection()
-  local Cache = require('ssns.cache')
-  local bufnr = vim.api.nvim_get_current_buf()
-
-  -- Try to get buffer-local database connection
-  local db_key = vim.b[bufnr].ssns_db_key
-  if not db_key then
-    return nil
-  end
-
-  -- Parse db_key format: "server_name:database_name"
-  local server_name, db_name = db_key:match("^([^:]+):(.+)$")
-  if not server_name or not db_name then
-    return nil
-  end
-
-  -- Find server and database in cache
-  local server = Cache.find_server(server_name)
-  if not server then
-    return nil
-  end
-
-  local database = server:find_database(db_name)
-  if not database then
-    return nil
-  end
-
-  return {
-    server = server,
-    database = database,
-    connection_config = server.connection_config,
-  }
 end
 
 ---Get FK constraints from a table
@@ -108,7 +73,7 @@ local function build_styled_content(bufnr, line_num, col)
   cb:blank()
 
   -- Get connection
-  local connection = get_connection()
+  local connection = BufferConnection.get_connection(bufnr)
   if not connection then
     cb:styled("(No active connection)", "error")
     cb:blank()

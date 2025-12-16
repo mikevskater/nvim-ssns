@@ -6,6 +6,7 @@ local ExpandAsterisk = {}
 
 local Resolver = require('ssns.completion.metadata.resolver')
 local StatementCache = require('ssns.completion.statement_cache')
+local BufferConnection = require('ssns.utils.buffer_connection')
 local Debug = require('ssns.debug')
 
 -- Helper: Conditional debug logging based on config
@@ -493,25 +494,6 @@ function ExpandAsterisk.expand_asterisk_in_context(bufnr, connection, cursor_pos
   }
 end
 
----Helper: Get connection context for a buffer
----@param bufnr number Buffer number
----@return table? connection Connection context or nil
-local function get_buffer_connection(bufnr)
-  -- Fallback: Get active database from cache
-  local Cache = require('ssns.cache')
-  local active_db = Cache.get_active_database()
-  if active_db then
-    local server = active_db.parent
-    return {
-      server = server,
-      database = active_db,
-      connection_config = server.connection_config,
-    }
-  end
-
-  return nil
-end
-
 ---Find all expandable asterisks in a buffer range using token cache
 ---Uses the StatementCache to properly identify asterisks in SELECT lists
 ---@param bufnr number Buffer number
@@ -650,7 +632,7 @@ function ExpandAsterisk.expand_all_asterisks_in_range(bufnr, start_line, end_lin
   debug_log(string.format("expand_all_asterisks_in_range: bufnr=%d, lines %d-%d", bufnr, start_line, end_line))
 
   -- Get connection context
-  local connection = get_buffer_connection(bufnr)
+  local connection = BufferConnection.get_connection(bufnr)
   if not connection then
     return {
       success = false,
@@ -745,7 +727,7 @@ function ExpandAsterisk.expand_asterisk_at_cursor(bufnr)
   end
 
   -- Get connection context
-  local connection = get_buffer_connection(bufnr)
+  local connection = BufferConnection.get_connection(bufnr)
   if not connection then
     vim.notify("No database connection found for buffer", vim.log.levels.ERROR)
     return

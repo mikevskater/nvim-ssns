@@ -6,6 +6,7 @@ local SchemaQualify = {}
 
 local Resolver = require('ssns.completion.metadata.resolver')
 local StatementCache = require('ssns.completion.statement_cache')
+local BufferConnection = require('ssns.utils.buffer_connection')
 local Debug = require('ssns.debug')
 
 -- Helper: Conditional debug logging based on config
@@ -15,25 +16,6 @@ local function debug_log(message)
   if config.completion and config.completion.debug then
     Debug.log("[SCHEMA_QUALIFY] " .. message)
   end
-end
-
----Helper: Get connection context for a buffer
----@param bufnr number Buffer number
----@return table? connection Connection context or nil
-local function get_buffer_connection(bufnr)
-  -- Get active database from cache
-  local Cache = require('ssns.cache')
-  local active_db = Cache.get_active_database()
-  if active_db then
-    local server = active_db.parent
-    return {
-      server = server,
-      database = active_db,
-      connection_config = server.connection_config,
-    }
-  end
-
-  return nil
 end
 
 -- Keywords that indicate we're in a table reference context
@@ -239,7 +221,7 @@ function SchemaQualify.qualify_tables_in_range(bufnr, start_line, end_line)
   debug_log(string.format("qualify_tables_in_range: bufnr=%d, lines %d-%d", bufnr, start_line, end_line))
 
   -- Get connection context
-  local connection = get_buffer_connection(bufnr)
+  local connection = BufferConnection.get_connection(bufnr)
   if not connection then
     return {
       success = false,
