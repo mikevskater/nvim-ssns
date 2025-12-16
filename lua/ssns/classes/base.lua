@@ -304,4 +304,108 @@ function BaseDbObject:to_string()
   )
 end
 
+-- ============================================================================
+-- Action Node Helpers (for create_action_nodes consolidation)
+-- ============================================================================
+
+---Create an action node and add it to children
+---@param name string Display name (e.g., "SELECT", "DROP")
+---@param action_type string Action type identifier (e.g., "select", "drop")
+---@return BaseDbObject action The created action node
+function BaseDbObject:add_action(name, action_type)
+  local action = BaseDbObject.new({
+    name = name,
+    parent = self,
+  })
+  action.object_type = "action"
+  action.action_type = action_type
+  action.is_loaded = true
+  table.insert(self.children, action)
+  return action
+end
+
+---Create a lazy-loaded group node and add it to children
+---@param name string Display name (e.g., "Columns", "Parameters")
+---@param group_type string Group type identifier (e.g., "column_group", "parameter_group")
+---@param load_fn fun(): any[] Function that returns items to populate the group
+---@return BaseDbObject group The created group node
+function BaseDbObject:add_lazy_group(name, group_type, load_fn)
+  local group = BaseDbObject.new({
+    name = name,
+    parent = self,
+  })
+  group.object_type = group_type
+
+  -- Override load for lazy loading
+  group.load = function(grp)
+    if grp.is_loaded then
+      return true
+    end
+    local items = load_fn()
+    grp:clear_children()
+    for _, item in ipairs(items or {}) do
+      table.insert(grp.children, item)
+    end
+    grp.is_loaded = true
+    return true
+  end
+
+  table.insert(self.children, group)
+  return group
+end
+
+---Create an info node and add it to children
+---@param text string Display text
+---@return BaseDbObject info The created info node
+function BaseDbObject:add_info(text)
+  local info = BaseDbObject.new({
+    name = text,
+    parent = self,
+  })
+  info.object_type = "info"
+  info.is_loaded = true
+  table.insert(self.children, info)
+  return info
+end
+
+---Create an error node and add it to children
+---@param text string Error message
+---@return BaseDbObject error_node The created error node
+function BaseDbObject:add_error(text)
+  local error_node = BaseDbObject.new({
+    name = string.format("⚠ %s", text),
+    parent = self,
+  })
+  error_node.object_type = "error"
+  error_node.is_loaded = true
+  table.insert(self.children, error_node)
+  return error_node
+end
+
+---Create an actions group with sub-actions and add it to children
+---@param actions table[] Array of {name, action_type} pairs
+---@return BaseDbObject group The created actions group
+function BaseDbObject:add_actions_group(actions)
+  local group = BaseDbObject.new({
+    name = "Actions",
+    parent = self,
+  })
+  group.object_type = "actions_group"
+  group.is_loaded = true
+
+  for _, action_def in ipairs(actions) do
+    local action = BaseDbObject.new({
+      name = action_def.name or action_def[1],
+      parent = group,
+    })
+    action.object_type = "action"
+    action.action_type = action_def.action_type or action_def[2]
+    action.is_loaded = true
+    table.insert(group.children, action)
+  end
+
+  table.insert(self.children, group)
+  return group
+end
+
 return BaseDbObject

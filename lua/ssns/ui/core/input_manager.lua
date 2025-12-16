@@ -984,66 +984,50 @@ function InputManager:_highlight_current_field(current_key)
   end
 end
 
----Highlight a dropdown field
----@param key string Dropdown key
----@param active boolean Whether dropdown is active/focused
-function InputManager:_highlight_dropdown(key, active)
-  local dropdown = self.dropdowns[key]
-  if not dropdown then return end
+---Highlight a dropdown/multi-dropdown field (shared base)
+---@param dropdown_type "dropdown"|"multi_dropdown"
+---@param key string Field key
+---@param active boolean Whether field is active/focused
+function InputManager:_highlight_dropdown_base(dropdown_type, key, active)
+  local field = dropdown_type == "dropdown" and self.dropdowns[key] or self.multi_dropdowns[key]
+  if not field then return end
 
   -- Determine highlight group based on state
   local hl_group
   if active then
     hl_group = "SsnsFloatInputActive"
-  elseif dropdown.is_placeholder then
+  elseif field.is_placeholder then
     hl_group = "SsnsFloatInputPlaceholder"
   else
     hl_group = "SsnsFloatInput"
   end
 
   -- Highlight the dropdown value area (excluding arrow)
-  local arrow_len = 4  -- " ▼" is 4 bytes
+  local arrow_len = 4  -- Both " ▼" and " ▾" are 4 bytes
   vim.api.nvim_buf_add_highlight(
     self.bufnr, self._namespace, hl_group,
-    dropdown.line - 1, dropdown.col_start, dropdown.col_end - arrow_len
+    field.line - 1, field.col_start, field.col_end - arrow_len
   )
 
   -- Arrow always gets hint color
   vim.api.nvim_buf_add_highlight(
     self.bufnr, self._namespace, "SsnsUiHint",
-    dropdown.line - 1, dropdown.col_end - arrow_len, dropdown.col_end
+    field.line - 1, field.col_end - arrow_len, field.col_end
   )
+end
+
+---Highlight a dropdown field
+---@param key string Dropdown key
+---@param active boolean Whether dropdown is active/focused
+function InputManager:_highlight_dropdown(key, active)
+  self:_highlight_dropdown_base("dropdown", key, active)
 end
 
 ---Highlight a multi-dropdown field
 ---@param key string Multi-dropdown key
 ---@param active boolean Whether multi-dropdown is active/focused
 function InputManager:_highlight_multi_dropdown(key, active)
-  local multi_dropdown = self.multi_dropdowns[key]
-  if not multi_dropdown then return end
-
-  -- Determine highlight group based on state
-  local hl_group
-  if active then
-    hl_group = "SsnsFloatInputActive"
-  elseif multi_dropdown.is_placeholder then
-    hl_group = "SsnsFloatInputPlaceholder"
-  else
-    hl_group = "SsnsFloatInput"
-  end
-
-  -- Highlight the multi-dropdown value area (excluding arrow)
-  local arrow_len = 4  -- " ▾" is 4 bytes
-  vim.api.nvim_buf_add_highlight(
-    self.bufnr, self._namespace, hl_group,
-    multi_dropdown.line - 1, multi_dropdown.col_start, multi_dropdown.col_end - arrow_len
-  )
-
-  -- Arrow always gets hint color
-  vim.api.nvim_buf_add_highlight(
-    self.bufnr, self._namespace, "SsnsUiHint",
-    multi_dropdown.line - 1, multi_dropdown.col_end - arrow_len, multi_dropdown.col_end
-  )
+  self:_highlight_dropdown_base("multi_dropdown", key, active)
 end
 
 ---Open dropdown window for a dropdown field
@@ -1432,6 +1416,103 @@ function InputManager:_clear_dropdown_filter()
   end
 end
 
+---Pad or truncate display text to target width with optional ellipsis
+---@param text string Display text
+---@param target_width number Target display width
+---@return string padded_text
+function InputManager:_pad_or_truncate_text(text, target_width)
+  local display_len = vim.fn.strdisplaywidth(text)
+  if display_len < target_width then
+    return text .. string.rep(" ", target_width - display_len)
+  elseif display_len > target_width then
+    -- Truncate with ellipsis - use vim.fn.strcharpart for proper UTF-8 handling
+    local truncated = ""
+    local current_width = 0
+    local char_idx = 0
+    while current_width < target_width - 1 do
+      local char = vim.fn.strcharpart(text, char_idx, 1)
+      if char == "" then break end
+      local char_width = vim.fn.strdisplaywidth(char)
+      if current_width + char_width > target_width - 1 then
+        break
+      end
+      truncated = truncated .. char
+      current_width = current_width + char_width
+      char_idx = char_idx + 1
+    end
+    -- Pad to exact width and add ellipsis
+    local pad_needed = target_width - 1 - vim.fn.strdisplaywidth(truncated)
+    if pad_needed > 0 then
+      truncated = truncated .. string.rep(" ", pad_needed)
+    end
+    return truncated .. "…"
+  end
+  return text
+end
+
+---Update dropdown/multi-dropdown display in parent buffer (shared base)
+---@param dropdown_type "dropdown"|"multi_dropdown"
+---@param key string Field key
+---@param display_text string Text to display
+---@param is_placeholder boolean Whether showing placeholder
+---@param arrow string Arrow character (e.g., " ▼" or " ▾")
+function InputManager:_update_dropdown_display_base(dropdown_type, key, display_text, is_placeholder, arrow)
+  local field = dropdown_type == "dropdown" and self.dropdowns[key] or self.multi_dropdowns[key]
+  if not field then return end
+
+  local text_width = field.text_width or 18
+  local padded_text = self:_pad_or_truncate_text(display_text, text_width)
+
+  -- Get current line
+  local lines = vim.api.nvim_buf_get_lines(self.bufnr, field.line - 1, field.line, false)
+  if #lines == 0 then return end
+
+  local line = lines[1]
+
+  -- Find brackets
+  local bracket_pos = line:find("%]", field.col_start + 1)
+  if not bracket_pos then return end
+
+  -- Reconstruct line
+  local before = line:sub(1, field.col_start)
+  local after = line:sub(bracket_pos + 1)
+  local new_line = before .. padded_text .. arrow .. "]" .. after
+
+  -- Update buffer
+  local was_modifiable = vim.api.nvim_buf_get_option(self.bufnr, 'modifiable')
+  vim.api.nvim_buf_set_option(self.bufnr, 'modifiable', true)
+  vim.api.nvim_buf_set_lines(self.bufnr, field.line - 1, field.line, false, {new_line})
+  vim.api.nvim_buf_set_option(self.bufnr, 'modifiable', was_modifiable)
+
+  -- Update placeholder state
+  field.is_placeholder = is_placeholder
+
+  -- Update col_end based on new line content (find the closing bracket)
+  local new_bracket_pos = new_line:find("%]", field.col_start + 1)
+  if new_bracket_pos then
+    field.col_end = new_bracket_pos
+  end
+
+  -- Re-apply highlights (they get lost when buffer line is replaced)
+  local hl_group = is_placeholder and "SsnsFloatInputPlaceholder" or "SsnsFloatInput"
+
+  -- Clear existing highlights for this line
+  vim.api.nvim_buf_clear_namespace(self.bufnr, self._namespace, field.line - 1, field.line)
+
+  -- Highlight the dropdown value area (excluding arrow)
+  local arrow_len = 4  -- Both " ▼" and " ▾" are 4 bytes
+  vim.api.nvim_buf_add_highlight(
+    self.bufnr, self._namespace, hl_group,
+    field.line - 1, field.col_start, field.col_end - arrow_len
+  )
+
+  -- Arrow always gets hint color
+  vim.api.nvim_buf_add_highlight(
+    self.bufnr, self._namespace, "SsnsUiHint",
+    field.line - 1, field.col_end - arrow_len, field.col_end
+  )
+end
+
 ---Update dropdown display in parent buffer
 ---@param key string Dropdown key
 function InputManager:_update_dropdown_display(key)
@@ -1451,91 +1532,7 @@ function InputManager:_update_dropdown_display(key)
     end
   end
 
-  -- Calculate dimensions (text_width is in display columns)
-  local arrow = " ▼"
-  local text_width = dropdown.text_width or 18
-
-  -- Pad or truncate using display width
-  local display_len = vim.fn.strdisplaywidth(display_text)
-  if display_len < text_width then
-    display_text = display_text .. string.rep(" ", text_width - display_len)
-  elseif display_len > text_width then
-    -- Truncate with ellipsis - use vim.fn.strcharpart for proper UTF-8 handling
-    local truncated = ""
-    local current_width = 0
-    local char_idx = 0
-    while current_width < text_width - 1 do
-      local char = vim.fn.strcharpart(display_text, char_idx, 1)
-      if char == "" then break end
-      local char_width = vim.fn.strdisplaywidth(char)
-      if current_width + char_width > text_width - 1 then
-        break
-      end
-      truncated = truncated .. char
-      current_width = current_width + char_width
-      char_idx = char_idx + 1
-    end
-    -- Pad to exact width and add ellipsis
-    local pad_needed = text_width - 1 - vim.fn.strdisplaywidth(truncated)
-    if pad_needed > 0 then
-      truncated = truncated .. string.rep(" ", pad_needed)
-    end
-    display_text = truncated .. "…"
-  end
-
-  -- Get current line
-  local lines = vim.api.nvim_buf_get_lines(self.bufnr, dropdown.line - 1, dropdown.line, false)
-  if #lines == 0 then return end
-
-  local line = lines[1]
-
-  -- Find brackets
-  local bracket_pos = line:find("%]", dropdown.col_start + 1)
-  if not bracket_pos then return end
-
-  -- Reconstruct line
-  local before = line:sub(1, dropdown.col_start)
-  local after = line:sub(bracket_pos + 1)
-  local new_line = before .. display_text .. arrow .. "]" .. after
-
-  -- Update buffer
-  local was_modifiable = vim.api.nvim_buf_get_option(self.bufnr, 'modifiable')
-  vim.api.nvim_buf_set_option(self.bufnr, 'modifiable', true)
-  vim.api.nvim_buf_set_lines(self.bufnr, dropdown.line - 1, dropdown.line, false, {new_line})
-  vim.api.nvim_buf_set_option(self.bufnr, 'modifiable', was_modifiable)
-
-  -- Update placeholder state
-  dropdown.is_placeholder = is_placeholder
-
-  -- Update col_end based on new line content (find the closing bracket)
-  local new_bracket_pos = new_line:find("%]", dropdown.col_start + 1)
-  if new_bracket_pos then
-    dropdown.col_end = new_bracket_pos
-  end
-
-  -- Re-apply highlights (they get lost when buffer line is replaced)
-  local hl_group
-  if is_placeholder then
-    hl_group = "SsnsFloatInputPlaceholder"
-  else
-    hl_group = "SsnsFloatInput"
-  end
-
-  -- Clear existing highlights for this line
-  vim.api.nvim_buf_clear_namespace(self.bufnr, self._namespace, dropdown.line - 1, dropdown.line)
-
-  -- Highlight the dropdown value area (excluding arrow)
-  local arrow_len = 4  -- " ▼" is 4 bytes
-  vim.api.nvim_buf_add_highlight(
-    self.bufnr, self._namespace, hl_group,
-    dropdown.line - 1, dropdown.col_start, dropdown.col_end - arrow_len
-  )
-
-  -- Arrow always gets hint color
-  vim.api.nvim_buf_add_highlight(
-    self.bufnr, self._namespace, "SsnsUiHint",
-    dropdown.line - 1, dropdown.col_end - arrow_len, dropdown.col_end
-  )
+  self:_update_dropdown_display_base("dropdown", key, display_text, is_placeholder, " ▼")
 end
 
 ---Setup keymaps for dropdown window
@@ -1599,40 +1596,46 @@ function InputManager:_setup_dropdown_keymaps()
   end
 end
 
----Setup autocmds for dropdown focus-lost detection
-function InputManager:_setup_dropdown_autocmds()
-  if not self._dropdown_float or not self._dropdown_float:is_valid() then return end
+---Setup autocmds for dropdown/multi-dropdown focus-lost detection (shared base)
+---@param dropdown_type "dropdown"|"multi_dropdown"
+function InputManager:_setup_dropdown_autocmds_base(dropdown_type)
+  local float = dropdown_type == "dropdown" and self._dropdown_float or self._multi_dropdown_float
+  if not float or not float:is_valid() then return end
 
-  local bufnr = self._dropdown_float.bufnr
-  self._dropdown_autocmd_group = vim.api.nvim_create_augroup(
-    "SSNSDropdown_" .. bufnr,
-    { clear = true }
-  )
+  local bufnr = float.bufnr
+  local group_name = dropdown_type == "dropdown" and "SSNSDropdown_" or "SSNSMultiDropdown_"
+  local autocmd_group = vim.api.nvim_create_augroup(group_name .. bufnr, { clear = true })
+
+  -- Store autocmd group reference
+  if dropdown_type == "dropdown" then
+    self._dropdown_autocmd_group = autocmd_group
+  else
+    self._multi_dropdown_autocmd_group = autocmd_group
+  end
 
   -- Minimum time (ms) after opening before WinLeave/BufLeave can close the dropdown
   local SETTLE_TIME_MS = 150
+  local close_method = dropdown_type == "dropdown" and self._close_dropdown or self._close_multi_dropdown
+  local debug_prefix = dropdown_type == "dropdown" and "Dropdown" or "Multi-dropdown"
 
   -- Close on WinLeave (focus lost)
   vim.api.nvim_create_autocmd("WinLeave", {
-    group = self._dropdown_autocmd_group,
+    group = autocmd_group,
     buffer = bufnr,
     callback = function()
-      -- Check settle time IMMEDIATELY (not in scheduled callback) to avoid race condition
       local elapsed = vim.loop.now() - _dropdown_open_time
-      Debug.log(string.format("[DROPDOWN DEBUG] Dropdown WinLeave autocmd fired, elapsed=%dms", elapsed))
+      Debug.log(string.format("[DROPDOWN DEBUG] %s WinLeave autocmd fired, elapsed=%dms", debug_prefix, elapsed))
 
       if elapsed < SETTLE_TIME_MS then
-        Debug.log(string.format("[DROPDOWN DEBUG] Dropdown WinLeave IGNORED: within settle period (%dms < %dms)", elapsed, SETTLE_TIME_MS))
+        Debug.log(string.format("[DROPDOWN DEBUG] %s WinLeave IGNORED: within settle period (%dms < %dms)", debug_prefix, elapsed, SETTLE_TIME_MS))
         return
       end
 
-      -- Schedule to allow checking if we're going to parent window
       vim.schedule(function()
         local current_win = vim.api.nvim_get_current_win()
-        -- If leaving to a window that's not the parent, cancel
         if current_win ~= self.winid then
-          Debug.log("[DROPDOWN DEBUG] Dropdown WinLeave: closing with cancel=true")
-          self:_close_dropdown(true)
+          Debug.log(string.format("[DROPDOWN DEBUG] %s WinLeave: closing with cancel=true", debug_prefix))
+          close_method(self, true)
         end
       end)
     end,
@@ -1640,24 +1643,28 @@ function InputManager:_setup_dropdown_autocmds()
 
   -- Close on BufLeave
   vim.api.nvim_create_autocmd("BufLeave", {
-    group = self._dropdown_autocmd_group,
+    group = autocmd_group,
     buffer = bufnr,
     callback = function()
-      -- Check settle time IMMEDIATELY (not in scheduled callback) to avoid race condition
       local elapsed = vim.loop.now() - _dropdown_open_time
-      Debug.log(string.format("[DROPDOWN DEBUG] Dropdown BufLeave autocmd fired, elapsed=%dms", elapsed))
+      Debug.log(string.format("[DROPDOWN DEBUG] %s BufLeave autocmd fired, elapsed=%dms", debug_prefix, elapsed))
 
       if elapsed < SETTLE_TIME_MS then
-        Debug.log(string.format("[DROPDOWN DEBUG] Dropdown BufLeave IGNORED: within settle period (%dms < %dms)", elapsed, SETTLE_TIME_MS))
+        Debug.log(string.format("[DROPDOWN DEBUG] %s BufLeave IGNORED: within settle period (%dms < %dms)", debug_prefix, elapsed, SETTLE_TIME_MS))
         return
       end
 
       vim.schedule(function()
-        Debug.log("[DROPDOWN DEBUG] Dropdown BufLeave: closing with cancel=true")
-        self:_close_dropdown(true)
+        Debug.log(string.format("[DROPDOWN DEBUG] %s BufLeave: closing with cancel=true", debug_prefix))
+        close_method(self, true)
       end)
     end,
   })
+end
+
+---Setup autocmds for dropdown focus-lost detection
+function InputManager:_setup_dropdown_autocmds()
+  self:_setup_dropdown_autocmds_base("dropdown")
 end
 
 ---Get dropdown value
@@ -2087,88 +2094,7 @@ function InputManager:_update_multi_dropdown_display(key)
     end
   end
 
-  -- Pad or truncate
-  local arrow = " ▾"
-  local text_width = multi_dropdown.text_width or 18
-
-  local display_len = vim.fn.strdisplaywidth(display_text)
-  if display_len < text_width then
-    display_text = display_text .. string.rep(" ", text_width - display_len)
-  elseif display_len > text_width then
-    local truncated = ""
-    local current_width = 0
-    local char_idx = 0
-    while current_width < text_width - 1 do
-      local char = vim.fn.strcharpart(display_text, char_idx, 1)
-      if char == "" then break end
-      local char_width = vim.fn.strdisplaywidth(char)
-      if current_width + char_width > text_width - 1 then
-        break
-      end
-      truncated = truncated .. char
-      current_width = current_width + char_width
-      char_idx = char_idx + 1
-    end
-    local pad_needed = text_width - 1 - vim.fn.strdisplaywidth(truncated)
-    if pad_needed > 0 then
-      truncated = truncated .. string.rep(" ", pad_needed)
-    end
-    display_text = truncated .. "…"
-  end
-
-  -- Get current line
-  local lines = vim.api.nvim_buf_get_lines(self.bufnr, multi_dropdown.line - 1, multi_dropdown.line, false)
-  if #lines == 0 then return end
-
-  local line = lines[1]
-
-  -- Find brackets
-  local bracket_pos = line:find("%]", multi_dropdown.col_start + 1)
-  if not bracket_pos then return end
-
-  -- Reconstruct line
-  local before = line:sub(1, multi_dropdown.col_start)
-  local after = line:sub(bracket_pos + 1)
-  local new_line = before .. display_text .. arrow .. "]" .. after
-
-  -- Update buffer
-  local was_modifiable = vim.api.nvim_buf_get_option(self.bufnr, 'modifiable')
-  vim.api.nvim_buf_set_option(self.bufnr, 'modifiable', true)
-  vim.api.nvim_buf_set_lines(self.bufnr, multi_dropdown.line - 1, multi_dropdown.line, false, {new_line})
-  vim.api.nvim_buf_set_option(self.bufnr, 'modifiable', was_modifiable)
-
-  -- Update placeholder state
-  multi_dropdown.is_placeholder = is_placeholder
-
-  -- Update col_end based on new line content (find the closing bracket)
-  local new_bracket_pos = new_line:find("%]", multi_dropdown.col_start + 1)
-  if new_bracket_pos then
-    multi_dropdown.col_end = new_bracket_pos
-  end
-
-  -- Re-apply highlights (they get lost when buffer line is replaced)
-  local hl_group
-  if is_placeholder then
-    hl_group = "SsnsFloatInputPlaceholder"
-  else
-    hl_group = "SsnsFloatInput"
-  end
-
-  -- Clear existing highlights for this line
-  vim.api.nvim_buf_clear_namespace(self.bufnr, self._namespace, multi_dropdown.line - 1, multi_dropdown.line)
-
-  -- Highlight the multi-dropdown value area (excluding arrow)
-  local arrow_len = 4  -- " ▾" is 4 bytes
-  vim.api.nvim_buf_add_highlight(
-    self.bufnr, self._namespace, hl_group,
-    multi_dropdown.line - 1, multi_dropdown.col_start, multi_dropdown.col_end - arrow_len
-  )
-
-  -- Arrow always gets hint color
-  vim.api.nvim_buf_add_highlight(
-    self.bufnr, self._namespace, "SsnsUiHint",
-    multi_dropdown.line - 1, multi_dropdown.col_end - arrow_len, multi_dropdown.col_end
-  )
+  self:_update_dropdown_display_base("multi_dropdown", key, display_text, is_placeholder, " ▾")
 end
 
 ---Setup keymaps for multi-dropdown
@@ -2254,62 +2180,7 @@ end
 
 ---Setup autocmds for multi-dropdown
 function InputManager:_setup_multi_dropdown_autocmds()
-  if not self._multi_dropdown_float or not self._multi_dropdown_float:is_valid() then return end
-
-  local bufnr = self._multi_dropdown_float.bufnr
-  self._multi_dropdown_autocmd_group = vim.api.nvim_create_augroup(
-    "SSNSMultiDropdown_" .. bufnr,
-    { clear = true }
-  )
-
-  -- Minimum time (ms) after opening before WinLeave/BufLeave can close the dropdown
-  local SETTLE_TIME_MS = 150
-
-  vim.api.nvim_create_autocmd("WinLeave", {
-    group = self._multi_dropdown_autocmd_group,
-    buffer = bufnr,
-    callback = function()
-      -- Check settle time IMMEDIATELY (not in scheduled callback) to avoid race condition
-      local now = vim.loop.now()
-      local elapsed = now - _dropdown_open_time
-      Debug.log(string.format("[DROPDOWN DEBUG] Multi-dropdown WinLeave: now=%d, open_time=%d, elapsed=%dms", now, _dropdown_open_time, elapsed))
-
-      if elapsed < SETTLE_TIME_MS then
-        Debug.log(string.format("[DROPDOWN DEBUG] Multi-dropdown WinLeave IGNORED: within settle period (%dms < %dms)", elapsed, SETTLE_TIME_MS))
-        return
-      end
-
-      vim.schedule(function()
-        local current_win = vim.api.nvim_get_current_win()
-        Debug.log(string.format("[DROPDOWN DEBUG] Multi-dropdown WinLeave scheduled: current_win=%d, parent_winid=%d", current_win, self.winid))
-        if current_win ~= self.winid then
-          Debug.log("[DROPDOWN DEBUG] Multi-dropdown WinLeave: closing with cancel=true")
-          self:_close_multi_dropdown(true)
-        end
-      end)
-    end,
-  })
-
-  vim.api.nvim_create_autocmd("BufLeave", {
-    group = self._multi_dropdown_autocmd_group,
-    buffer = bufnr,
-    callback = function()
-      -- Check settle time IMMEDIATELY (not in scheduled callback) to avoid race condition
-      local now = vim.loop.now()
-      local elapsed = now - _dropdown_open_time
-      Debug.log(string.format("[DROPDOWN DEBUG] Multi-dropdown BufLeave: now=%d, open_time=%d, elapsed=%dms", now, _dropdown_open_time, elapsed))
-
-      if elapsed < SETTLE_TIME_MS then
-        Debug.log(string.format("[DROPDOWN DEBUG] Multi-dropdown BufLeave IGNORED: within settle period (%dms < %dms)", elapsed, SETTLE_TIME_MS))
-        return
-      end
-
-      vim.schedule(function()
-        Debug.log("[DROPDOWN DEBUG] Multi-dropdown BufLeave scheduled: closing with cancel=true")
-        self:_close_multi_dropdown(true)
-      end)
-    end,
-  })
+  self:_setup_dropdown_autocmds_base("multi_dropdown")
 end
 
 ---Get multi-dropdown values

@@ -60,68 +60,16 @@ end
 function ProcedureClass:create_action_nodes()
   self:clear_children()
 
-  -- Add EXEC action
-  local exec_action = BaseDbObject.new({
-    name = "EXEC",
-    parent = self,
-  })
-  exec_action.object_type = "action"
-  exec_action.action_type = "exec"
-  exec_action.is_loaded = true
-  table.insert(self.children, exec_action)
+  self:add_action("EXEC", "exec")
 
-  -- Add Parameters group (lazy loaded when expanded)
-  local params_group = BaseDbObject.new({
-    name = "Parameters",
-    parent = self,
-  })
-  params_group.object_type = "parameter_group"
-
-  -- Override load for parameters group
-  params_group.load = function(group)
-    if group.is_loaded then
-      return true
-    end
+  self:add_lazy_group("Parameters", "parameter_group", function()
     self:load_parameters()
-    group:clear_children()
-    for _, param in ipairs(self.parameters) do
-      -- Don't set parent - just add to children manually to avoid auto-add
-      table.insert(group.children, param)
-    end
-    group.is_loaded = true
-    return true
-  end
-  table.insert(self.children, params_group)
+    return self.parameters
+  end)
 
-  -- Add Procedure Definition action (ALTER shows definition)
-  local definition_action = BaseDbObject.new({
-    name = "ALTER",
-    parent = self,
-  })
-  definition_action.object_type = "action"
-  definition_action.action_type = "alter"
-  definition_action.is_loaded = true
-  table.insert(self.children, definition_action)
-
-  -- Add DROP action
-  local drop_action = BaseDbObject.new({
-    name = "DROP",
-    parent = self,
-  })
-  drop_action.object_type = "action"
-  drop_action.action_type = "drop"
-  drop_action.is_loaded = true
-  table.insert(self.children, drop_action)
-
-  -- Add DEPENDENCIES action
-  local dependencies_action = BaseDbObject.new({
-    name = "DEPENDENCIES",
-    parent = self,
-  })
-  dependencies_action.object_type = "action"
-  dependencies_action.action_type = "dependencies"
-  dependencies_action.is_loaded = true
-  table.insert(self.children, dependencies_action)
+  self:add_action("ALTER", "alter")
+  self:add_action("DROP", "drop")
+  self:add_action("DEPENDENCIES", "dependencies")
 end
 
 ---Load parameters for this procedure (lazy loading)

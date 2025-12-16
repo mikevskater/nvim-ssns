@@ -60,68 +60,16 @@ end
 function ViewClass:create_action_nodes()
   self:clear_children()
 
-  -- Add SELECT action
-  local select_action = BaseDbObject.new({
-    name = "SELECT",
-    parent = self,
-  })
-  select_action.object_type = "action"
-  select_action.action_type = "select"
-  select_action.is_loaded = true
-  table.insert(self.children, select_action)
+  self:add_action("SELECT", "select")
 
-  -- Add Columns group (lazy loaded when expanded)
-  local columns_group = BaseDbObject.new({
-    name = "Columns",
-    parent = self,
-  })
-  columns_group.object_type = "column_group"
-
-  -- Override load for columns group
-  columns_group.load = function(group)
-    if group.is_loaded then
-      return true
-    end
+  self:add_lazy_group("Columns", "column_group", function()
     self:load_columns()
-    group:clear_children()
-    for _, col in ipairs(self.columns) do
-      -- Don't set parent - just add to children manually to avoid auto-add
-      table.insert(group.children, col)
-    end
-    group.is_loaded = true
-    return true
-  end
-  table.insert(self.children, columns_group)
+    return self.columns
+  end)
 
-  -- Add View Definition action (ALTER shows definition)
-  local definition_action = BaseDbObject.new({
-    name = "ALTER",
-    parent = self,
-  })
-  definition_action.object_type = "action"
-  definition_action.action_type = "alter"
-  definition_action.is_loaded = true
-  table.insert(self.children, definition_action)
-
-  -- Add DROP action
-  local drop_action = BaseDbObject.new({
-    name = "DROP",
-    parent = self,
-  })
-  drop_action.object_type = "action"
-  drop_action.action_type = "drop"
-  drop_action.is_loaded = true
-  table.insert(self.children, drop_action)
-
-  -- Add DEPENDENCIES action
-  local dependencies_action = BaseDbObject.new({
-    name = "DEPENDENCIES",
-    parent = self,
-  })
-  dependencies_action.object_type = "action"
-  dependencies_action.action_type = "dependencies"
-  dependencies_action.is_loaded = true
-  table.insert(self.children, dependencies_action)
+  self:add_action("ALTER", "alter")
+  self:add_action("DROP", "drop")
+  self:add_action("DEPENDENCIES", "dependencies")
 end
 
 ---Load columns for this view (lazy loading)

@@ -70,170 +70,38 @@ end
 function TableClass:create_action_nodes()
   self:clear_children()
 
-  -- Add SELECT action
-  local select_action = BaseDbObject.new({
-    name = "SELECT",
-    parent = self,
-  })
-  select_action.object_type = "action"
-  select_action.action_type = "select"
-  select_action.is_loaded = true
-  table.insert(self.children, select_action)
+  -- Actions
+  self:add_action("SELECT", "select")
 
-  -- Add Columns group (lazy loaded when expanded)
-  local columns_group = BaseDbObject.new({
-    name = "Columns",
-    parent = self,
-  })
-  columns_group.object_type = "column_group"
-
-  -- Override load for columns group
-  columns_group.load = function(group)
-    if group.is_loaded then
-      return true
-    end
+  -- Lazy-loaded groups
+  self:add_lazy_group("Columns", "column_group", function()
     self:load_columns()
-    group:clear_children()
-    for _, col in ipairs(self.columns) do
-      -- Don't set parent - just add to children manually to avoid auto-add
-      table.insert(group.children, col)
-    end
-    group.is_loaded = true
-    return true
-  end
-  table.insert(self.children, columns_group)
+    return self.columns
+  end)
 
-  -- Add Indexes group (lazy loaded when expanded)
-  local indexes_group = BaseDbObject.new({
-    name = "Indexes",
-    parent = self,
-  })
-  indexes_group.object_type = "index_group"
-
-  -- Override load for indexes group
-  indexes_group.load = function(group)
-    if group.is_loaded then
-      return true
-    end
+  self:add_lazy_group("Indexes", "index_group", function()
     self:load_indexes()
-    group:clear_children()
-    for _, idx in ipairs(self.indexes) do
-      -- Don't set parent - just add to children manually to avoid auto-add
-      table.insert(group.children, idx)
-    end
-    group.is_loaded = true
-    return true
-  end
-  table.insert(self.children, indexes_group)
+    return self.indexes
+  end)
 
-  -- Add Keys/Constraints group (lazy loaded when expanded)
-  local keys_group = BaseDbObject.new({
-    name = "Keys",
-    parent = self,
-  })
-  keys_group.object_type = "key_group"
-
-  -- Override load for keys group
-  keys_group.load = function(group)
-    if group.is_loaded then
-      return true
-    end
+  self:add_lazy_group("Keys", "key_group", function()
     self:load_constraints()
-    group:clear_children()
-    for _, constraint in ipairs(self.constraints) do
-      -- Don't set parent - just add to children manually to avoid auto-add
-      table.insert(group.children, constraint)
-    end
-    group.is_loaded = true
-    return true
-  end
-  table.insert(self.children, keys_group)
+    return self.constraints
+  end)
 
-  -- Add ALTER action
-  local alter_action = BaseDbObject.new({
-    name = "ALTER",
-    parent = self,
+  -- More actions
+  self:add_action("ALTER", "alter")
+  self:add_action("DROP", "drop")
+  self:add_action("DEPENDENCIES", "dependencies")
+
+  -- Actions group with table helpers
+  self:add_actions_group({
+    { "COUNT", "count" },
+    { "DESCRIBE", "describe" },
+    { "INSERT", "insert" },
+    { "UPDATE", "update" },
+    { "DELETE", "delete" },
   })
-  alter_action.object_type = "action"
-  alter_action.action_type = "alter"
-  alter_action.is_loaded = true
-  table.insert(self.children, alter_action)
-
-  -- Add DROP action
-  local drop_action = BaseDbObject.new({
-    name = "DROP",
-    parent = self,
-  })
-  drop_action.object_type = "action"
-  drop_action.action_type = "drop"
-  drop_action.is_loaded = true
-  table.insert(self.children, drop_action)
-
-  -- Add DEPENDENCIES action
-  local dependencies_action = BaseDbObject.new({
-    name = "DEPENDENCIES",
-    parent = self,
-  })
-  dependencies_action.object_type = "action"
-  dependencies_action.action_type = "dependencies"
-  dependencies_action.is_loaded = true
-  table.insert(self.children, dependencies_action)
-
-  -- Add Actions group (table helpers)
-  local actions_group = BaseDbObject.new({
-    name = "Actions",
-    parent = self,
-  })
-  actions_group.object_type = "actions_group"
-  actions_group.is_loaded = true
-
-  -- Add helper actions to the group
-  local count_action = BaseDbObject.new({
-    name = "COUNT",
-    parent = actions_group,
-  })
-  count_action.object_type = "action"
-  count_action.action_type = "count"
-  count_action.is_loaded = true
-  table.insert(actions_group.children, count_action)
-
-  local describe_action = BaseDbObject.new({
-    name = "DESCRIBE",
-    parent = actions_group,
-  })
-  describe_action.object_type = "action"
-  describe_action.action_type = "describe"
-  describe_action.is_loaded = true
-  table.insert(actions_group.children, describe_action)
-
-  local insert_action = BaseDbObject.new({
-    name = "INSERT",
-    parent = actions_group,
-  })
-  insert_action.object_type = "action"
-  insert_action.action_type = "insert"
-  insert_action.is_loaded = true
-  table.insert(actions_group.children, insert_action)
-
-  local update_action = BaseDbObject.new({
-    name = "UPDATE",
-    parent = actions_group,
-  })
-  update_action.object_type = "action"
-  update_action.action_type = "update"
-  update_action.is_loaded = true
-  table.insert(actions_group.children, update_action)
-
-  local delete_action = BaseDbObject.new({
-    name = "DELETE",
-    parent = actions_group,
-  })
-  delete_action.object_type = "action"
-  delete_action.action_type = "delete"
-  delete_action.is_loaded = true
-  table.insert(actions_group.children, delete_action)
-
-  table.insert(self.children, actions_group)
 end
 
 ---Load columns for this table (lazy loading)
