@@ -4,7 +4,7 @@
 local Ssns = {}
 
 ---Plugin version
-Ssns.version = "0.1.0-dev"
+Ssns.version = "0.8.0-dev"
 
 ---Setup the plugin
 ---@param user_config SsnsConfig? User configuration
