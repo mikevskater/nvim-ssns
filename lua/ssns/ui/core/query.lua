@@ -21,6 +21,10 @@ UiQuery.auto_save_timers = {}
 ---@type {resultSets: table[]?, sql: string?, execution_time_ms: number?, metadata: table?}?
 UiQuery.last_results = nil
 
+---Store last results window height for restore on toggle
+---@type number?
+UiQuery.last_results_window_height = nil
+
 ---Generate a unique buffer name
 ---@param object_name string? The object name (table, view, etc.)
 ---@param server ServerClass? The server
@@ -855,14 +859,18 @@ function UiQuery.toggle_results()
   end
 
   if result_win then
-    -- Results window is visible, close it
+    -- Results window is visible, save height and close it
+    UiQuery.last_results_window_height = vim.api.nvim_win_get_height(result_win)
     vim.api.nvim_win_close(result_win, false)
   else
     -- Results window is hidden, open it in a split
     vim.cmd('botright split')
     vim.api.nvim_win_set_buf(0, result_buf)
     local new_win = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_height(new_win, 10)
+
+    -- Restore previous height or use default of 10
+    local height = UiQuery.last_results_window_height or 10
+    vim.api.nvim_win_set_height(new_win, height)
 
     -- Setup keymaps for results buffer
     UiQuery.setup_results_keymaps(result_buf)
