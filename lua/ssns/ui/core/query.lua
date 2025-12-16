@@ -1995,13 +1995,23 @@ function UiQuery.show_results_controls()
   UiFloat._show_controls_popup(controls)
 end
 
+---Save results window height before closing
+---@param win number? Window handle (nil = current window)
+local function save_results_window_height(win)
+  win = win or vim.api.nvim_get_current_win()
+  if vim.api.nvim_win_is_valid(win) then
+    UiQuery.last_results_window_height = vim.api.nvim_win_get_height(win)
+  end
+end
+
 function UiQuery.setup_results_keymaps(result_buf)
   local km = KeymapManager.get_group("results")
   local query_km = KeymapManager.get_group("query")
 
   local keymaps = {
-    -- Close results window
+    -- Close results window (save height first)
     { mode = "n", lhs = km.close or "q", rhs = function()
+      save_results_window_height()
       vim.cmd('close')
     end, desc = "Close results window" },
 
@@ -2028,6 +2038,21 @@ function UiQuery.setup_results_keymaps(result_buf)
 
   KeymapManager.set_multiple(result_buf, keymaps, true)
   KeymapManager.mark_group_active(result_buf, "results")
+
+  -- Set up autocmd to save window height when closed by any means
+  -- Use BufWinLeave which fires when buffer leaves a window (i.e., window closes)
+  vim.api.nvim_create_autocmd("BufWinLeave", {
+    buffer = result_buf,
+    callback = function()
+      -- Save the height of the window that's being closed
+      -- At this point, the window is still valid
+      local win = vim.fn.bufwinid(result_buf)
+      if win ~= -1 and vim.api.nvim_win_is_valid(win) then
+        UiQuery.last_results_window_height = vim.api.nvim_win_get_height(win)
+      end
+    end,
+    desc = "Save results window height on close",
+  })
 end
 
 ---Escape a value for CSV format
