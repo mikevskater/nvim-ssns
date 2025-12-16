@@ -318,8 +318,9 @@ function combine_multi_chunk_results(results, metadata)
     return result
   end
 
-  -- Multiple results - combine all result sets
+  -- Multiple results - combine all result sets AND aggregate rowsAffected
   local all_result_sets = {}
+  local all_rows_affected = {}
 
   for i, result in ipairs(results) do
     if result.resultSets then
@@ -331,12 +332,30 @@ function combine_multi_chunk_results(results, metadata)
         table.insert(all_result_sets, enhanced_result_set)
       end
     end
+
+    -- Aggregate rowsAffected from each chunk's metadata
+    if result.metadata and result.metadata.rowsAffected then
+      local rows = result.metadata.rowsAffected
+      if type(rows) == "table" then
+        for _, count in ipairs(rows) do
+          table.insert(all_rows_affected, count)
+        end
+      elseif type(rows) == "number" then
+        table.insert(all_rows_affected, rows)
+      end
+    end
+  end
+
+  -- Build combined metadata with aggregated rowsAffected
+  local combined_metadata = metadata or {}
+  if #all_rows_affected > 0 then
+    combined_metadata.rowsAffected = all_rows_affected
   end
 
   return {
     success = true,
     resultSets = all_result_sets,
-    metadata = metadata or {}
+    metadata = combined_metadata
   }
 end
 

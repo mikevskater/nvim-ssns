@@ -993,7 +993,66 @@ function UiQuery.format_results(resultSets, sql, execution_time_ms, query_metada
 
   -- Check if empty (no result sets)
   if #resultSets == 0 then
-    -- Return empty for no rows (silent like SSMS)
+    -- Check if we have rows affected info from metadata (for UPDATE/INSERT/DELETE/CREATE statements)
+    if query_metadata and query_metadata.rowsAffected then
+      local rows_affected = query_metadata.rowsAffected
+      local has_any_affected = false
+
+      -- Show EACH affected count on its own line (like SSMS Messages tab)
+      if type(rows_affected) == "table" then
+        for _, count in ipairs(rows_affected) do
+          if type(count) == "number" then
+            if count > 0 then
+              local row_word = count == 1 and "row" or "rows"
+              table.insert(lines, string.format("(%d %s affected)", count, row_word))
+              has_any_affected = true
+            else
+              -- 0 rows affected (e.g., CREATE/DROP/ALTER or UPDATE with no matches)
+              table.insert(lines, "Commands completed successfully.")
+            end
+            table.insert(lines, "")
+          end
+        end
+      elseif type(rows_affected) == "number" then
+        if rows_affected > 0 then
+          local row_word = rows_affected == 1 and "row" or "rows"
+          table.insert(lines, string.format("(%d %s affected)", rows_affected, row_word))
+          has_any_affected = true
+        else
+          table.insert(lines, "Commands completed successfully.")
+        end
+        table.insert(lines, "")
+      end
+
+      -- Add total execution time at the end
+      if query_metadata.total_execution_time_ms then
+        local ms = query_metadata.total_execution_time_ms
+        if ms < 1000 then
+          table.insert(lines, string.format("Total execution time: %.0fms", ms))
+        else
+          table.insert(lines, string.format("Total execution time: %.2fs", ms / 1000))
+        end
+      elseif execution_time_ms then
+        if execution_time_ms < 1000 then
+          table.insert(lines, string.format("Total execution time: %.0fms", execution_time_ms))
+        else
+          table.insert(lines, string.format("Total execution time: %.2fs", execution_time_ms / 1000))
+        end
+      end
+
+      return lines
+    end
+
+    -- No metadata, just show completion message with timing if available
+    table.insert(lines, "Commands completed successfully.")
+    if execution_time_ms then
+      if execution_time_ms < 1000 then
+        table.insert(lines, string.format("Total execution time: %.0fms", execution_time_ms))
+      else
+        table.insert(lines, string.format("Total execution time: %.2fs", execution_time_ms / 1000))
+      end
+    end
+    table.insert(lines, "")
     return lines
   end
 
@@ -1081,6 +1140,55 @@ function UiQuery.format_results(resultSets, sql, execution_time_ms, query_metada
     -- Add formatted result set lines
     for _, line in ipairs(set_lines) do
       table.insert(lines, line)
+    end
+  end
+
+  -- After result sets, show rowsAffected messages for non-SELECT statements
+  -- (for mixed queries like SELECT + UPDATE, or batches with both types)
+  if query_metadata and query_metadata.rowsAffected then
+    local rows_affected = query_metadata.rowsAffected
+    local num_result_sets = #resultSets
+
+    -- For mixed queries, skip the first N rowsAffected values that correspond to SELECTs
+    -- (SELECTs already show their data in result tables)
+    if type(rows_affected) == "table" then
+      local has_non_select_messages = false
+
+      -- Show rowsAffected values starting after the result sets
+      -- (assuming SELECTs come first and produce both resultSets AND rowsAffected entries)
+      for i = num_result_sets + 1, #rows_affected do
+        local count = rows_affected[i]
+        if type(count) == "number" then
+          if not has_non_select_messages then
+            table.insert(lines, "")  -- Blank line before first message
+            has_non_select_messages = true
+          end
+          if count > 0 then
+            local row_word = count == 1 and "row" or "rows"
+            table.insert(lines, string.format("(%d %s affected)", count, row_word))
+          else
+            table.insert(lines, "Commands completed successfully.")
+          end
+        end
+      end
+    elseif type(rows_affected) == "number" and num_result_sets == 0 then
+      -- Single value, no result sets - show it
+      if rows_affected > 0 then
+        table.insert(lines, "")
+        local row_word = rows_affected == 1 and "row" or "rows"
+        table.insert(lines, string.format("(%d %s affected)", rows_affected, row_word))
+      end
+    end
+  end
+
+  -- Add total execution time at the end
+  if query_metadata and query_metadata.total_execution_time_ms then
+    local ms = query_metadata.total_execution_time_ms
+    table.insert(lines, "")
+    if ms < 1000 then
+      table.insert(lines, string.format("Total execution time: %.0fms", ms))
+    else
+      table.insert(lines, string.format("Total execution time: %.2fs", ms / 1000))
     end
   end
 
