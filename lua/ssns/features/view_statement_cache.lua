@@ -4,42 +4,44 @@
 ---@module ssns.features.view_statement_cache
 local ViewStatementCache = {}
 
-local UiFloat = require('ssns.ui.core.float')
-local ContentBuilder = require('ssns.ui.core.content_builder')
-local JsonUtils = require('ssns.utils.json')
+local BaseViewer = require('ssns.features.base_viewer')
 local StatementCache = require('ssns.completion.statement_cache')
 
--- Store reference to current floating window for cleanup
-local current_float = nil
+-- Create viewer instance
+local viewer = BaseViewer.create({
+  title = "Statement Cache",
+  min_width = 60,
+  max_width = 100,
+  footer = "q/Esc: close | r: refresh | R: force rebuild",
+})
 
 ---Close the current floating window
 function ViewStatementCache.close_current_float()
-  if current_float then
-    if current_float.close then
-      pcall(function() current_float:close() end)
-    end
-  end
-  current_float = nil
+  viewer:close()
 end
 
 ---View statement cache for current buffer
 function ViewStatementCache.view_cache()
-  -- Close any existing float
-  ViewStatementCache.close_current_float()
-
-  local bufnr = vim.api.nvim_get_current_buf()
+  local info = BaseViewer.get_buffer_info()
+  local bufnr = info.bufnr
   local bufname = vim.api.nvim_buf_get_name(bufnr)
 
   -- Get cache for current buffer
   local cache = StatementCache.get_or_build_cache(bufnr)
   local stats = StatementCache.get_stats()
 
-  -- Build styled content
-  local cb = ContentBuilder.new()
+  -- Set keymaps
+  viewer.on_refresh = ViewStatementCache.view_cache
+  viewer:set_keymaps({
+    ['R'] = function()
+      StatementCache.invalidate(bufnr)
+      ViewStatementCache.view_cache()
+    end,
+  })
 
-  cb:header("Statement Cache")
-  cb:separator("=", 50)
-  cb:blank()
+  -- Show with JSON output
+  viewer:show_with_json(function(cb)
+    BaseViewer.add_header(cb, "Statement Cache")
 
   -- Buffer info
   cb:section("Buffer Info")
@@ -257,65 +259,37 @@ function ViewStatementCache.view_cache()
   })
   cb:blank()
 
-  -- JSON output for current buffer cache
-  if cache then
-    cb:blank()
-    cb:header("Full JSON Output (Current Buffer)")
-    cb:separator("=", 50)
-    cb:blank()
+    -- Return JSON data for current buffer cache
+    if cache then
+      local json_cache = {
+        buffer_tick = cache.buffer_tick,
+        last_update = cache.last_update,
+        go_boundaries = cache.go_boundaries,
+        temp_tables = cache.temp_tables,
+        chunks_count = cache.chunks and #cache.chunks or 0,
+        chunks_preview = {},
+      }
 
-    -- Create a cleaned version for JSON (limit chunk details)
-    local json_cache = {
-      buffer_tick = cache.buffer_tick,
-      last_update = cache.last_update,
-      go_boundaries = cache.go_boundaries,
-      temp_tables = cache.temp_tables,
-      chunks_count = cache.chunks and #cache.chunks or 0,
-      -- Include first 5 chunks for reference
-      chunks_preview = {},
-    }
-
-    if cache.chunks then
-      for i = 1, math.min(5, #cache.chunks) do
-        local chunk = cache.chunks[i]
-        table.insert(json_cache.chunks_preview, {
-          statement_type = chunk.statement_type,
-          start_line = chunk.start_line,
-          end_line = chunk.end_line,
-          go_batch_index = chunk.go_batch_index,
-          tables_count = chunk.tables and #chunk.tables or 0,
-          columns_count = chunk.columns and #chunk.columns or 0,
-          ctes_count = chunk.ctes and #chunk.ctes or 0,
-        })
+      if cache.chunks then
+        for i = 1, math.min(5, #cache.chunks) do
+          local chunk = cache.chunks[i]
+          table.insert(json_cache.chunks_preview, {
+            statement_type = chunk.statement_type,
+            start_line = chunk.start_line,
+            end_line = chunk.end_line,
+            go_batch_index = chunk.go_batch_index,
+            tables_count = chunk.tables and #chunk.tables or 0,
+            columns_count = chunk.columns and #chunk.columns or 0,
+            ctes_count = chunk.ctes and #chunk.ctes or 0,
+          })
+        end
       end
+
+      return json_cache
     end
 
-    local json_lines = JsonUtils.prettify_lines(json_cache)
-    for _, line in ipairs(json_lines) do
-      cb:line(line)
-    end
-  end
-
-  -- Create floating window
-  current_float = UiFloat.create_styled(cb, {
-    title = "Statement Cache",
-    border = "rounded",
-    min_width = 60,
-    max_width = 100,
-    wrap = false,
-    keymaps = {
-      ['r'] = function()
-        -- Refresh: rebuild cache and update display
-        ViewStatementCache.view_cache()
-      end,
-      ['R'] = function()
-        -- Force rebuild: invalidate and rebuild
-        StatementCache.invalidate(bufnr)
-        ViewStatementCache.view_cache()
-      end,
-    },
-    footer = "q/Esc: close | r: refresh | R: force rebuild",
-  })
+    return nil
+  end, "Full JSON Output (Current Buffer)")
 end
 
 return ViewStatementCache
