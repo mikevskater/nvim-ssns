@@ -509,6 +509,12 @@ function UiBuffer.setup_keymaps()
       rhs = "<Cmd>lua require('ssns.ui.core.tree').view_metadata()<CR>",
       desc = "View object metadata",
     },
+    -- Cancel loading operation
+    {
+      lhs = km.cancel or "<C-c>",
+      rhs = "<Cmd>lua require('ssns.ui.core.tree').cancel_loading()<CR>",
+      desc = "Cancel loading operation",
+    },
     -- Mouse support
     {
       lhs = "<LeftMouse>",

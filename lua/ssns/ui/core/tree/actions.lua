@@ -137,14 +137,21 @@ function TreeActions.toggle_node(UiTree)
   end
 end
 
----Load a node asynchronously
+---Load a node asynchronously with cancellation support
 ---@param UiTree table The main UiTree module
 ---@param obj BaseDbObject
 ---@param line_number number
 function TreeActions.load_node_async(UiTree, obj, line_number)
   local Buffer = require('ssns.ui.core.buffer')
   local Config = require('ssns.config')
+  local Async = require('ssns.async')
   local smart_positioning = Config.get_ui().smart_cursor_positioning
+
+  -- Cancel any existing load operation for this object
+  if obj._cancel_load then
+    obj._cancel_load()
+    obj._cancel_load = nil
+  end
 
   -- Set loading state
   obj.ui_state.loading = true
@@ -155,59 +162,117 @@ function TreeActions.load_node_async(UiTree, obj, line_number)
   local col = smart_positioning and Buffer.get_name_column(line_number) or 0
   Buffer.set_cursor(line_number, col)
 
-  -- Load asynchronously using vim.schedule
-  vim.schedule(function()
+  -- Create cancellation token
+  local cancel_token = Async.create_cancel_token()
+
+  -- Store cancel function on object for external cancellation
+  obj._cancel_load = function()
+    cancel_token:cancel("Cancelled by user")
+  end
+
+  -- Load asynchronously using Executor
+  Async.run(function(ctx)
+    -- Check cancellation before starting
+    if ctx.is_cancelled() then
+      return nil, "cancelled"
+    end
+
+    -- Execute the load
     local success, result = pcall(function()
       return obj:load()
     end)
 
-    -- Clear loading state
+    -- Check cancellation after load
+    if ctx.is_cancelled() then
+      return nil, "cancelled"
+    end
+
+    return { success = success, result = result }
+  end, {
+    name = "Load " .. (obj.name or "node"),
+    cancel_token = cancel_token,
+    timeout_ms = 60000, -- 60 seconds for metadata loads
+    on_complete = function(load_result, err)
+      -- Clear loading state and cancel function
+      obj.ui_state.loading = false
+      obj._cancel_load = nil
+
+      -- Handle cancellation
+      if err and (err:match("cancelled") or err:match("Cancelled")) then
+        -- Silently handle cancellation - don't show error
+        UiTree.render()
+        return
+      end
+
+      -- Handle errors
+      if err then
+        obj.ui_state.error = tostring(err)
+        vim.notify(string.format("SSNS: Failed to load %s: %s", obj.name, err), vim.log.levels.ERROR)
+        UiTree.render()
+        return
+      end
+
+      local success = load_result and load_result.success
+      local result = load_result and load_result.result
+
+      -- Check if pcall failed (threw error)
+      if not success then
+        obj.ui_state.error = tostring(result)
+        vim.notify(string.format("SSNS: Failed to load %s: %s", obj.name, result), vim.log.levels.ERROR)
+      -- Check if load() returned false (failed without throwing)
+      elseif result == false then
+        local error_msg = obj.error_message or "Unknown error"
+        obj.ui_state.error = error_msg
+        vim.notify(string.format("SSNS: Failed to load %s: %s", obj.name, error_msg), vim.log.levels.ERROR)
+      end
+
+      -- Update success flag based on both checks
+      success = success and result ~= false
+
+      -- Re-render tree with results or error
+      UiTree.render()
+
+      -- Position cursor at first child if loaded successfully
+      if success and obj:has_children() then
+        local child_line = line_number + 1
+        local child_col = smart_positioning and Buffer.get_name_column(child_line) or 0
+        Buffer.set_cursor(child_line, child_col)
+        -- Update indent tracking
+        if smart_positioning then
+          Buffer.last_indent_info = {
+            line = child_line,
+            indent_level = Buffer.get_indent_level(child_line),
+            column = child_col,
+          }
+        end
+      else
+        -- Error or no children, stay on current line
+        local current_col = smart_positioning and Buffer.get_name_column(line_number) or 0
+        Buffer.set_cursor(line_number, current_col)
+        -- Update indent tracking
+        if smart_positioning then
+          Buffer.last_indent_info = {
+            line = line_number,
+            indent_level = Buffer.get_indent_level(line_number),
+            column = current_col,
+          }
+        end
+      end
+    end,
+  })
+end
+
+---Cancel loading for a specific node
+---@param obj BaseDbObject The object to cancel loading for
+---@return boolean cancelled True if a load was cancelled
+function TreeActions.cancel_node_load(obj)
+  if obj and obj._cancel_load then
+    obj._cancel_load()
+    obj._cancel_load = nil
     obj.ui_state.loading = false
-
-    -- Check if pcall failed (threw error)
-    if not success then
-      obj.ui_state.error = tostring(result)
-      vim.notify(string.format("SSNS: Failed to load %s: %s", obj.name, result), vim.log.levels.ERROR)
-    -- Check if load() returned false (failed without throwing)
-    elseif result == false then
-      local error_msg = obj.error_message or "Unknown error"
-      obj.ui_state.error = error_msg
-      vim.notify(string.format("SSNS: Failed to load %s: %s", obj.name, error_msg), vim.log.levels.ERROR)
-    end
-
-    -- Update success flag based on both checks
-    success = success and result ~= false
-
-    -- Re-render tree with results or error
-    UiTree.render()
-
-    -- Position cursor at first child if loaded successfully
-    if success and obj:has_children() then
-      local child_line = line_number + 1
-      local child_col = smart_positioning and Buffer.get_name_column(child_line) or 0
-      Buffer.set_cursor(child_line, child_col)
-      -- Update indent tracking
-      if smart_positioning then
-        Buffer.last_indent_info = {
-          line = child_line,
-          indent_level = Buffer.get_indent_level(child_line),
-          column = child_col,
-        }
-      end
-    else
-      -- Error or no children, stay on current line
-      local col = smart_positioning and Buffer.get_name_column(line_number) or 0
-      Buffer.set_cursor(line_number, col)
-      -- Update indent tracking
-      if smart_positioning then
-        Buffer.last_indent_info = {
-          line = line_number,
-          indent_level = Buffer.get_indent_level(line_number),
-          column = col,
-        }
-      end
-    end
-  end)
+    return true
+  end
+  return false
 end
 
 ---Execute an action node
