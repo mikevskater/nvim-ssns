@@ -131,6 +131,21 @@ function UiTree.set_lualine_color()
   TreeActions.set_lualine_color(UiTree)
 end
 
+---Cancel loading operation for current node
+function UiTree.cancel_loading()
+  local Buffer = require('ssns.ui.core.buffer')
+  local line_number = Buffer.get_current_line()
+  local obj = UiTree.line_map[line_number]
+
+  if obj and obj.ui_state.loading then
+    local cancelled = TreeActions.cancel_node_load(obj)
+    if cancelled then
+      vim.notify("SSNS: Loading cancelled", vim.log.levels.INFO)
+      UiTree.render()
+    end
+  end
+end
+
 ---Handle mouse click on tree
 ---@param double_click boolean? Whether this is a double-click
 function UiTree.handle_mouse_click(double_click)
