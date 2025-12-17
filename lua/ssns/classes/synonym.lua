@@ -299,95 +299,41 @@ function SynonymClass:create_action_nodes()
   local parts = self:parse_base_object_name()
 
   if error_msg then
-    -- Show error as a child node
-    local error_node = BaseDbObject.new({
-      name = string.format("⚠ %s", error_msg),
-      parent = self,
-    })
-    error_node.object_type = "error"
-    error_node.is_loaded = true
-    table.insert(self.children, error_node)
+    self:add_error(error_msg)
     return
   end
 
   if not base_object then
-    local not_found_node = BaseDbObject.new({
-      name = string.format("⚠ Base object not found: %s", self.base_object_name),
-      parent = self,
-    })
-    not_found_node.object_type = "error"
-    not_found_node.is_loaded = true
-    table.insert(self.children, not_found_node)
+    self:add_error(string.format("Base object not found: %s", self.base_object_name))
     return
   end
 
   -- Add info node showing what this synonym points to
   local type_label = self:get_base_type_label()
   local ref_info = ""
-
-  -- Add cross-database indicator if applicable
   if parts.database then
     ref_info = " [Cross-DB]"
   elseif is_external then
     ref_info = " [Linked Server]"
   end
-
-  local info_node = BaseDbObject.new({
-    name = string.format("→ %s (%s%s)", self.base_object_name, type_label, ref_info),
-    parent = self,
-  })
-  info_node.object_type = "info"
-  info_node.is_loaded = true
-  table.insert(self.children, info_node)
+  self:add_info(string.format("→ %s (%s%s)", self.base_object_name, type_label, ref_info))
 
   -- Add GO-TO action (navigate to base object in tree)
   if base_object and not is_external then
-    local goto_action = BaseDbObject.new({
-      name = "GO-TO",
-      parent = self,
-    })
-    goto_action.object_type = "action"
-    goto_action.action_type = "goto"
-    goto_action.is_loaded = true
-    table.insert(self.children, goto_action)
+    self:add_action("GO-TO", "goto")
   end
 
   -- If base object is a table or view, show columns group
   if base_object.object_type == "table" or base_object.object_type == "view" then
-    -- Add SELECT action
-    local select_action = BaseDbObject.new({
-      name = "SELECT",
-      parent = self,
-    })
-    select_action.object_type = "action"
-    select_action.action_type = "select"
-    select_action.is_loaded = true
-    table.insert(self.children, select_action)
+    self:add_action("SELECT", "select")
 
-    -- Add Columns group (lazy loaded from base object)
-    local columns_group = BaseDbObject.new({
-      name = "Columns",
-      parent = self,
-    })
-    columns_group.object_type = "column_group"
-
-    -- Override load for columns group to get columns from base object
-    columns_group.load = function(group)
-      if group.is_loaded then
-        return true
-      end
-
-      group:clear_children()
-
-      -- Get columns from base object
+    -- Columns group (copies columns from base object)
+    self:add_lazy_group("Columns", "column_group", function()
+      local copies = {}
       local columns = base_object:get_columns()
       if columns then
         for _, col in ipairs(columns) do
-          -- Create a copy of column with this synonym as parent
-          local col_copy = BaseDbObject.new({
-            name = col.column_name,
-            parent = group,
-          })
+          local col_copy = BaseDbObject.new({ name = col.column_name, parent = nil })
           col_copy.object_type = "column"
           col_copy.column_name = col.column_name
           col_copy.data_type = col.data_type
@@ -396,98 +342,56 @@ function SynonymClass:create_action_nodes()
           col_copy.is_foreign_key = col.is_foreign_key
           col_copy.ordinal_position = col.ordinal_position
           col_copy.is_loaded = true
-          table.insert(group.children, col_copy)
+          table.insert(copies, col_copy)
         end
       end
+      return copies
+    end)
 
-      group.is_loaded = true
-      return true
-    end
-    table.insert(self.children, columns_group)
-
-    -- Add Indexes group (lazy loaded from base object)
+    -- Indexes group for tables (copies indexes from base object)
     if base_object.object_type == "table" then
-      local indexes_group = BaseDbObject.new({
-        name = "Indexes",
-        parent = self,
-      })
-      indexes_group.object_type = "index_group"
-
-      indexes_group.load = function(group)
-        if group.is_loaded then
-          return true
-        end
-
-        group:clear_children()
-
+      self:add_lazy_group("Indexes", "index_group", function()
+        local copies = {}
         local indexes = base_object:get_indexes()
         if indexes then
           for _, idx in ipairs(indexes) do
-            local idx_copy = BaseDbObject.new({
-              name = idx.index_name,
-              parent = group,
-            })
+            local idx_copy = BaseDbObject.new({ name = idx.index_name, parent = nil })
             idx_copy.object_type = "index"
             idx_copy.index_name = idx.index_name
             idx_copy.is_unique = idx.is_unique
             idx_copy.is_primary_key = idx.is_primary_key
             idx_copy.index_type = idx.index_type
             idx_copy.is_loaded = true
-            table.insert(group.children, idx_copy)
+            table.insert(copies, idx_copy)
           end
         end
-
-        group.is_loaded = true
-        return true
-      end
-      table.insert(self.children, indexes_group)
+        return copies
+      end)
     end
   elseif base_object.object_type == "procedure" or base_object.object_type == "function" then
     -- For procedures/functions, show parameters
-    local execute_action = BaseDbObject.new({
-      name = base_object.object_type == "procedure" and "EXECUTE" or "SELECT",
-      parent = self,
-    })
-    execute_action.object_type = "action"
-    execute_action.action_type = base_object.object_type == "procedure" and "exec" or "select"
-    execute_action.is_loaded = true
-    table.insert(self.children, execute_action)
+    local action_name = base_object.object_type == "procedure" and "EXECUTE" or "SELECT"
+    local action_type = base_object.object_type == "procedure" and "exec" or "select"
+    self:add_action(action_name, action_type)
 
-    -- Add Parameters group (lazy loaded from base object)
-    local params_group = BaseDbObject.new({
-      name = "Parameters",
-      parent = self,
-    })
-    params_group.object_type = "parameter_group"
-
-    params_group.load = function(group)
-      if group.is_loaded then
-        return true
-      end
-
-      group:clear_children()
-
+    -- Parameters group (copies parameters from base object)
+    self:add_lazy_group("Parameters", "parameter_group", function()
+      local copies = {}
       local parameters = base_object:get_parameters()
       if parameters then
         for _, param in ipairs(parameters) do
-          local param_copy = BaseDbObject.new({
-            name = param.parameter_name,
-            parent = group,
-          })
+          local param_copy = BaseDbObject.new({ name = param.parameter_name, parent = nil })
           param_copy.object_type = "parameter"
           param_copy.parameter_name = param.parameter_name
           param_copy.data_type = param.data_type
           param_copy.is_output = param.is_output
           param_copy.ordinal_position = param.ordinal_position
           param_copy.is_loaded = true
-          table.insert(group.children, param_copy)
+          table.insert(copies, param_copy)
         end
       end
-
-      group.is_loaded = true
-      return true
-    end
-    table.insert(self.children, params_group)
+      return copies
+    end)
   end
 end
 
