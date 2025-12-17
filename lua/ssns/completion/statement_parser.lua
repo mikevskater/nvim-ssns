@@ -91,6 +91,8 @@ local ScopeContext = require('ssns.completion.parser.scope')
 local SelectListParser = require('ssns.completion.parser.clauses.select_list')
 local FromClauseParser = require('ssns.completion.parser.clauses.from_clause')
 local CteClauseParser = require('ssns.completion.parser.clauses.cte_clause')
+local SubqueryParser = require('ssns.completion.parser.clauses.subquery')
+local WhereClauseParser = require('ssns.completion.parser.clauses.where_clause')
 
 -- Import statement handler modules
 local BaseStatement = require('ssns.completion.parser.statements.base')
@@ -100,6 +102,8 @@ local UpdateStatement = require('ssns.completion.parser.statements.update')
 local DeleteStatement = require('ssns.completion.parser.statements.delete')
 local MergeStatement = require('ssns.completion.parser.statements.merge')
 local DdlStatement = require('ssns.completion.parser.statements.ddl')
+local ExecStatement = require('ssns.completion.parser.statements.exec')
+local SetStatement = require('ssns.completion.parser.statements.set')
 
 local StatementParser = {}
 
@@ -129,233 +133,11 @@ function ParserState:parse_table_reference(known_ctes)
 end
 
 ---Parse a subquery recursively
----This method is called by clause parsers to parse nested subqueries
+---This method delegates to SubqueryParser module
 ---@param known_ctes table<string, boolean>
 ---@return SubqueryInfo?
 function ParserState:parse_subquery(known_ctes)
-  local start_token = self:current()
-  if not start_token then
-    return nil
-  end
-
-  -- Track token range for parameter extraction
-  local start_token_idx = self.pos
-
-  local subquery = {
-    alias = nil,
-    columns = {},
-    tables = {},
-    subqueries = {},
-    parameters = {},
-    start_pos = { line = start_token.line, col = start_token.col },
-    end_pos = { line = start_token.line, col = start_token.col },
-    clause_positions = {},
-  }
-
-  -- Create a temporary scope for this subquery
-  local scope = ScopeContext.new(nil)
-  -- Populate scope.ctes from known_ctes
-  for name, _ in pairs(known_ctes or {}) do
-    scope:add_cte(name, { name = name, columns = {}, tables = {}, subqueries = {}, parameters = {} })
-  end
-
-  -- We're at SELECT keyword - save it for position tracking
-  local select_token = self:current()
-  self:advance()
-
-  -- Parse SELECT list using the SelectListParser module
-  local select_clause_pos
-  subquery.columns, select_clause_pos = SelectListParser.parse(self, scope, select_token)
-  if select_clause_pos then
-    subquery.clause_positions["select"] = select_clause_pos
-  end
-
-  -- Parse FROM clause using the FromClauseParser module
-  if self:is_keyword("FROM") then
-    local from_token = self:current()
-    local result = FromClauseParser.parse(self, scope, from_token)
-    subquery.tables = result.tables
-    if result.clause_position then
-      subquery.clause_positions["from"] = result.clause_position
-    end
-    -- Add join and on positions
-    if result.join_positions then
-      for i, pos in ipairs(result.join_positions) do
-        subquery.clause_positions["join_" .. i] = pos
-      end
-    end
-    if result.on_positions then
-      for i, pos in ipairs(result.on_positions) do
-        subquery.clause_positions["on_" .. i] = pos
-      end
-    end
-  end
-
-  -- Copy subqueries from scope
-  subquery.subqueries = scope.subqueries
-
-  -- Handle set operations (UNION, INTERSECT, EXCEPT) to capture tables from all members
-  local where_start = nil
-  local last_token_before_end = nil
-
-  while self:current() do
-    -- Skip until we hit UNION/INTERSECT/EXCEPT or end of subquery
-    local set_op_paren_depth = 0
-    while self:current() do
-      local token = self:current()
-
-      -- Track WHERE clause start
-      if set_op_paren_depth == 0 and self:is_keyword("WHERE") and not where_start then
-        where_start = token
-      end
-
-      -- Track last token for WHERE clause end position
-      last_token_before_end = token
-
-      if token.type == "paren_open" then
-        set_op_paren_depth = set_op_paren_depth + 1
-        self:advance()
-        -- Check for nested subquery: (SELECT ...
-        if self:is_keyword("SELECT") then
-          local nested = self:parse_subquery(known_ctes)
-          if nested then
-            table.insert(subquery.subqueries, nested)
-          end
-          -- After parse_subquery, parser is AT the closing ) - consume it
-          if self:is_type("paren_close") then
-            last_token_before_end = self:current()
-            self:advance()
-          end
-          set_op_paren_depth = set_op_paren_depth - 1
-        end
-      elseif token.type == "paren_close" then
-        if set_op_paren_depth == 0 then
-          -- End of subquery - record WHERE clause position
-          if where_start and last_token_before_end then
-            subquery.clause_positions["where"] = {
-              start_line = where_start.line,
-              start_col = where_start.col,
-              end_line = last_token_before_end.line,
-              end_col = last_token_before_end.col + #last_token_before_end.text - 1,
-            }
-          end
-          break
-        end
-        set_op_paren_depth = set_op_paren_depth - 1
-        self:advance()
-      elseif set_op_paren_depth == 0 and (self:is_keyword("UNION") or self:is_keyword("INTERSECT") or self:is_keyword("EXCEPT")) then
-        -- Found set operation - record WHERE clause position
-        if where_start and last_token_before_end then
-          subquery.clause_positions["where"] = {
-            start_line = where_start.line,
-            start_col = where_start.col,
-            end_line = last_token_before_end.line,
-            end_col = last_token_before_end.col + #last_token_before_end.text - 1,
-          }
-        end
-        break
-      else
-        self:advance()
-      end
-    end
-
-    local is_set_op = self:is_keyword("UNION") or self:is_keyword("INTERSECT") or self:is_keyword("EXCEPT")
-    if not is_set_op then
-      break
-    end
-
-    self:advance()  -- consume UNION/INTERSECT/EXCEPT
-
-    -- Handle ALL or DISTINCT modifier
-    if self:is_keyword("ALL") or self:is_keyword("DISTINCT") then
-      self:advance()
-    end
-
-    -- Expect SELECT
-    if not self:is_keyword("SELECT") then
-      break
-    end
-    self:advance()  -- consume SELECT
-
-    -- Skip SELECT list until FROM
-    local select_paren_depth = 0
-    while self:current() do
-      if self:is_type("paren_open") then
-        select_paren_depth = select_paren_depth + 1
-      elseif self:is_type("paren_close") then
-        if select_paren_depth > 0 then
-          select_paren_depth = select_paren_depth - 1
-        else
-          break  -- End of subquery
-        end
-      elseif select_paren_depth == 0 and self:is_keyword("FROM") then
-        break  -- Found FROM clause
-      end
-      self:advance()
-    end
-
-    -- Parse FROM clause for UNION member
-    if self:is_keyword("FROM") then
-      local from_token = self:current()
-      local union_scope = ScopeContext.new(nil)
-      for name, _ in pairs(known_ctes or {}) do
-        union_scope:add_cte(name, { name = name, columns = {}, tables = {}, subqueries = {}, parameters = {} })
-      end
-      local result = FromClauseParser.parse(self, union_scope, from_token)
-      for _, tbl in ipairs(result.tables) do
-        table.insert(subquery.tables, tbl)
-      end
-    end
-  end
-
-  -- Parse remaining nested subqueries
-  local scan_depth = 0
-  while self:current() do
-    if self:is_type("paren_open") then
-      scan_depth = scan_depth + 1
-      self:advance()
-      if self:is_keyword("SELECT") then
-        local nested = self:parse_subquery(known_ctes)
-        if nested then
-          table.insert(subquery.subqueries, nested)
-        end
-        scan_depth = scan_depth - 1
-      end
-    elseif self:is_type("paren_close") then
-      if scan_depth <= 0 then
-        break  -- End of current subquery
-      end
-      scan_depth = scan_depth - 1
-      self:advance()
-    else
-      self:advance()
-    end
-  end
-
-  -- Record end position
-  local end_token = self:current()
-  if end_token then
-    subquery.end_pos = { line = end_token.line, col = end_token.col }
-  end
-
-  -- Build alias mapping for this subquery
-  local subquery_aliases = {}
-  for _, table_ref in ipairs(subquery.tables) do
-    if table_ref.alias then
-      subquery_aliases[table_ref.alias:lower()] = table_ref
-    end
-  end
-
-  -- Resolve parent_table for columns
-  resolve_column_parents(subquery.columns, subquery_aliases, subquery.tables)
-
-  -- Extract parameters from tokens
-  local end_token_idx = self.pos - 1
-  if end_token_idx >= start_token_idx then
-    self:extract_all_parameters_from_tokens(start_token_idx, end_token_idx, subquery.parameters)
-  end
-
-  return subquery
+  return SubqueryParser.parse(self, known_ctes)
 end
 
 ---Dispatch to appropriate statement handler based on keyword
@@ -399,7 +181,7 @@ local function parse_statement_dispatch(state, scope, temp_tables)
     end
     -- Parse WHERE clause for DELETE
     if state:is_keyword("WHERE") then
-      parse_where_clause(state, chunk, scope)
+      WhereClauseParser.parse(state, chunk, scope, SubqueryParser)
     end
     -- Finalize chunk
     BaseStatement.finalize_chunk(chunk, scope, state)
@@ -426,9 +208,9 @@ local function parse_statement_dispatch(state, scope, temp_tables)
   elseif keyword == "TRUNCATE" then
     return DdlStatement.parse_truncate(state, scope, temp_tables)
   elseif keyword == "EXEC" or keyword == "EXECUTE" then
-    return parse_exec_statement(state, scope)
+    return ExecStatement.parse(state, scope)
   elseif keyword == "SET" then
-    return parse_set_statement(state, scope)
+    return SetStatement.parse(state, scope, SubqueryParser)
   else
     -- Unknown statement type - skip to next statement
     state:consume_until_statement_end()
@@ -516,7 +298,7 @@ function parse_statement_remaining(state, chunk, scope, statement_type)
 
   -- Parse WHERE clause
   if state:is_keyword("WHERE") then
-    parse_where_clause(state, chunk, scope)
+    WhereClauseParser.parse(state, chunk, scope, SubqueryParser)
   end
 
   -- Finalize UPDATE chunk
@@ -534,178 +316,6 @@ function parse_statement_remaining(state, chunk, scope, statement_type)
       end
     end
   end
-end
-
----Parse WHERE clause and track its position (shared by UPDATE/DELETE)
----@param state ParserState
----@param chunk StatementChunk
----@param scope ScopeContext
-function parse_where_clause(state, chunk, scope)
-  local where_token = state:current()
-  state:advance()  -- consume WHERE
-
-  local paren_depth = 0
-  local last_token = where_token
-
-  -- Build known_ctes for subquery parsing
-  local known_ctes = scope and scope:get_known_ctes_table() or {}
-
-  -- Parse until we hit ORDER BY, statement end, or next statement
-  while state:current() do
-    local token = state:current()
-
-    if token.type == "paren_open" then
-      paren_depth = paren_depth + 1
-      last_token = token
-      state:advance()
-      -- Check for subquery: (SELECT ...
-      if state:is_keyword("SELECT") then
-        local subquery = state:parse_subquery(known_ctes)
-        if subquery then
-          -- After parse_subquery, parser is AT the closing ) - consume it
-          if state:is_type("paren_close") then
-            last_token = state:current()
-            state:advance()
-          end
-          paren_depth = paren_depth - 1
-          -- Add to scope so it gets copied to chunk in finalize
-          if scope then
-            scope:add_subquery(subquery)
-          end
-        end
-      end
-    elseif token.type == "paren_close" then
-      paren_depth = paren_depth - 1
-      if paren_depth < 0 then
-        break
-      end
-      last_token = token
-      state:advance()
-    elseif token.type == "go" or (token.type == "identifier" and token.text:upper() == "GO") then
-      break
-    elseif token.type == "semicolon" then
-      break
-    elseif paren_depth == 0 and token.type == "keyword" then
-      local upper_text = token.text:upper()
-      if upper_text == "ORDER" or upper_text == "OPTION"
-         or upper_text == "FOR" then
-        break
-      elseif is_statement_starter(upper_text) and upper_text ~= "WITH" then
-        break
-      else
-        last_token = token
-        state:advance()
-      end
-    else
-      last_token = token
-      state:advance()
-    end
-  end
-
-  -- Track WHERE clause position
-  chunk.clause_positions["where"] = {
-    start_line = where_token.line,
-    start_col = where_token.col,
-    end_line = last_token.line,
-    end_col = last_token.col + #last_token.text - 1,
-  }
-end
-
----Parse EXEC/EXECUTE statement
----@param state ParserState
----@param scope ScopeContext
----@return StatementChunk
-function parse_exec_statement(state, scope)
-  state:mark_chunk_start()  -- Mark token position for this chunk
-  local start_token = state:current()
-  local chunk = BaseStatement.create_chunk("EXEC", start_token, state.go_batch_index, state)
-
-  scope.statement_type = "EXEC"
-  state:advance()  -- Must advance past EXEC before consume_until_statement_end
-  state:consume_until_statement_end()
-
-  -- Set token_end_idx manually since we don't call finalize_chunk
-  if chunk.token_start_idx then
-    chunk.token_end_idx = state.pos > 1 and state.pos - 1 or state.pos
-  end
-
-  -- Extract parameters from token range
-  if chunk.token_start_idx and chunk.token_end_idx then
-    state:extract_all_parameters_from_tokens(chunk.token_start_idx, chunk.token_end_idx, chunk.parameters)
-  end
-
-  return chunk
-end
-
----Parse SET statement (variable assignment)
----@param state ParserState
----@param scope ScopeContext
----@return StatementChunk
-function parse_set_statement(state, scope)
-  state:mark_chunk_start()  -- Mark token position for this chunk
-  local start_token = state:current()
-  local chunk = BaseStatement.create_chunk("SET", start_token, state.go_batch_index, state)
-
-  scope.statement_type = "SET"
-  state:advance()  -- Advance past SET
-
-  -- Build known_ctes for subquery parsing
-  local known_ctes = scope and scope:get_known_ctes_table() or {}
-
-  -- Parse SET statement content, looking for subqueries
-  local paren_depth = 0
-
-  while state:current() do
-    local token = state:current()
-
-    if token.type == "paren_open" then
-      paren_depth = paren_depth + 1
-      state:advance()
-      -- Check for subquery: (SELECT ...
-      if state:is_keyword("SELECT") then
-        local subquery = state:parse_subquery(known_ctes)
-        if subquery then
-          -- After parse_subquery, parser is AT the closing ) - consume it
-          if state:is_type("paren_close") then
-            state:advance()
-          end
-          paren_depth = paren_depth - 1
-          -- Add to scope so it gets copied to chunk in finalize
-          if scope then
-            scope:add_subquery(subquery)
-          end
-        end
-      end
-    elseif token.type == "paren_close" then
-      paren_depth = paren_depth - 1
-      state:advance()
-    elseif token.type == "go" or (token.type == "identifier" and token.text:upper() == "GO") then
-      -- Stop at GO batch separator
-      break
-    elseif token.type == "semicolon" then
-      -- Stop at semicolon
-      break
-    elseif paren_depth == 0 and token.type == "keyword" then
-      -- Check for new statement starter at top level
-      if is_statement_starter(token.text:upper()) then
-        break
-      else
-        state:advance()
-      end
-    else
-      state:advance()
-    end
-  end
-
-  -- Finalize chunk (copies subqueries from scope, sets token_end_idx)
-  BaseStatement.finalize_chunk(chunk, scope, state)
-
-  -- Extract parameters from token range
-  if chunk.token_start_idx and chunk.token_end_idx then
-    state:extract_all_parameters_from_tokens(chunk.token_start_idx, chunk.token_end_idx, chunk.parameters)
-  end
-
-  return chunk
 end
 
 ---Parse SQL text into statement chunks
