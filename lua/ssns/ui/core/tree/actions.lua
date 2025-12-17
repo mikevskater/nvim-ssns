@@ -45,46 +45,55 @@ function TreeActions.toggle_node(UiTree)
     end
 
     -- Determine async load function based on object type
+    -- Prefer RPC async methods (non-blocking) for responsive UI
+    -- Fall back to vim.schedule async if RPC async not available
+    -- Last resort: synchronous loading
+    local AsyncRPC = require('ssns.async.rpc')
+    local rpc_available = AsyncRPC.is_available()
+
+    local rpc_async_fn = nil
     local async_load_fn = nil
     local sync_fallback_fn = nil
 
     if obj.object_type == "tables_group" then
-      if adapter.features.schemas and db.load_all_tables_bulk_async then
-        async_load_fn = function(on_complete) db:load_all_tables_bulk_async({ on_complete = on_complete }) end
-      elseif adapter.features.schemas then
-        sync_fallback_fn = function() db:load_all_tables_bulk() end
+      if rpc_available and db.load_all_tables_bulk_rpc_async and adapter.features.schemas then
+        -- Best: non-blocking RPC async
+        rpc_async_fn = function(on_complete) db:load_all_tables_bulk_rpc_async({ on_complete = on_complete }) end
+      elseif db.get_tables_async then
+        -- Fallback: vim.schedule based (still blocks during query)
+        async_load_fn = function(on_complete) db:get_tables_async({ on_complete = on_complete }) end
       else
         sync_fallback_fn = function() db:get_tables() end
       end
     elseif obj.object_type == "views_group" and adapter.features.views then
-      if adapter.features.schemas and db.load_all_views_bulk_async then
-        async_load_fn = function(on_complete) db:load_all_views_bulk_async({ on_complete = on_complete }) end
-      elseif adapter.features.schemas then
-        sync_fallback_fn = function() db:load_all_views_bulk() end
+      if rpc_available and db.load_all_views_bulk_rpc_async and adapter.features.schemas then
+        rpc_async_fn = function(on_complete) db:load_all_views_bulk_rpc_async({ on_complete = on_complete }) end
+      elseif db.get_views_async then
+        async_load_fn = function(on_complete) db:get_views_async({ on_complete = on_complete }) end
       else
         sync_fallback_fn = function() db:get_views() end
       end
     elseif obj.object_type == "procedures_group" and adapter.features.procedures then
-      if adapter.features.schemas and db.load_all_procedures_bulk_async then
-        async_load_fn = function(on_complete) db:load_all_procedures_bulk_async({ on_complete = on_complete }) end
-      elseif adapter.features.schemas then
-        sync_fallback_fn = function() db:load_all_procedures_bulk() end
+      if rpc_available and db.load_all_procedures_bulk_rpc_async and adapter.features.schemas then
+        rpc_async_fn = function(on_complete) db:load_all_procedures_bulk_rpc_async({ on_complete = on_complete }) end
+      elseif db.get_procedures_async then
+        async_load_fn = function(on_complete) db:get_procedures_async({ on_complete = on_complete }) end
       else
         sync_fallback_fn = function() db:get_procedures() end
       end
     elseif obj.object_type == "functions_group" and adapter.features.functions then
-      if adapter.features.schemas and db.load_all_functions_bulk_async then
-        async_load_fn = function(on_complete) db:load_all_functions_bulk_async({ on_complete = on_complete }) end
-      elseif adapter.features.schemas then
-        sync_fallback_fn = function() db:load_all_functions_bulk() end
+      if rpc_available and db.load_all_functions_bulk_rpc_async and adapter.features.schemas then
+        rpc_async_fn = function(on_complete) db:load_all_functions_bulk_rpc_async({ on_complete = on_complete }) end
+      elseif db.get_functions_async then
+        async_load_fn = function(on_complete) db:get_functions_async({ on_complete = on_complete }) end
       else
         sync_fallback_fn = function() db:get_functions() end
       end
     elseif obj.object_type == "synonyms_group" and adapter.features.synonyms then
-      if adapter.features.schemas and db.load_all_synonyms_bulk_async then
-        async_load_fn = function(on_complete) db:load_all_synonyms_bulk_async({ on_complete = on_complete }) end
-      elseif adapter.features.schemas then
-        sync_fallback_fn = function() db:load_all_synonyms_bulk() end
+      if rpc_available and db.load_all_synonyms_bulk_rpc_async and adapter.features.schemas then
+        rpc_async_fn = function(on_complete) db:load_all_synonyms_bulk_rpc_async({ on_complete = on_complete }) end
+      elseif db.get_synonyms_async then
+        async_load_fn = function(on_complete) db:get_synonyms_async({ on_complete = on_complete }) end
       else
         sync_fallback_fn = function() db:get_synonyms() end
       end
@@ -93,13 +102,49 @@ function TreeActions.toggle_node(UiTree)
       sync_fallback_fn = function() db:get_schemas() end
     end
 
+    -- Use RPC async if available (preferred - UI stays responsive)
+    local effective_async_fn = rpc_async_fn or async_load_fn
+
     -- Execute async or sync load
-    if async_load_fn then
+    if effective_async_fn then
+      local Buffer = require('ssns.ui.core.buffer')
+      local Config = require('ssns.config')
+      local Spinner = require('ssns.async.spinner')
+      local smart_positioning = Config.get_ui().smart_cursor_positioning
+
       -- Set loading state on the group object
       obj.ui_state.loading = true
       UiTree.render()
 
-      async_load_fn(function(result, err)
+      -- Keep cursor on the expanded group while loading
+      local col = smart_positioning and Buffer.get_name_column(line_number) or 0
+      Buffer.set_cursor(line_number, col)
+
+      -- Start animated spinner on the loading line (line after group header)
+      -- line_number is 1-indexed, spinner uses 0-indexed, loading indicator is on next line
+      local loading_line = line_number  -- Convert: (line_number + 1) - 1 = line_number for 0-indexed next line
+
+      -- Calculate indentation to match tree structure
+      -- Groups are rendered at indent_level, children at indent_level + 1
+      -- Each indent level is 2 spaces, plus "  " prefix for the loading indicator
+      local indent_level = Buffer.get_indent_level(line_number) or 0
+      local indent = string.rep("  ", indent_level + 1) .. "  "
+
+      local spinner_id = Spinner.start_in_buffer(Buffer.bufnr, {
+        text = indent .. "Loading " .. (obj.name or "objects") .. "...",
+        style = Config.get().async and Config.get().async.spinner_style or "braille",
+        show_runtime = Config.get().async and Config.get().async.show_runtime ~= false,
+        line = loading_line,
+        hl_group = "Comment",
+      })
+
+      -- Force display update (needed for vim.schedule fallback, not for RPC async)
+      vim.cmd('redraw')
+
+      effective_async_fn(function(result, err)
+        -- Stop the animated spinner
+        Spinner.stop(spinner_id)
+
         obj.ui_state.loading = false
 
         if err then
@@ -108,7 +153,35 @@ function TreeActions.toggle_node(UiTree)
         end
 
         UiTree.render()
+
+        -- Now position cursor on first child after load completes
+        if obj:has_children() then
+          local child_line = line_number + 1
+          local child_col = smart_positioning and Buffer.get_name_column(child_line) or 0
+          Buffer.set_cursor(child_line, child_col)
+          if smart_positioning then
+            Buffer.last_indent_info = {
+              line = child_line,
+              indent_level = Buffer.get_indent_level(child_line),
+              column = child_col,
+            }
+          end
+        else
+          -- No children loaded (error case or empty), stay on group
+          local group_col = smart_positioning and Buffer.get_name_column(line_number) or 0
+          Buffer.set_cursor(line_number, group_col)
+          if smart_positioning then
+            Buffer.last_indent_info = {
+              line = line_number,
+              indent_level = Buffer.get_indent_level(line_number),
+              column = group_col,
+            }
+          end
+        end
       end)
+
+      -- Return early - cursor positioning is handled in the callback
+      return
     elseif sync_fallback_fn then
       -- Sync fallback
       sync_fallback_fn()
@@ -179,6 +252,7 @@ function TreeActions.load_node_async(UiTree, obj, line_number)
   local Buffer = require('ssns.ui.core.buffer')
   local Config = require('ssns.config')
   local Async = require('ssns.async')
+  local Spinner = require('ssns.async.spinner')
   local smart_positioning = Config.get_ui().smart_cursor_positioning
 
   -- Cancel any existing load operation for this object
@@ -196,12 +270,34 @@ function TreeActions.load_node_async(UiTree, obj, line_number)
   local col = smart_positioning and Buffer.get_name_column(line_number) or 0
   Buffer.set_cursor(line_number, col)
 
+  -- Start animated spinner on the loading line (line after the node header)
+  -- line_number is 1-indexed, spinner uses 0-indexed, loading indicator is on next line
+  local loading_line = line_number  -- Convert: (line_number + 1) - 1 = line_number for 0-indexed next line
+
+  -- Calculate indentation to match tree structure
+  -- The node is at indent_level, children are at indent_level + 1
+  -- Each indent level is 2 spaces, plus "    " prefix for server/db loading indicator
+  local indent_level = Buffer.get_indent_level(line_number) or 0
+  local indent = string.rep("  ", indent_level + 1) .. "    "
+
+  local spinner_id = Spinner.start_in_buffer(Buffer.bufnr, {
+    text = indent .. "Loading " .. (obj.name or "node") .. "...",
+    style = Config.get().async and Config.get().async.spinner_style or "braille",
+    show_runtime = Config.get().async and Config.get().async.show_runtime ~= false,
+    line = loading_line,
+    hl_group = "Comment",
+  })
+
+  -- Force display update before blocking RPC call
+  vim.cmd('redraw')
+
   -- Create cancellation token
   local cancel_token = Async.create_cancel_token()
 
   -- Store cancel function on object for external cancellation
   obj._cancel_load = function()
     cancel_token:cancel("Cancelled by user")
+    Spinner.stop(spinner_id)
   end
 
   -- Load asynchronously using Executor
@@ -227,6 +323,9 @@ function TreeActions.load_node_async(UiTree, obj, line_number)
     cancel_token = cancel_token,
     timeout_ms = 60000, -- 60 seconds for metadata loads
     on_complete = function(load_result, err)
+      -- Stop the animated spinner
+      Spinner.stop(spinner_id)
+
       -- Clear loading state and cancel function
       obj.ui_state.loading = false
       obj._cancel_load = nil
