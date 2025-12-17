@@ -30,6 +30,7 @@ local Spinner = require('ssns.async.spinner')
 local Progress = require('ssns.async.progress')
 local Executor = require('ssns.async.executor')
 local FileIO = require('ssns.async.file_io')
+local RPC = require('ssns.async.rpc')
 
 -- Export submodules
 Async.Cancellation = Cancellation
@@ -37,6 +38,7 @@ Async.Spinner = Spinner
 Async.Progress = Progress
 Async.Executor = Executor
 Async.FileIO = FileIO
+Async.RPC = RPC
 
 -- Re-export common functions at top level for convenience
 
