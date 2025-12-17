@@ -1733,7 +1733,7 @@ function MultiPanelWindow:_recalculate_layout()
   if self._closed then return end
 
   -- Calculate new layouts
-  local layouts, total_width, total_height, start_row, start_col = calculate_full_layout(self.config)
+  local layouts, total_width, total_height, start_row, start_col = FloatLayout.calculate_full_layout(self.config)
 
   -- Update cache
   self._layout_cache = {
