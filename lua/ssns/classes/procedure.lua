@@ -266,4 +266,55 @@ function ProcedureClass:get_metadata_info()
   }
 end
 
+-- ============================================================================
+-- Async Methods
+-- ============================================================================
+
+---@class ProcedureLoadAsyncOpts : ExecutorOpts
+---@field on_complete fun(result: any, error: string?)? Completion callback
+
+---Load parameters for this procedure asynchronously
+---@param opts ProcedureLoadAsyncOpts? Options
+---@return string task_id Task ID for tracking/cancellation
+function ProcedureClass:load_parameters_async(opts)
+  opts = opts or {}
+  local Executor = require('ssns.async.executor')
+
+  return Executor.run(function(ctx)
+    ctx.throw_if_cancelled()
+    ctx.report_progress(0, "Loading parameters...")
+    local parameters = self:load_parameters()
+    ctx.report_progress(100, "Parameters loaded")
+    return parameters
+  end, {
+    name = opts.name or string.format("Loading parameters for %s", self.procedure_name),
+    timeout_ms = opts.timeout_ms,
+    cancel_token = opts.cancel_token,
+    on_progress = opts.on_progress,
+    on_complete = opts.on_complete,
+  })
+end
+
+---Load procedure definition asynchronously
+---@param opts ProcedureLoadAsyncOpts? Options
+---@return string task_id Task ID for tracking/cancellation
+function ProcedureClass:load_definition_async(opts)
+  opts = opts or {}
+  local Executor = require('ssns.async.executor')
+
+  return Executor.run(function(ctx)
+    ctx.throw_if_cancelled()
+    ctx.report_progress(0, "Loading definition...")
+    local definition = self:load_definition()
+    ctx.report_progress(100, "Definition loaded")
+    return definition
+  end, {
+    name = opts.name or string.format("Loading definition for %s", self.procedure_name),
+    timeout_ms = opts.timeout_ms,
+    cancel_token = opts.cancel_token,
+    on_progress = opts.on_progress,
+    on_complete = opts.on_complete,
+  })
+end
+
 return ProcedureClass
