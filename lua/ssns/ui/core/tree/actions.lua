@@ -363,44 +363,71 @@ function TreeActions.execute_action(UiTree, action)
   elseif action.action_type == "exec" then
     -- Generate EXEC statement with parameter prompts if needed
     if parent.generate_exec then
-      -- Load parameters to check if we need prompts
-      if parent.load_parameters then
-        parent:load_parameters()
-      end
+      -- Helper function to show param UI and create exec statement
+      local function show_exec_ui(parameters)
+        -- Filter to only input parameters (IN or INOUT)
+        local input_params = {}
+        for _, param in ipairs(parameters or {}) do
+          if param.direction == "IN" or param.direction == "INOUT" then
+            table.insert(input_params, param)
+          end
+        end
 
-      local parameters = parent.parameters or {}
+        if #input_params > 0 then
+          -- Show parameter input UI BEFORE creating buffer
+          local UiParamInput = require('ssns.ui.dialogs.param_input')
+          local proc_name = (parent.schema_name and parent.schema_name .. "." or "") .. parent.procedure_name
 
-      -- Filter to only input parameters (IN or INOUT)
-      local input_params = {}
-      for _, param in ipairs(parameters) do
-        if param.direction == "IN" or param.direction == "INOUT" then
-          table.insert(input_params, param)
+          UiParamInput.show_input(
+            proc_name,
+            server.name,
+            database and database.db_name or nil,
+            input_params,
+            function(values)
+              -- Build EXEC statement with user-provided values
+              local UiQuery = require('ssns.ui.core.query')
+              local sql = UiQuery.build_exec_statement(parent.schema_name, parent.procedure_name, input_params, values)
+
+              -- Create buffer with the fully-formed EXEC statement
+              Query.create_query_buffer(server, database, sql, parent.name)
+            end
+          )
+        else
+          -- No parameters, create buffer with simple EXEC
+          local sql = parent:generate_exec()
+          Query.create_query_buffer(server, database, sql, parent.name)
         end
       end
 
-      if #input_params > 0 then
-        -- Show parameter input UI BEFORE creating buffer
-        local UiParamInput = require('ssns.ui.dialogs.param_input')
-        local proc_name = (parent.schema_name and parent.schema_name .. "." or "") .. parent.procedure_name
+      -- Prefer async parameter loading if available
+      if parent.load_parameters_async then
+        -- Set loading state for UI feedback
+        parent.ui_state.loading = true
+        UiTree.render()
 
-        UiParamInput.show_input(
-          proc_name,
-          server.name,
-          database and database.db_name or nil,
-          input_params,
-          function(values)
-            -- Build EXEC statement with user-provided values
-            local UiQuery = require('ssns.ui.core.query')
-            local sql = UiQuery.build_exec_statement(parent.schema_name, parent.procedure_name, input_params, values)
+        parent:load_parameters_async({
+          on_complete = function(parameters, err)
+            parent.ui_state.loading = false
+            UiTree.render()
 
-            -- Create buffer with the fully-formed EXEC statement
-            Query.create_query_buffer(server, database, sql, parent.name)
-          end
-        )
+            if err then
+              vim.notify(string.format("Failed to load parameters: %s", err), vim.log.levels.ERROR)
+              -- Fallback to simple exec without parameters
+              local sql = parent:generate_exec()
+              Query.create_query_buffer(server, database, sql, parent.name)
+              return
+            end
+
+            show_exec_ui(parent.parameters)
+          end,
+        })
+      elseif parent.load_parameters then
+        -- Sync fallback
+        parent:load_parameters()
+        show_exec_ui(parent.parameters)
       else
-        -- No parameters, create buffer with simple EXEC
-        local sql = parent:generate_exec()
-        Query.create_query_buffer(server, database, sql, parent.name)
+        -- No parameter loading available, use empty params
+        show_exec_ui({})
       end
     end
   elseif action.action_type == "alter" then
