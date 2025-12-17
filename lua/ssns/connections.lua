@@ -404,4 +404,214 @@ function Connections.with_database(connection, new_database)
   return modified
 end
 
+-- ============================================================================
+-- Async Methods
+-- ============================================================================
+
+---Load connections from JSON file asynchronously
+---@param callback fun(connections: ConnectionData[], error: string?)
+function Connections.load_async(callback)
+  local FileIO = require('ssns.async.file_io')
+  local path = Connections.get_file_path()
+
+  -- Check if file exists first
+  FileIO.exists_async(path, function(exists, _)
+    if not exists then
+      callback({}, nil)
+      return
+    end
+
+    FileIO.read_json_async(path, function(data, err)
+      if err then
+        callback({}, "Failed to load connections: " .. err)
+        return
+      end
+
+      callback(data and data.connections or {}, nil)
+    end)
+  end)
+end
+
+---Save connections to JSON file asynchronously
+---@param connections ConnectionData[] Array of connection objects
+---@param callback fun(success: boolean, error: string?)
+function Connections.save_async(connections, callback)
+  local FileIO = require('ssns.async.file_io')
+  local path = Connections.get_file_path()
+  local dir = vim.fn.fnamemodify(path, ":h")
+
+  local data = {
+    version = FILE_VERSION,
+    connections = connections,
+  }
+
+  -- Prettify using shared JsonUtils
+  local lines = JsonUtils.prettify_lines(data)
+  local content = table.concat(lines, "\n")
+
+  -- Ensure directory exists first
+  FileIO.mkdir_async(dir, function(mkdir_success, mkdir_err)
+    if not mkdir_success then
+      callback(false, "Failed to create directory: " .. (mkdir_err or "unknown error"))
+      return
+    end
+
+    FileIO.write_async(path, content, function(result)
+      callback(result.success, result.error)
+    end)
+  end)
+end
+
+---Add a new connection asynchronously
+---@param connection ConnectionData Connection data to add
+---@param callback fun(success: boolean, error: string?)
+function Connections.add_async(connection, callback)
+  -- Validate connection synchronously (it's just data validation)
+  local valid, err = Connections.validate(connection)
+  if not valid then
+    callback(false, err)
+    return
+  end
+
+  Connections.load_async(function(connections, load_err)
+    if load_err then
+      callback(false, load_err)
+      return
+    end
+
+    -- Check for duplicate names
+    for _, conn in ipairs(connections) do
+      if conn.name == connection.name then
+        callback(false, string.format("Connection '%s' already exists", connection.name))
+        return
+      end
+    end
+
+    -- Add defaults
+    connection.favorite = connection.favorite or false
+    connection.auto_connect = connection.auto_connect or false
+
+    table.insert(connections, connection)
+    Connections.save_async(connections, callback)
+  end)
+end
+
+---Remove a connection by name asynchronously
+---@param name string Connection name to remove
+---@param callback fun(success: boolean, error: string?)
+function Connections.remove_async(name, callback)
+  Connections.load_async(function(connections, load_err)
+    if load_err then
+      callback(false, load_err)
+      return
+    end
+
+    local found = false
+    for i, conn in ipairs(connections) do
+      if conn.name == name then
+        table.remove(connections, i)
+        found = true
+        break
+      end
+    end
+
+    if not found then
+      callback(false, string.format("Connection '%s' not found", name))
+      return
+    end
+
+    Connections.save_async(connections, callback)
+  end)
+end
+
+---Update an existing connection asynchronously
+---@param name string Connection name to update
+---@param connection ConnectionData New connection data
+---@param callback fun(success: boolean, error: string?)
+function Connections.update_async(name, connection, callback)
+  -- Validate connection synchronously
+  local valid, err = Connections.validate(connection)
+  if not valid then
+    callback(false, err)
+    return
+  end
+
+  Connections.load_async(function(connections, load_err)
+    if load_err then
+      callback(false, load_err)
+      return
+    end
+
+    local found = false
+    for i, conn in ipairs(connections) do
+      if conn.name == name then
+        connections[i] = connection
+        found = true
+        break
+      end
+    end
+
+    if not found then
+      callback(false, string.format("Connection '%s' not found", name))
+      return
+    end
+
+    Connections.save_async(connections, callback)
+  end)
+end
+
+---Find a connection by name asynchronously
+---@param name string Connection name
+---@param callback fun(connection: ConnectionData?, error: string?)
+function Connections.find_async(name, callback)
+  Connections.load_async(function(connections, err)
+    if err then
+      callback(nil, err)
+      return
+    end
+
+    for _, conn in ipairs(connections) do
+      if conn.name == name then
+        callback(conn, nil)
+        return
+      end
+    end
+
+    callback(nil, nil)
+  end)
+end
+
+---Toggle favorite status for a connection asynchronously
+---@param name string Connection name
+---@param callback fun(success: boolean, new_state: boolean?, error: string?)
+function Connections.toggle_favorite_async(name, callback)
+  Connections.load_async(function(connections, load_err)
+    if load_err then
+      callback(false, nil, load_err)
+      return
+    end
+
+    local found = false
+    local new_state = false
+
+    for i, conn in ipairs(connections) do
+      if conn.name == name then
+        connections[i].favorite = not conn.favorite
+        new_state = connections[i].favorite
+        found = true
+        break
+      end
+    end
+
+    if not found then
+      callback(false, nil, string.format("Connection '%s' not found", name))
+      return
+    end
+
+    Connections.save_async(connections, function(success, save_err)
+      callback(success, new_state, save_err)
+    end)
+  end)
+end
+
 return Connections
