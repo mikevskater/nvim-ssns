@@ -40,47 +40,102 @@ function Ssns.setup(user_config)
     end
   end
 
-  -- Load favorite connections from connections.json (shown in tree but not connected)
-  local favorites = Connections.get_favorites()
-  local favorite_count = 0
-  local auto_connect_count = 0
+  -- Load favorite connections asynchronously (shown in tree but not connected)
+  -- This prevents blocking during startup for file I/O
+  Connections.get_favorites_async(function(favorites, load_err)
+    if load_err then
+      vim.schedule(function()
+        vim.notify(
+          string.format("SSNS: Failed to load saved connections: %s", load_err),
+          vim.log.levels.WARN
+        )
+      end)
+      return
+    end
 
-  for _, conn in ipairs(favorites) do
-    -- Skip if already loaded from config
-    if not Cache.server_exists(conn.name) then
-      local server, err = Cache.add_server_from_connection(conn)
-      if server then
-        favorite_count = favorite_count + 1
-        -- Auto-connect if configured
-        if conn.auto_connect then
+    local favorite_count = 0
+    local auto_connect_servers = {}
+
+    -- First pass: add all favorite servers to cache (fast, no I/O)
+    for _, conn in ipairs(favorites) do
+      -- Skip if already loaded from config
+      if not Cache.server_exists(conn.name) then
+        local server, err = Cache.add_server_from_connection(conn)
+        if server then
+          favorite_count = favorite_count + 1
+          -- Collect servers needing auto-connect
+          if conn.auto_connect then
+            table.insert(auto_connect_servers, { server = server, name = conn.name })
+          end
+        else
+          vim.schedule(function()
+            vim.notify(
+              string.format("SSNS: Failed to load favorite '%s': %s", conn.name, err or "Unknown error"),
+              vim.log.levels.WARN
+            )
+          end)
+        end
+      end
+    end
+
+    -- Report initial load (servers added to tree, not yet connected)
+    vim.schedule(function()
+      local total_servers = #servers + favorite_count
+      if total_servers > 0 then
+        local msg = string.format("SSNS: Loaded %d connection(s)", total_servers)
+        if #auto_connect_servers > 0 then
+          msg = msg .. string.format(" (connecting to %d...)", #auto_connect_servers)
+        end
+        vim.notify(msg, vim.log.levels.INFO)
+      end
+    end)
+
+    -- Second pass: auto-connect servers asynchronously
+    -- Each connection is done in sequence to avoid overwhelming the backend
+    if #auto_connect_servers > 0 then
+      local connected_count = 0
+      local failed_count = 0
+
+      local function connect_next(index)
+        if index > #auto_connect_servers then
+          -- All connections attempted, report final status
+          vim.schedule(function()
+            if connected_count > 0 then
+              vim.notify(
+                string.format("SSNS: Auto-connected to %d server(s)", connected_count),
+                vim.log.levels.INFO
+              )
+            end
+          end)
+          return
+        end
+
+        local item = auto_connect_servers[index]
+        local server = item.server
+        local name = item.name
+
+        -- Use vim.schedule to avoid blocking
+        vim.schedule(function()
           local success, connect_err = server:connect()
           if success then
-            auto_connect_count = auto_connect_count + 1
+            connected_count = connected_count + 1
           else
+            failed_count = failed_count + 1
             vim.notify(
-              string.format("SSNS: Failed to auto-connect '%s': %s", conn.name, connect_err or "Unknown error"),
+              string.format("SSNS: Failed to auto-connect '%s': %s", name, connect_err or "Unknown error"),
               vim.log.levels.WARN
             )
           end
-        end
-      else
-        vim.notify(
-          string.format("SSNS: Failed to load favorite '%s': %s", conn.name, err or "Unknown error"),
-          vim.log.levels.WARN
-        )
-      end
-    end
-  end
 
-  -- Report successful initialization
-  local total_servers = #servers + favorite_count
-  if total_servers > 0 then
-    local msg = string.format("SSNS: Initialized with %d connection(s)", total_servers)
-    if auto_connect_count > 0 then
-      msg = msg .. string.format(" (%d auto-connected)", auto_connect_count)
+          -- Continue to next server
+          connect_next(index + 1)
+        end)
+      end
+
+      -- Start connecting servers
+      connect_next(1)
     end
-    vim.notify(msg, vim.log.levels.INFO)
-  end
+  end)
 
   -- Setup UI highlights
   local Highlights = require('ssns.ui.core.highlights')
