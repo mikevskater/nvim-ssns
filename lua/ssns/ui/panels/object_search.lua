@@ -82,6 +82,41 @@ local loading_cancel_token = nil
 ---@type TextSpinner? Text spinner for loading animation
 local loading_text_spinner = nil
 
+---@type ObjectSearchUIState
+local ui_state = {
+  selected_server = nil,
+  selected_databases = {},
+  all_databases_selected = false,
+  loaded_objects = {},
+  loading_status = "idle",
+  loading_progress = 0,
+  loading_message = "",
+  loading_detail = nil,
+  server_loading = false,
+  search_term = "",
+  search_term_before_edit = "",
+  search_editing = false,
+  -- Search target filters (what to search in)
+  search_names = true,
+  search_definitions = true,
+  search_metadata = false,
+  -- Object type filters (what types to show)
+  show_tables = true,
+  show_views = true,
+  show_procedures = true,
+  show_functions = true,
+  show_synonyms = true,
+  show_schemas = true,
+  -- Search options
+  show_system = false,
+  case_sensitive = false,
+  use_regex = false,
+  whole_word = false,
+  filtered_results = {},
+  selected_result_idx = 1,
+  definitions_cache = {},
+}
+
 ---Start the text spinner animation
 local function start_spinner_animation()
   if loading_text_spinner and loading_text_spinner:is_running() then
@@ -126,41 +161,6 @@ local function stop_spinner_animation()
     loading_text_spinner = nil
   end
 end
-
----@type ObjectSearchUIState
-local ui_state = {
-  selected_server = nil,
-  selected_databases = {},
-  all_databases_selected = false,
-  loaded_objects = {},
-  loading_status = "idle",
-  loading_progress = 0,
-  loading_message = "",
-  loading_detail = nil,
-  server_loading = false,
-  search_term = "",
-  search_term_before_edit = "",
-  search_editing = false,
-  -- Search target filters (what to search in)
-  search_names = true,
-  search_definitions = true,
-  search_metadata = false,
-  -- Object type filters (what types to show)
-  show_tables = true,
-  show_views = true,
-  show_procedures = true,
-  show_functions = true,
-  show_synonyms = true,
-  show_schemas = true,
-  -- Search options
-  show_system = false,
-  case_sensitive = false,
-  use_regex = false,
-  whole_word = false,
-  filtered_results = {},
-  selected_result_idx = 1,
-  definitions_cache = {},
-}
 
 ---System schemas to filter out when show_system is false
 local SYSTEM_SCHEMAS = {
