@@ -1163,6 +1163,12 @@ function UiQuery.format_single_result_set_styled(result_set, columns_metadata, b
   builder:result_header_row_with_rownum(col_info, border_style, row_num_width)
   builder:result_separator_with_rownum(col_info, border_style, row_num_width)
 
+  -- Pre-build row separator for caching (same for all rows)
+  local cached_row_separator = nil
+  if show_row_separators then
+    cached_row_separator = ContentBuilder.build_row_separator_with_rownum(col_info, border_style, row_num_width)
+  end
+
   -- Build data rows with multi-line support and row separators
   -- Limit to max_display_rows if configured (0 = no limit)
   local rows_to_display = (max_display_rows > 0) and math.min(total_rows, max_display_rows) or total_rows
@@ -1210,8 +1216,8 @@ function UiQuery.format_single_result_set_styled(result_set, columns_metadata, b
       end
 
       -- Add row separator before each row (except first) if enabled
-      if show_row_separators and row_idx > 1 then
-        builder:result_row_separator_with_rownum(col_info, border_style, row_num_width)
+      if cached_row_separator and row_idx > 1 then
+        builder:add_cached_row_separator(cached_row_separator)
       end
 
       -- Render the multi-line row

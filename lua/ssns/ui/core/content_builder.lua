@@ -1737,12 +1737,12 @@ function ContentBuilder:result_bottom_border_with_rownum(columns, border_style, 
   return self
 end
 
----Add a row separator with optional row number column
+---Build a row separator string with optional row number column (for caching)
 ---@param columns table[] Array of { width: number }
 ---@param border_style string "box" or "ascii"
 ---@param row_num_width number? Width of row number column
----@return ContentBuilder self
-function ContentBuilder:result_row_separator_with_rownum(columns, border_style, row_num_width)
+---@return string separator The separator string
+function ContentBuilder.build_row_separator_with_rownum(columns, border_style, row_num_width)
   local chars = ContentBuilder.get_border_chars(border_style)
   local parts = { chars.t_right }
 
@@ -1761,13 +1761,29 @@ function ContentBuilder:result_row_separator_with_rownum(columns, border_style, 
   end
   table.insert(parts, chars.t_left)
 
-  local text = table.concat(parts, "")
+  return table.concat(parts, "")
+end
+
+---Add a pre-built row separator line (for performance when separator is cached)
+---@param separator_text string The pre-built separator string
+---@return ContentBuilder self
+function ContentBuilder:add_cached_row_separator(separator_text)
   local line = {
-    text = text,
-    highlights = {{ col_start = 0, col_end = #text, style = "result_border" }},
+    text = separator_text,
+    highlights = {{ col_start = 0, col_end = #separator_text, style = "result_border" }},
   }
   table.insert(self._lines, line)
   return self
+end
+
+---Add a row separator with optional row number column
+---@param columns table[] Array of { width: number }
+---@param border_style string "box" or "ascii"
+---@param row_num_width number? Width of row number column
+---@return ContentBuilder self
+function ContentBuilder:result_row_separator_with_rownum(columns, border_style, row_num_width)
+  local text = ContentBuilder.build_row_separator_with_rownum(columns, border_style, row_num_width)
+  return self:add_cached_row_separator(text)
 end
 
 return ContentBuilder
