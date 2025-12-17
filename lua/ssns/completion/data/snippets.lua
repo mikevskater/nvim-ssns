@@ -2,6 +2,13 @@
 ---@class SnippetData
 local Snippets = {}
 
+---Cached user snippets (loaded asynchronously at init)
+---@type table[]?
+Snippets._user_snippets_cache = nil
+
+---Whether async loading is in progress
+Snippets._loading = false
+
 ---Common SQL snippets (all databases)
 Snippets.common = {
   {
@@ -117,8 +124,15 @@ function Snippets.get_for_database(db_type)
 end
 
 ---Load user-defined snippets from file
+---Returns cached version if available (async-loaded at init)
 ---@return table[] snippets User snippet list
 function Snippets.load_user_snippets()
+  -- Return cached snippets if available
+  if Snippets._user_snippets_cache then
+    return Snippets._user_snippets_cache
+  end
+
+  -- Fallback to sync load if cache not populated yet
   local data_path = vim.fn.stdpath('data')
   local snippets_file = data_path .. '/ssns/snippets.json'
 
@@ -136,7 +150,44 @@ function Snippets.load_user_snippets()
     return {}
   end
 
-  return snippets or {}
+  -- Cache the result for future calls
+  Snippets._user_snippets_cache = snippets or {}
+
+  return Snippets._user_snippets_cache
+end
+
+---Initialize user snippets cache asynchronously
+---Should be called at plugin startup
+---@param callback fun(success: boolean, error: string?)? Optional callback
+function Snippets.init_async(callback)
+  -- Don't reload if already loaded or loading
+  if Snippets._user_snippets_cache or Snippets._loading then
+    if callback then callback(true, nil) end
+    return
+  end
+
+  Snippets._loading = true
+
+  Snippets.load_user_snippets_async(function(snippets, err)
+    Snippets._loading = false
+
+    if err then
+      Snippets._user_snippets_cache = {} -- Empty cache on error
+      if callback then callback(false, err) end
+      return
+    end
+
+    Snippets._user_snippets_cache = snippets or {}
+    if callback then callback(true, nil) end
+  end)
+end
+
+---Reload user snippets (clears cache and reloads)
+---@param callback fun(success: boolean, error: string?)? Optional callback
+function Snippets.reload_async(callback)
+  Snippets._user_snippets_cache = nil
+  Snippets._loading = false
+  Snippets.init_async(callback)
 end
 
 -- ============================================================================

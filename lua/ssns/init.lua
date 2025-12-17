@@ -109,6 +109,10 @@ function Ssns.setup(user_config)
     end)
   end
 
+  -- Pre-load user snippets asynchronously for faster completion
+  local Snippets = require('ssns.completion.data.snippets')
+  Snippets.init_async()
+
   -- Register commands via commands module
   local Commands = require('ssns.commands')
   Commands.register()
