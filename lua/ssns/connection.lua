@@ -533,7 +533,44 @@ function Connection.escape_string(str)
 end
 
 -- ============================================================================
--- ASYNC EXECUTION METHODS
+-- RPC ASYNC EXECUTION (Non-blocking)
+-- ============================================================================
+-- These methods use the async RPC mechanism where the query runs in Node.js
+-- and calls back when complete. The UI remains responsive during execution.
+
+---@class RPCAsyncExecuteOpts
+---@field on_complete fun(result: table, error: string?)? Completion callback
+---@field on_error fun(error: string)? Error callback
+---@field timeout_ms number? Timeout in milliseconds (default: 60000)
+---@field use_cache boolean? Use query cache (default: false for async)
+
+---Execute a query with non-blocking RPC async (UI stays responsive)
+---The query runs in Node.js and calls back when complete
+---@param connection_config ConnectionData The connection configuration
+---@param query string The SQL query to execute
+---@param opts RPCAsyncExecuteOpts? Options
+---@return string callback_id Callback ID for tracking/cancellation
+function Connection.execute_rpc_async(connection_config, query, opts)
+  opts = opts or {}
+  local AsyncRPC = require('ssns.async.rpc')
+
+  return AsyncRPC.execute_async(connection_config, query, {
+    on_complete = opts.on_complete,
+    on_error = opts.on_error,
+    timeout_ms = opts.timeout_ms or 60000,
+  })
+end
+
+---Cancel an RPC async query
+---@param callback_id string The callback ID from execute_rpc_async
+---@return boolean cancelled True if query was pending and cancelled
+function Connection.cancel_rpc_async(callback_id)
+  local AsyncRPC = require('ssns.async.rpc')
+  return AsyncRPC.cancel(callback_id)
+end
+
+-- ============================================================================
+-- ASYNC EXECUTION METHODS (vim.schedule based - UI freezes during query)
 -- ============================================================================
 
 ---@class AsyncExecuteOpts

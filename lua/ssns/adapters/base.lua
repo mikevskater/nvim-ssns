@@ -56,6 +56,28 @@ function BaseAdapter:execute(connection, query, opts)
   return ConnectionModule.execute(conn_config, query, opts)
 end
 
+---@class RPCAsyncExecuteOpts
+---@field on_complete fun(result: table, error: string?)? Completion callback
+---@field on_error fun(error: string)? Error callback
+---@field timeout_ms number? Timeout in milliseconds
+
+---Execute a query asynchronously using RPC (non-blocking, UI stays responsive)
+---Uses the async RPC mechanism - query runs in Node.js background
+---@param connection any The database connection config (or nil to use adapter's config)
+---@param query string The SQL query to execute
+---@param opts RPCAsyncExecuteOpts? Options
+---@return string callback_id Callback ID for cancellation
+function BaseAdapter:execute_rpc_async(connection, query, opts)
+  opts = opts or {}
+  local ConnectionModule = require('ssns.connection')
+  local conn_config = connection or self.connection_config
+  return ConnectionModule.execute_rpc_async(conn_config, query, {
+    on_complete = opts.on_complete,
+    on_error = opts.on_error,
+    timeout_ms = opts.timeout_ms,
+  })
+end
+
 ---Test if the connection is valid
 ---Default implementation that works for all adapters
 ---@param connection any The database connection object (unused, uses adapter's config)
