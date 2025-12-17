@@ -12,6 +12,7 @@
 ---@field completion CompletionConfig IntelliSense completion configuration
 ---@field semantic_highlighting SemanticHighlightingConfig Semantic highlighting configuration
 ---@field formatter FormatterConfig SQL formatter configuration
+---@field async AsyncConfig Async execution configuration
 
 ---@class UiConfig
 ---@field position string Window position: "left", "right", "float"
@@ -78,6 +79,14 @@
 ---@field preserve_newlines boolean Honor newlines in values, rendering as multi-line cells (default: true)
 ---@field row_separators boolean|string Show separators between data rows: true | false | "auto" (default: "auto" = on for multi-line, off for truncate)
 ---@field max_display_rows number Maximum rows to display per result set (0 = no limit, default: 0). All rows still available for export.
+
+---@class AsyncConfig Async execution configuration
+---@field enabled boolean Enable async execution (default: true)
+---@field spinner_style string Spinner animation style: "braille" | "dots" | "line" | "bounce" | "arc" (default: "braille")
+---@field show_runtime boolean Show elapsed runtime in spinner (default: true)
+---@field default_timeout_ms number Default timeout for async operations in milliseconds (default: 30000)
+---@field query_timeout_ms number Timeout for user query execution in milliseconds (default: 300000 = 5 minutes)
+---@field metadata_timeout_ms number Timeout for metadata loading in milliseconds (default: 60000)
 
 ---@class QueryHistoryConfig
 ---@field enabled boolean Enable query history tracking (default: true)
@@ -962,6 +971,16 @@ local default_config = {
       -- from = { one_table_per_line = true },
       -- where = { one_condition_per_line = true },
     },
+  },
+
+  -- Async execution configuration
+  async = {
+    enabled = true,                  -- Enable async execution (default: true)
+    spinner_style = "braille",       -- Animation style: "braille"|"dots"|"line"|"bounce"|"arc"
+    show_runtime = true,             -- Show elapsed runtime in spinner (default: true)
+    default_timeout_ms = 30000,      -- Default timeout for async operations (30 seconds)
+    query_timeout_ms = 300000,       -- Timeout for user query execution (5 minutes)
+    metadata_timeout_ms = 60000,     -- Timeout for metadata loading (1 minute)
   },
 }
 
