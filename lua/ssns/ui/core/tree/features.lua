@@ -296,10 +296,12 @@ function TreeFeatures.show_history_from_context(UiTree)
 end
 
 ---View definition (ALTER script) for the object under cursor
+---Uses async loading with spinner feedback
 ---@param UiTree table The main UiTree module
 function TreeFeatures.view_definition(UiTree)
   local Buffer = require('ssns.ui.core.buffer')
   local Query = require('ssns.ui.core.query')
+  local Async = require('ssns.async')
 
   local line_number = Buffer.get_current_line()
   local obj = UiTree.line_map[line_number]
@@ -331,50 +333,56 @@ function TreeFeatures.view_definition(UiTree)
     return
   end
 
-  -- Get definition
-  if obj.get_definition then
+  -- Check if object supports definition loading
+  if not obj.get_definition and not obj.load_definition_async then
+    vim.notify("SSNS: Object does not support viewing definition", vim.log.levels.WARN)
+    return
+  end
+
+  -- Get server and database for later use
+  local server = obj:get_server()
+  local database = obj:get_database()
+
+  -- Prefer async loading if available
+  if obj.load_definition_async then
+    -- Set loading state on object for UI feedback
+    obj.ui_state.loading = true
+    UiTree.render()
+
+    -- Load definition asynchronously
+    obj:load_definition_async({
+      on_complete = function(definition, err)
+        obj.ui_state.loading = false
+
+        if err then
+          vim.notify(string.format("SSNS: Failed to load definition: %s", err), vim.log.levels.ERROR)
+          UiTree.render()
+          return
+        end
+
+        if definition then
+          Query.create_query_buffer(server, database, definition, obj.name)
+        else
+          vim.notify("SSNS: No definition available for " .. (obj.name or "object"), vim.log.levels.WARN)
+        end
+        UiTree.render()
+      end,
+    })
+  else
+    -- Fallback to sync get_definition
     local definition = obj:get_definition()
     if definition then
-      local server = obj:get_server()
-      local database = obj:get_database()
       Query.create_query_buffer(server, database, definition, obj.name)
     else
       vim.notify("SSNS: No definition available for " .. (obj.name or "object"), vim.log.levels.WARN)
     end
-  else
-    vim.notify("SSNS: Object does not support viewing definition", vim.log.levels.WARN)
   end
 end
 
----View metadata for the object under cursor
----@param UiTree table The main UiTree module
-function TreeFeatures.view_metadata(UiTree)
-  local Buffer = require('ssns.ui.core.buffer')
-  local Float = require('ssns.ui.core.float')
-
-  local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
-
-  if not obj then
-    vim.notify("SSNS: No object under cursor", vim.log.levels.WARN)
-    return
-  end
-
-  -- Skip non-metadata objects
-  local skip_types = {
-    action = true,
-    column_group = true,
-    index_group = true,
-    key_group = true,
-    actions_group = true,
-  }
-
-  if skip_types[obj.object_type] then
-    vim.notify("SSNS: Cannot view metadata for " .. obj.object_type, vim.log.levels.WARN)
-    return
-  end
-
-  -- Build metadata display
+---Build metadata lines for an object
+---@param obj BaseDbObject
+---@return string[] lines
+local function build_metadata_lines(obj)
   local lines = {}
   table.insert(lines, "=== " .. (obj.name or "Object") .. " ===")
   table.insert(lines, "")
@@ -403,11 +411,41 @@ function TreeFeatures.view_metadata(UiTree)
     table.insert(lines, "Schema: " .. (obj.schema_name or "unknown"))
     if obj.columns_loaded and obj.columns then
       table.insert(lines, "Columns: " .. #obj.columns)
+      table.insert(lines, "")
+      -- List column names with types
+      for i, col in ipairs(obj.columns) do
+        if i <= 20 then -- Limit to first 20 columns
+          local col_info = col.column_name or col.name
+          if col.data_type then
+            col_info = col_info .. " (" .. col.data_type .. ")"
+          end
+          if col.is_primary_key then
+            col_info = col_info .. " [PK]"
+          end
+          table.insert(lines, "  " .. col_info)
+        elseif i == 21 then
+          table.insert(lines, "  ... and " .. (#obj.columns - 20) .. " more")
+        end
+      end
     end
   elseif obj.object_type == "procedure" or obj.object_type == "function" then
     table.insert(lines, "Schema: " .. (obj.schema_name or "unknown"))
     if obj.parameters_loaded and obj.parameters then
       table.insert(lines, "Parameters: " .. #obj.parameters)
+      if #obj.parameters > 0 then
+        table.insert(lines, "")
+        -- List parameters with types
+        for _, param in ipairs(obj.parameters) do
+          local param_info = param.parameter_name or param.name
+          if param.data_type then
+            param_info = param_info .. " (" .. param.data_type .. ")"
+          end
+          if param.direction then
+            param_info = param_info .. " [" .. param.direction .. "]"
+          end
+          table.insert(lines, "  " .. param_info)
+        end
+      end
     end
   elseif obj.object_type == "column" then
     table.insert(lines, "Data Type: " .. (obj.data_type or "unknown"))
@@ -419,12 +457,112 @@ function TreeFeatures.view_metadata(UiTree)
     end
   end
 
-  -- Show in float window
-  Float.create(lines, {
-    title = "Metadata: " .. (obj.name or "Object"),
-    width = 50,
-    height = #lines + 2,
-  })
+  return lines
+end
+
+---View metadata for the object under cursor
+---Uses async loading with spinner when columns/parameters need to be fetched
+---@param UiTree table The main UiTree module
+function TreeFeatures.view_metadata(UiTree)
+  local Buffer = require('ssns.ui.core.buffer')
+  local Float = require('ssns.ui.core.float')
+  local Spinner = require('ssns.async.spinner')
+
+  local line_number = Buffer.get_current_line()
+  local obj = UiTree.line_map[line_number]
+
+  if not obj then
+    vim.notify("SSNS: No object under cursor", vim.log.levels.WARN)
+    return
+  end
+
+  -- Skip non-metadata objects
+  local skip_types = {
+    action = true,
+    column_group = true,
+    index_group = true,
+    key_group = true,
+    actions_group = true,
+  }
+
+  if skip_types[obj.object_type] then
+    vim.notify("SSNS: Cannot view metadata for " .. obj.object_type, vim.log.levels.WARN)
+    return
+  end
+
+  -- Determine if we need async loading
+  local needs_async_load = false
+  local async_load_fn = nil
+
+  if (obj.object_type == "table" or obj.object_type == "view") and not obj.columns_loaded then
+    if obj.load_columns_async then
+      needs_async_load = true
+      async_load_fn = function(on_complete)
+        obj:load_columns_async({ on_complete = on_complete })
+      end
+    end
+  elseif (obj.object_type == "procedure" or obj.object_type == "function") and not obj.parameters_loaded then
+    if obj.load_parameters_async then
+      needs_async_load = true
+      async_load_fn = function(on_complete)
+        obj:load_parameters_async({ on_complete = on_complete })
+      end
+    end
+  end
+
+  if needs_async_load and async_load_fn then
+    -- Create float window with loading state
+    local loading_lines = {
+      "=== " .. (obj.name or "Object") .. " ===",
+      "",
+      "Loading metadata...",
+    }
+
+    local float_win = Float.create(loading_lines, {
+      title = "Metadata: " .. (obj.name or "Object"),
+      min_width = 50,
+      modifiable = true, -- Allow updates
+    })
+
+    -- Start spinner in the float window
+    local spinner_id = Spinner.start_in_buffer(float_win.bufnr, {
+      text = "Loading metadata...",
+      line = 2, -- Line 3 (0-indexed)
+      show_runtime = true,
+    })
+
+    -- Execute async load
+    async_load_fn(function(result, err)
+      -- Stop spinner
+      Spinner.stop(spinner_id)
+
+      if not float_win:is_valid() then
+        return -- Window was closed
+      end
+
+      if err then
+        local error_lines = {
+          "=== " .. (obj.name or "Object") .. " ===",
+          "",
+          "Error loading metadata:",
+          tostring(err),
+        }
+        float_win:update_lines(error_lines)
+        return
+      end
+
+      -- Update window with loaded metadata
+      local lines = build_metadata_lines(obj)
+      float_win:update_lines(lines)
+    end)
+  else
+    -- No async loading needed, show metadata immediately
+    local lines = build_metadata_lines(obj)
+    Float.create(lines, {
+      title = "Metadata: " .. (obj.name or "Object"),
+      min_width = 50,
+    })
+  end
 end
 
 return TreeFeatures
