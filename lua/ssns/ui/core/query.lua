@@ -1723,7 +1723,8 @@ function UiQuery.show_results_controls()
         { key = km.toggle or query_km.toggle_results or "C-r", desc = "Toggle results window" },
         { key = km.export_csv or "A-e", desc = "Export cursor result set to CSV" },
         { key = km.export_all_csv or "A-E", desc = "Export ALL result sets to CSV files" },
-        { key = km.yank_csv or "A-y", desc = "Yank results as CSV to clipboard" },
+        { key = km.yank_csv or "A-y", desc = "Yank cursor result set as CSV" },
+        { key = km.yank_all_csv or "A-Y", desc = "Yank ALL result sets as CSV" },
       },
     },
   }
@@ -1770,10 +1771,15 @@ function UiQuery.setup_results_keymaps(result_buf)
       UiQuery.export_all_results_to_csv()
     end, desc = "Export ALL result sets to CSV files" },
 
-    -- Yank as CSV to clipboard
+    -- Yank cursor-hovered result set as CSV to clipboard
     { mode = "n", lhs = km.yank_csv or "<A-y>", rhs = function()
       UiQuery.yank_results_as_csv()
-    end, desc = "Yank results as CSV" },
+    end, desc = "Yank cursor result set as CSV" },
+
+    -- Yank ALL result sets as CSV to clipboard
+    { mode = "n", lhs = km.yank_all_csv or "<A-Y>", rhs = function()
+      UiQuery.yank_all_results_as_csv()
+    end, desc = "Yank ALL result sets as CSV" },
 
     -- Show controls
     { mode = "n", lhs = "?", rhs = function()
@@ -2196,7 +2202,7 @@ function UiQuery.export_all_results_to_csv()
   end
 end
 
----Yank results as CSV to clipboard
+---Yank cursor-hovered result set as CSV to clipboard
 function UiQuery.yank_results_as_csv()
   local query_bufnr = get_current_query_bufnr()
   local stored = query_bufnr and UiQuery.buffer_results[query_bufnr]
@@ -2206,7 +2212,16 @@ function UiQuery.yank_results_as_csv()
     return
   end
 
-  local csv_content = UiQuery.results_to_csv(stored.resultSets, 0)
+  -- Determine which result set to yank based on cursor position
+  local cursor_line = vim.api.nvim_win_get_cursor(0)[1]  -- 1-indexed
+  local result_set_index = get_result_set_at_cursor(query_bufnr, cursor_line)
+
+  -- Default to first result set if we can't determine cursor position
+  if not result_set_index then
+    result_set_index = 1
+  end
+
+  local csv_content = UiQuery.results_to_csv(stored.resultSets, result_set_index)
   if csv_content == "" then
     vim.notify("SSNS: No data to copy", vim.log.levels.WARN)
     return
@@ -2216,15 +2231,62 @@ function UiQuery.yank_results_as_csv()
   vim.fn.setreg("+", csv_content)
   vim.fn.setreg("*", csv_content)
 
-  -- Count rows for feedback
+  -- Count rows in this result set
   local row_count = 0
-  for _, resultSet in ipairs(stored.resultSets) do
-    if resultSet.rows then
-      row_count = row_count + #resultSet.rows
+  if stored.resultSets[result_set_index] and stored.resultSets[result_set_index].rows then
+    row_count = #stored.resultSets[result_set_index].rows
+  end
+
+  if #stored.resultSets > 1 then
+    vim.notify(string.format("SSNS: Copied result set %d (%d rows) as CSV to clipboard", result_set_index, row_count), vim.log.levels.INFO)
+  else
+    vim.notify(string.format("SSNS: Copied %d rows as CSV to clipboard", row_count), vim.log.levels.INFO)
+  end
+end
+
+---Yank ALL result sets as CSV to clipboard (separated by blank lines)
+function UiQuery.yank_all_results_as_csv()
+  local query_bufnr = get_current_query_bufnr()
+  local stored = query_bufnr and UiQuery.buffer_results[query_bufnr]
+
+  if not stored or not stored.resultSets or #stored.resultSets == 0 then
+    vim.notify("SSNS: No results to copy", vim.log.levels.WARN)
+    return
+  end
+
+  -- Build CSV content for all result sets
+  local csv_parts = {}
+  local total_rows = 0
+
+  for i, resultSet in ipairs(stored.resultSets) do
+    local csv_content = UiQuery.results_to_csv(stored.resultSets, i)
+    if csv_content ~= "" then
+      -- Add result set header comment for multiple result sets
+      if #stored.resultSets > 1 then
+        table.insert(csv_parts, string.format("# Result Set %d", i))
+      end
+      table.insert(csv_parts, csv_content)
+
+      -- Count rows
+      if resultSet.rows then
+        total_rows = total_rows + #resultSet.rows
+      end
     end
   end
 
-  vim.notify(string.format("SSNS: Copied %d rows as CSV to clipboard", row_count), vim.log.levels.INFO)
+  if #csv_parts == 0 then
+    vim.notify("SSNS: No data to copy", vim.log.levels.WARN)
+    return
+  end
+
+  -- Join with double newline between result sets
+  local full_csv = table.concat(csv_parts, "\n\n")
+
+  -- Copy to clipboard
+  vim.fn.setreg("+", full_csv)
+  vim.fn.setreg("*", full_csv)
+
+  vim.notify(string.format("SSNS: Copied %d result sets (%d total rows) as CSV to clipboard", #stored.resultSets, total_rows), vim.log.levels.INFO)
 end
 
 ---Get the results for a specific query buffer (for external access)
