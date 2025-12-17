@@ -223,6 +223,83 @@ module.exports = (plugin) => {
   }, { sync: true });
 
   /**
+   * SSNSExecuteQueryAsync - Execute SQL query asynchronously (non-blocking)
+   *
+   * This function returns immediately and calls back to Lua when the query completes.
+   * The callback is invoked via plugin.nvim.call() to the Lua function SSNSAsyncCallback.
+   *
+   * Usage from Lua:
+   *   vim.fn.SSNSExecuteQueryAsync({config_json, query, callback_id})
+   *
+   * @param {Array} args - [configJson, query, callbackId]
+   * @returns {Object} { started: true } immediately
+   */
+  plugin.registerFunction('SSNSExecuteQueryAsync', async (args) => {
+    // Handle double-wrapped array from Neovim
+    const configInput = Array.isArray(args[0]) ? args[0][0] : args[0];
+    const query = Array.isArray(args[0]) ? args[0][1] : args[1];
+    const callbackId = Array.isArray(args[0]) ? args[0][2] : args[2];
+
+    if (!configInput || !query || !callbackId) {
+      // Return error immediately for missing params
+      return {
+        started: false,
+        error: 'Missing required parameters: config, query, and callbackId'
+      };
+    }
+
+    // Return immediately - query runs in background
+    setImmediate(async () => {
+      try {
+        // Parse config from JSON
+        const config = parseConfig(configInput);
+
+        // Get driver for this connection
+        const driver = getDriverInstance(config);
+
+        // Execute query
+        const result = await driver.execute(query);
+
+        // Call back to Lua with result
+        try {
+          await plugin.nvim.call('luaeval', [
+            'require("ssns.async.rpc").handle_callback(_A.id, _A.result, nil)',
+            { id: callbackId, result: result }
+          ]);
+        } catch (callbackErr) {
+          ssnsLog(`[SSNSExecuteQueryAsync] Callback error: ${callbackErr}`);
+        }
+
+      } catch (err) {
+        ssnsLog(`[SSNSExecuteQueryAsync] Error: ${err && err.stack ? err.stack : err}`);
+
+        // Call back to Lua with error
+        try {
+          const errorResult = {
+            resultSets: [],
+            metadata: {},
+            error: {
+              message: err.message || 'Unknown error occurred',
+              code: err.code || null,
+              lineNumber: err.lineNumber || null,
+              procName: err.procName || null
+            }
+          };
+          await plugin.nvim.call('luaeval', [
+            'require("ssns.async.rpc").handle_callback(_A.id, _A.result, _A.err)',
+            { id: callbackId, result: errorResult, err: err.message }
+          ]);
+        } catch (callbackErr) {
+          ssnsLog(`[SSNSExecuteQueryAsync] Error callback failed: ${callbackErr}`);
+        }
+      }
+    });
+
+    // Return immediately
+    return { started: true };
+  }, { sync: true });  // sync:true so we can return { started: true } immediately
+
+  /**
    * SSNSCloseConnection - Close database connection
    *
    * Usage from Lua:
