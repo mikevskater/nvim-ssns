@@ -323,6 +323,14 @@ function UiQuery.setup_query_keymaps(bufnr)
       UiQuery.toggle_results()
     end, desc = "Toggle results window" },
 
+    -- Cancel running query
+    { mode = "n", lhs = km.cancel or "<C-c>", rhs = function()
+      local QueryExecute = require('ssns.ui.core.query.execute')
+      if QueryExecute.is_query_running(bufnr) then
+        QueryExecute.cancel_query(bufnr)
+      end
+    end, desc = "Cancel running query" },
+
     -- Attach connection (flat list)
     { mode = "n", lhs = km.attach_connection or "<A-s>", rhs = function()
       local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
