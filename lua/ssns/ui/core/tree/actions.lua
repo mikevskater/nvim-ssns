@@ -44,40 +44,74 @@ function TreeActions.toggle_node(UiTree)
       db:_ensure_schemas_loaded()
     end
 
-    -- Load the appropriate object type using BULK loading for all schemas
-    -- This is different from completion which may use lazy loading
+    -- Determine async load function based on object type
+    local async_load_fn = nil
+    local sync_fallback_fn = nil
+
     if obj.object_type == "tables_group" then
-      if adapter.features.schemas then
-        db:load_all_tables_bulk()  -- Force bulk load all schemas for tree view
+      if adapter.features.schemas and db.load_all_tables_bulk_async then
+        async_load_fn = function(on_complete) db:load_all_tables_bulk_async({ on_complete = on_complete }) end
+      elseif adapter.features.schemas then
+        sync_fallback_fn = function() db:load_all_tables_bulk() end
       else
-        db:get_tables()  -- Non-schema servers load directly
+        sync_fallback_fn = function() db:get_tables() end
       end
     elseif obj.object_type == "views_group" and adapter.features.views then
-      if adapter.features.schemas then
-        db:load_all_views_bulk()  -- Force bulk load all schemas for tree view
+      if adapter.features.schemas and db.load_all_views_bulk_async then
+        async_load_fn = function(on_complete) db:load_all_views_bulk_async({ on_complete = on_complete }) end
+      elseif adapter.features.schemas then
+        sync_fallback_fn = function() db:load_all_views_bulk() end
       else
-        db:get_views()  -- Non-schema servers load directly
+        sync_fallback_fn = function() db:get_views() end
       end
     elseif obj.object_type == "procedures_group" and adapter.features.procedures then
-      if adapter.features.schemas then
-        db:load_all_procedures_bulk()  -- Force bulk load all schemas for tree view
+      if adapter.features.schemas and db.load_all_procedures_bulk_async then
+        async_load_fn = function(on_complete) db:load_all_procedures_bulk_async({ on_complete = on_complete }) end
+      elseif adapter.features.schemas then
+        sync_fallback_fn = function() db:load_all_procedures_bulk() end
       else
-        db:get_procedures()  -- Non-schema servers load directly
+        sync_fallback_fn = function() db:get_procedures() end
       end
     elseif obj.object_type == "functions_group" and adapter.features.functions then
-      if adapter.features.schemas then
-        db:load_all_functions_bulk()  -- Force bulk load all schemas for tree view
+      if adapter.features.schemas and db.load_all_functions_bulk_async then
+        async_load_fn = function(on_complete) db:load_all_functions_bulk_async({ on_complete = on_complete }) end
+      elseif adapter.features.schemas then
+        sync_fallback_fn = function() db:load_all_functions_bulk() end
       else
-        db:get_functions()  -- Non-schema servers load directly
+        sync_fallback_fn = function() db:get_functions() end
       end
     elseif obj.object_type == "synonyms_group" and adapter.features.synonyms then
-      if adapter.features.schemas then
-        db:load_all_synonyms_bulk()  -- Force bulk load all schemas for tree view
+      if adapter.features.schemas and db.load_all_synonyms_bulk_async then
+        async_load_fn = function(on_complete) db:load_all_synonyms_bulk_async({ on_complete = on_complete }) end
+      elseif adapter.features.schemas then
+        sync_fallback_fn = function() db:load_all_synonyms_bulk() end
       else
-        db:get_synonyms()  -- Non-schema servers load directly
+        sync_fallback_fn = function() db:get_synonyms() end
       end
     elseif obj.object_type == "schemas_group" and adapter.features.schemas then
-      db:get_schemas()  -- Load schema names only
+      -- Schemas are typically fast to load, use sync for simplicity
+      sync_fallback_fn = function() db:get_schemas() end
+    end
+
+    -- Execute async or sync load
+    if async_load_fn then
+      -- Set loading state on the group object
+      obj.ui_state.loading = true
+      UiTree.render()
+
+      async_load_fn(function(result, err)
+        obj.ui_state.loading = false
+
+        if err then
+          obj.ui_state.error = tostring(err)
+          vim.notify(string.format("SSNS: Failed to load %s: %s", obj.object_type, err), vim.log.levels.ERROR)
+        end
+
+        UiTree.render()
+      end)
+    elseif sync_fallback_fn then
+      -- Sync fallback
+      sync_fallback_fn()
     end
   end
 
@@ -371,7 +405,31 @@ function TreeActions.execute_action(UiTree, action)
     end
   elseif action.action_type == "alter" then
     -- Show definition (ALTER displays the object definition)
-    if parent.get_definition then
+    -- Prefer async loading if available
+    if parent.load_definition_async then
+      -- Set loading state for UI feedback
+      parent.ui_state.loading = true
+      UiTree.render()
+
+      parent:load_definition_async({
+        on_complete = function(definition, err)
+          parent.ui_state.loading = false
+          UiTree.render()
+
+          if err then
+            vim.notify(string.format("Failed to load definition: %s", err), vim.log.levels.ERROR)
+            return
+          end
+
+          if definition then
+            Query.create_query_buffer(server, database, definition, parent.name)
+          else
+            vim.notify("No definition available", vim.log.levels.WARN)
+          end
+        end,
+      })
+    elseif parent.get_definition then
+      -- Fallback to sync
       local definition = parent:get_definition()
       if definition then
         Query.create_query_buffer(server, database, definition, parent.name)
