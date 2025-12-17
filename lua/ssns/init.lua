@@ -103,10 +103,18 @@ function Ssns.setup(user_config)
     QueryHistory.init()
   end
 
-  -- Register commands
-  Ssns._register_commands()
+  -- Register commands via commands module
+  local Commands = require('ssns.commands')
+  Commands.register()
 
-  -- Setup keymaps for SQL buffers using KeymapManager (handles conflicts)
+  -- Setup keymaps for SQL buffers
+  Ssns._setup_sql_filetype_keymaps()
+end
+
+---Setup keymaps for SQL filetype buffers
+function Ssns._setup_sql_filetype_keymaps()
+  local Config = require('ssns.config')
+
   vim.api.nvim_create_autocmd("FileType", {
     pattern = "sql",
     callback = function(args)
@@ -217,546 +225,13 @@ function Ssns.setup(user_config)
   })
 end
 
----Register Neovim commands
-function Ssns._register_commands()
-  -- :SSNS - Toggle the tree UI
-  vim.api.nvim_create_user_command("SSNS", function()
-    Ssns.toggle()
-  end, {
-    desc = "Toggle SSNS database tree",
-  })
-
-  -- :SSNSOpen - Open the tree UI
-  vim.api.nvim_create_user_command("SSNSOpen", function()
-    Ssns.open()
-  end, {
-    desc = "Open SSNS database tree",
-  })
-
-  -- :SSNSClose - Close the tree UI
-  vim.api.nvim_create_user_command("SSNSClose", function()
-    Ssns.close()
-  end, {
-    desc = "Close SSNS database tree",
-  })
-
-  -- :SSNSFloat - Open tree UI in floating window mode
-  vim.api.nvim_create_user_command("SSNSFloat", function()
-    Ssns.open_float()
-  end, {
-    desc = "Open SSNS database tree in floating window",
-  })
-
-  -- :SSNSDocked - Open tree UI in docked/split mode
-  vim.api.nvim_create_user_command("SSNSDocked", function()
-    Ssns.open_docked()
-  end, {
-    desc = "Open SSNS database tree in docked split",
-  })
-
-  -- :SSNSRefresh - Refresh all servers
-  vim.api.nvim_create_user_command("SSNSRefresh", function()
-    Ssns.refresh_all()
-  end, {
-    desc = "Refresh all SSNS servers",
-  })
-
-  -- :SSNSConnect <name> - Connect to a saved connection
-  vim.api.nvim_create_user_command("SSNSConnect", function(opts)
-    Ssns.connect(opts.args)
-  end, {
-    nargs = 1,
-    desc = "Connect to a saved SSNS connection",
-    complete = function()
-      local Config = require('ssns.config')
-      local Connections = require('ssns.connections')
-      local names = {}
-
-      -- Get from config
-      local config_connections = Config.get_connections()
-      for name, _ in pairs(config_connections) do
-        table.insert(names, name)
-      end
-
-      -- Get from connections file
-      local file_connections = Connections.load()
-      for _, conn in ipairs(file_connections) do
-        -- Avoid duplicates
-        local exists = false
-        for _, n in ipairs(names) do
-          if n == conn.name then
-            exists = true
-            break
-          end
-        end
-        if not exists then
-          table.insert(names, conn.name)
-        end
-      end
-
-      return names
-    end,
-  })
-
-  -- :SSNSQuery - Open a new query buffer
-  vim.api.nvim_create_user_command("SSNSQuery", function()
-    Ssns.new_query()
-  end, {
-    desc = "Open a new SSNS query buffer",
-  })
-
-  -- :SSNSStats - Show cache statistics
-  vim.api.nvim_create_user_command("SSNSStats", function()
-    Ssns.show_stats()
-  end, {
-    desc = "Show SSNS cache statistics",
-  })
-
-  -- :SSNSDebug - Debug cache contents
-  vim.api.nvim_create_user_command("SSNSDebug", function()
-    Ssns.debug()
-  end, {
-    desc = "Debug SSNS cache contents",
-  })
-
-  -- :SSNSHistory - Show query history
-  vim.api.nvim_create_user_command("SSNSHistory", function()
-    Ssns.show_history()
-  end, {
-    desc = "Show query execution history",
-  })
-
-  -- :SSNSHistoryClear - Clear query history
-  vim.api.nvim_create_user_command("SSNSHistoryClear", function()
-    Ssns.clear_history()
-  end, {
-    desc = "Clear all query history",
-  })
-
-  -- :SSNSHistoryExport - Export query history
-  vim.api.nvim_create_user_command("SSNSHistoryExport", function(opts)
-    Ssns.export_history(opts.args)
-  end, {
-    nargs = "?",
-    desc = "Export query history to file",
-    complete = "file",
-  })
-
-  -- :SSNSSearch - Search database objects
-  vim.api.nvim_create_user_command("SSNSSearch", function()
-    Ssns.show_object_search()
-  end, {
-    desc = "Search database objects (tables, views, procedures, etc.)",
-  })
-
-  -- :SSNSExportResults - Export query results to CSV
-  vim.api.nvim_create_user_command("SSNSExportResults", function(opts)
-    local Query = require('ssns.ui.core.query')
-    Query.export_results_to_csv(opts.args ~= "" and opts.args or nil)
-  end, {
-    nargs = "?",
-    desc = "Export query results to CSV file and open in default app",
-    complete = "file",
-  })
-
-  -- :SSNSYankResultsCSV - Yank query results as CSV to clipboard
-  vim.api.nvim_create_user_command("SSNSYankResultsCSV", function()
-    local Query = require('ssns.ui.core.query')
-    Query.yank_results_as_csv()
-  end, {
-    nargs = 0,
-    desc = "Yank query results as CSV to clipboard",
-  })
-
-  -- :SSNSCompletionStats - Show completion performance statistics
-  vim.api.nvim_create_user_command("SSNSCompletionStats", function()
-    Ssns.show_completion_stats()
-  end, {
-    desc = "Show completion performance statistics",
-  })
-
-  -- :SSNSCompletionStatsReset - Reset completion performance statistics
-  vim.api.nvim_create_user_command("SSNSCompletionStatsReset", function()
-    Ssns.reset_completion_stats()
-  end, {
-    desc = "Reset completion performance statistics",
-  })
-
-  -- :SSNSExpandAsterisk - Expand * or alias.* to column list
-  vim.api.nvim_create_user_command("SSNSExpandAsterisk", function()
-    local ExpandAsterisk = require('ssns.features.expand_asterisk')
-    ExpandAsterisk.expand_asterisk_at_cursor()
-  end, {
-    nargs = 0,
-    desc = "Expand * or alias.* to column list (like SSMS RedGate)",
-  })
-
-  -- :SSNSUsageStats - Display usage statistics for the current connection
-  vim.api.nvim_create_user_command("SSNSUsageStats", function()
-    Ssns.show_usage_stats()
-  end, {
-    nargs = 0,
-    desc = "Show usage-based completion statistics",
-  })
-
-  -- :SSNSUsageClear - Clear all usage weights
-  vim.api.nvim_create_user_command("SSNSUsageClear", function()
-    Ssns.clear_usage_weights()
-  end, {
-    nargs = 0,
-    desc = "Clear all usage weights (requires confirmation)",
-  })
-
-  -- :SSNSUsageClearCurrent - Clear weights for current connection only
-  vim.api.nvim_create_user_command("SSNSUsageClearCurrent", function()
-    Ssns.clear_usage_weights_current()
-  end, {
-    nargs = 0,
-    desc = "Clear usage weights for current connection (requires confirmation)",
-  })
-
-  -- :SSNSUsageExport - Export weights to a JSON file
-  vim.api.nvim_create_user_command("SSNSUsageExport", function(opts)
-    Ssns.export_usage_weights(opts.args)
-  end, {
-    nargs = "?",
-    desc = "Export usage weights to JSON file",
-    complete = "file",
-  })
-
-  -- :SSNSUsageImport - Import weights from a JSON file
-  vim.api.nvim_create_user_command("SSNSUsageImport", function(opts)
-    Ssns.import_usage_weights(opts.args)
-  end, {
-    nargs = "?",
-    desc = "Import usage weights from JSON file",
-    complete = "file",
-  })
-
-  -- :SSNSUsageToggle - Toggle usage tracking on/off
-  vim.api.nvim_create_user_command("SSNSUsageToggle", function()
-    Ssns.toggle_usage_tracking()
-  end, {
-    nargs = 0,
-    desc = "Toggle usage tracking on/off",
-  })
-
-  -- :SSNSHighlightToggle - Toggle semantic highlighting on/off for current buffer
-  vim.api.nvim_create_user_command("SSNSHighlightToggle", function()
-    Ssns.toggle_semantic_highlighting()
-  end, {
-    nargs = 0,
-    desc = "Toggle semantic highlighting for current buffer",
-  })
-
-  -- :SSNSGoTo - Go to object under cursor in database tree
-  vim.api.nvim_create_user_command("SSNSGoTo", function()
-    local GoTo = require('ssns.features.go_to')
-    GoTo.go_to_object_at_cursor()
-  end, {
-    nargs = 0,
-    desc = "Go to object under cursor in tree",
-  })
-
-  -- :SSNSViewDefinition - View definition of object under cursor
-  vim.api.nvim_create_user_command("SSNSViewDefinition", function()
-    local ViewDefinition = require('ssns.features.view_definition')
-    ViewDefinition.view_definition_at_cursor()
-  end, {
-    nargs = 0,
-    desc = "View definition of object under cursor in floating window",
-  })
-
-  -- :SSNSViewMetadata - View metadata of object under cursor
-  vim.api.nvim_create_user_command("SSNSViewMetadata", function()
-    local ViewMetadata = require('ssns.features.view_metadata')
-    ViewMetadata.view_metadata_at_cursor()
-  end, {
-    nargs = 0,
-    desc = "View metadata of object under cursor in floating window",
-  })
-
-  -- Debug Commands (all prefixed with SSNSDebug for discoverability)
-
-  -- :SSNSDebugStatementChunks - View parsed statement chunks
-  vim.api.nvim_create_user_command("SSNSDebugStatementChunks", function()
-    local StatementChunksViewer = require('ssns.features.statement_chunks')
-    StatementChunksViewer.view_statement_chunks()
-  end, {
-    nargs = 0,
-    desc = "View parsed statement chunks in floating window",
-  })
-
-  -- :SSNSDebugTokens - View tokenizer output
-  vim.api.nvim_create_user_command("SSNSDebugTokens", function()
-    local ViewTokens = require('ssns.features.view_tokens')
-    ViewTokens.view_tokens()
-  end, {
-    nargs = 0,
-    desc = "View tokenizer output in floating window",
-  })
-
-  -- :SSNSDebugContext - View statement context at cursor
-  vim.api.nvim_create_user_command("SSNSDebugContext", function()
-    local ViewContext = require('ssns.features.view_context')
-    ViewContext.view_context()
-  end, {
-    nargs = 0,
-    desc = "View statement context at cursor in floating window",
-  })
-
-  -- :SSNSDebugStatementCache - View statement cache for current buffer
-  vim.api.nvim_create_user_command("SSNSDebugStatementCache", function()
-    local ViewStatementCache = require('ssns.features.view_statement_cache')
-    ViewStatementCache.view_cache()
-  end, {
-    nargs = 0,
-    desc = "View statement cache in floating window",
-  })
-
-  -- :SSNSDebugLog - View debug log in floating window
-  vim.api.nvim_create_user_command("SSNSDebugLog", function(opts)
-    local ViewDebugLog = require('ssns.features.view_debug_log')
-    ViewDebugLog.view_log(opts.args ~= "" and opts.args or nil)
-  end, {
-    nargs = "?",
-    desc = "View debug log in floating window (optional filter argument)",
-  })
-
-  -- :SSNSDebugQueryCache - View query result cache
-  vim.api.nvim_create_user_command("SSNSDebugQueryCache", function()
-    local ViewQueryCache = require('ssns.features.view_query_cache')
-    ViewQueryCache.view_cache()
-  end, {
-    nargs = 0,
-    desc = "View query cache in floating window",
-  })
-
-  -- :SSNSDebugUsageWeights - View usage-based ranking weights
-  vim.api.nvim_create_user_command("SSNSDebugUsageWeights", function()
-    local ViewUsageWeights = require('ssns.features.view_usage_weights')
-    ViewUsageWeights.view_weights()
-  end, {
-    nargs = 0,
-    desc = "View usage-based ranking weights in floating window",
-  })
-
-  -- :SSNSDebugCompletionMetadata - View completion metadata resolution
-  vim.api.nvim_create_user_command("SSNSDebugCompletionMetadata", function()
-    local ViewCompletionMetadata = require('ssns.features.view_completion_metadata')
-    ViewCompletionMetadata.view_metadata()
-  end, {
-    nargs = 0,
-    desc = "View completion metadata resolution in floating window",
-  })
-
-  -- :SSNSDebugFuzzyMatcher - View fuzzy matcher algorithm details
-  vim.api.nvim_create_user_command("SSNSDebugFuzzyMatcher", function()
-    local ViewFuzzyMatcher = require('ssns.features.view_fuzzy_matcher')
-    ViewFuzzyMatcher.view_matcher()
-  end, {
-    nargs = 0,
-    desc = "View fuzzy matcher algorithm in floating window",
-  })
-
-  -- :SSNSDebugTypeCompatibility - View type compatibility rules
-  vim.api.nvim_create_user_command("SSNSDebugTypeCompatibility", function()
-    local ViewTypeCompatibility = require('ssns.features.view_type_compatibility')
-    ViewTypeCompatibility.view_compatibility()
-  end, {
-    nargs = 0,
-    desc = "View type compatibility rules in floating window",
-  })
-
-  -- :SSNSDebugFKGraph - View FK relationship graph
-  vim.api.nvim_create_user_command("SSNSDebugFKGraph", function()
-    local ViewFKGraph = require('ssns.features.view_fk_graph')
-    ViewFKGraph.view_graph()
-  end, {
-    nargs = 0,
-    desc = "View FK relationship graph in floating window",
-  })
-
-  -- :SSNSAddServer - Open add server UI
-  vim.api.nvim_create_user_command("SSNSAddServer", function()
-    local AddServerUI = require('ssns.ui.dialogs.add_server')
-    AddServerUI.open()
-  end, {
-    nargs = 0,
-    desc = "Add a new server connection",
-  })
-
-  -- :SSNSAttach - Attach current SQL buffer to a connection
-  vim.api.nvim_create_user_command("SSNSAttach", function()
-    local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
-    ConnectionPicker.show()
-  end, {
-    nargs = 0,
-    desc = "Attach current SQL buffer to a saved connection",
-  })
-
-  -- :SSNSAttachPick - Attach with hierarchical server/database picker
-  vim.api.nvim_create_user_command("SSNSAttachPick", function()
-    local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
-    ConnectionPicker.show_hierarchical()
-  end, {
-    nargs = 0,
-    desc = "Attach current SQL buffer to a connection (server then database)",
-  })
-
-  -- :SSNSDetach - Detach connection from current buffer
-  vim.api.nvim_create_user_command("SSNSDetach", function()
-    local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
-    ConnectionPicker.detach()
-  end, {
-    nargs = 0,
-    desc = "Detach SSNS connection from current buffer",
-  })
-
-  -- :SSNSConnectionInfo - Show current connection info
-  vim.api.nvim_create_user_command("SSNSConnectionInfo", function()
-    local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
-    local db_key = ConnectionPicker.get_current_connection()
-    if db_key then
-      vim.notify(string.format("SSNS: Current connection: %s", db_key), vim.log.levels.INFO)
-    else
-      vim.notify("SSNS: No connection attached to this buffer", vim.log.levels.INFO)
-    end
-  end, {
-    nargs = 0,
-    desc = "Show current SSNS connection for this buffer",
-  })
-
-  -- :SSNSChangeDatabase - Change database for current server connection
-  vim.api.nvim_create_user_command("SSNSChangeDatabase", function()
-    local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
-    ConnectionPicker.show_database_picker()
-  end, {
-    nargs = 0,
-    desc = "Change database for current server connection",
-  })
-
-  -- SQL Formatter Commands
-  local FormatterCommands = require('ssns.formatter.commands')
-  FormatterCommands.register_commands()
-
-  -- :SSNSManageConnections - Open connection manager (alias for SSNSAddServer)
-  vim.api.nvim_create_user_command("SSNSManageConnections", function()
-    local AddServerUI = require('ssns.ui.dialogs.add_server')
-    AddServerUI.open()
-  end, {
-    nargs = 0,
-    desc = "Manage saved server connections",
-  })
-
-  -- Theme Commands
-
-  -- :SSNSTheme - Open theme picker UI
-  vim.api.nvim_create_user_command("SSNSTheme", function()
-    local ThemePicker = require('ssns.ui.panels.theme_picker')
-    ThemePicker.show()
-  end, {
-    nargs = 0,
-    desc = "Open SSNS theme picker",
-  })
-
-  -- :SSNSThemeClear - Clear theme and use defaults
-  vim.api.nvim_create_user_command("SSNSThemeClear", function()
-    local ThemeManager = require('ssns.ui.theme_manager')
-    ThemeManager.clear_theme()
-  end, {
-    nargs = 0,
-    desc = "Clear SSNS theme (use defaults)",
-  })
-
-  -- Testing Framework Commands
-
-  -- :SSNSRunTests - Run all IntelliSense tests
-  vim.api.nvim_create_user_command("SSNSRunTests", function()
-    Ssns.run_all_tests()
-  end, {
-    nargs = 0,
-    desc = "Run all SSNS IntelliSense tests",
-  })
-
-  -- :SSNSRunTest <number> - Run a specific test by number
-  vim.api.nvim_create_user_command("SSNSRunTest", function(opts)
-    local test_number = tonumber(opts.args)
-    if not test_number then
-      vim.notify("Invalid test number. Usage: :SSNSRunTest <number>", vim.log.levels.ERROR)
-      return
-    end
-    Ssns.run_test(test_number)
-  end, {
-    nargs = 1,
-    desc = "Run a specific SSNS test by number (1-40)",
-  })
-
-  -- :SSNSRunTestCategory <category> - Run tests in a specific category
-  vim.api.nvim_create_user_command("SSNSRunTestCategory", function(opts)
-    Ssns.run_category_tests(opts.args)
-  end, {
-    nargs = 1,
-    desc = "Run tests in a specific category folder",
-    complete = function()
-      -- Get list of category folders from the tests directory
-      local tests_path = vim.fn.stdpath("config") .. "/lua/ssns/testing/tests"
-      local categories = {}
-
-      local handle = vim.loop.fs_scandir(tests_path)
-      if handle then
-        while true do
-          local name, type = vim.loop.fs_scandir_next(handle)
-          if not name then break end
-          if type == "directory" then
-            table.insert(categories, name)
-          end
-        end
-      end
-
-      table.sort(categories)
-      return categories
-    end,
-  })
-
-  -- :SSNSRunTestsByType <type> - Run tests by completion type
-  vim.api.nvim_create_user_command("SSNSRunTestsByType", function(opts)
-    Ssns.run_tests_by_type(opts.args)
-  end, {
-    nargs = 1,
-    desc = "Run tests by completion type (table, column, schema, etc.)",
-    complete = function()
-      -- Return common completion types
-      return {
-        "table",
-        "column",
-        "schema",
-        "object",
-        "database",
-        "function",
-        "procedure",
-        "view",
-      }
-    end,
-  })
-
-  -- :SSNSViewTestResults - Open test results markdown file
-  vim.api.nvim_create_user_command("SSNSViewTestResults", function()
-    Ssns.view_test_results()
-  end, {
-    nargs = 0,
-    desc = "Open the test results markdown file",
-  })
-end
+-- UI Functions (delegate to ui modules)
 
 ---Toggle the tree UI
 function Ssns.toggle()
   local Buffer = require('ssns.ui.core.buffer')
   local Tree = require('ssns.ui.core.tree')
-
   Buffer.toggle()
-
-  -- If window was opened, render the tree
   if Buffer.is_open() then
     Tree.render()
   end
@@ -767,17 +242,16 @@ end
 function Ssns.open(mode_override)
   local Buffer = require('ssns.ui.core.buffer')
   local Tree = require('ssns.ui.core.tree')
-
   Buffer.open(mode_override)
   Tree.render()
 end
 
----Open the tree UI in floating window mode (regardless of config)
+---Open the tree UI in floating window mode
 function Ssns.open_float()
   Ssns.open("float")
 end
 
----Open the tree UI in docked/split mode (regardless of config)
+---Open the tree UI in docked/split mode
 function Ssns.open_docked()
   Ssns.open("docked")
 end
@@ -788,78 +262,23 @@ function Ssns.close()
   Buffer.close()
 end
 
+-- Connection Functions (delegate to api/connections)
+
 ---Refresh all servers
 function Ssns.refresh_all()
-  local Cache = require('ssns.cache')
-  Cache.refresh_all()
-  vim.notify("SSNS: Refreshed all servers", vim.log.levels.INFO)
+  require('ssns.api.connections').refresh_all()
 end
 
 ---Connect to a saved connection
 ---@param connection_name string
 function Ssns.connect(connection_name)
-  local Config = require('ssns.config')
-  local Cache = require('ssns.cache')
-  local Connections = require('ssns.connections')
-
-  -- Check if already in cache
-  local existing_server = Cache.find_server(connection_name)
-  if existing_server then
-    local success, err = existing_server:connect()
-    if success then
-      vim.notify(string.format("SSNS: Connected to '%s'", connection_name), vim.log.levels.INFO)
-    else
-      vim.notify(string.format("SSNS: Failed to connect to '%s': %s", connection_name, err), vim.log.levels.ERROR)
-    end
-    return
-  end
-
-  -- Get connection config from config or connections file
-  local connection_config = nil
-
-  -- First check config (now stores ConnectionData objects)
-  local config_connections = Config.get_connections()
-  connection_config = config_connections[connection_name]
-
-  -- If not in config, check connections file
-  if not connection_config then
-    local file_conn = Connections.find(connection_name)
-    if file_conn then
-      connection_config = file_conn  -- file_conn IS the ConnectionData
-    end
-  end
-
-  if not connection_config then
-    vim.notify(string.format("SSNS: Connection '%s' not found", connection_name), vim.log.levels.ERROR)
-    return
-  end
-
-  -- Create and add server
-  local Factory = require('ssns.factory')
-  local server, err = Factory.create_server(connection_name, connection_config)
-
-  if not server then
-    vim.notify(string.format("SSNS: Failed to create connection '%s': %s", connection_name, err), vim.log.levels.ERROR)
-    return
-  end
-
-  Cache.add_server(server)
-
-  -- Connect
-  local success, connect_err = server:connect()
-  if success then
-    vim.notify(string.format("SSNS: Connected to '%s'", connection_name), vim.log.levels.INFO)
-  else
-    vim.notify(string.format("SSNS: Failed to connect to '%s': %s", connection_name, connect_err), vim.log.levels.ERROR)
-  end
+  require('ssns.api.connections').connect(connection_name)
 end
 
 ---Open a new query buffer
 function Ssns.new_query()
   local Query = require('ssns.ui.core.query')
   local Cache = require('ssns.cache')
-
-  -- Get all servers
   local servers = Cache.get_all_servers()
 
   if #servers == 0 then
@@ -867,21 +286,17 @@ function Ssns.new_query()
     return
   end
 
-  -- If only one server, use it directly
   if #servers == 1 then
     Query.create_query_buffer(servers[1], nil, nil)
     return
   end
 
-  -- Multiple servers - prompt user to select
   local server_names = {}
   for _, server in ipairs(servers) do
     table.insert(server_names, server.name)
   end
 
-  vim.ui.select(server_names, {
-    prompt = "Select server:",
-  }, function(choice, idx)
+  vim.ui.select(server_names, { prompt = "Select server:" }, function(choice, idx)
     if choice then
       Query.create_query_buffer(servers[idx], nil, nil)
     end
@@ -890,583 +305,112 @@ end
 
 ---Attach current buffer to a connection (flat picker)
 function Ssns.attach()
-  local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
-  ConnectionPicker.show()
+  require('ssns.api.connections').attach()
 end
 
 ---Attach current buffer to a connection (hierarchical picker)
 function Ssns.attach_pick()
-  local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
-  ConnectionPicker.show_hierarchical()
+  require('ssns.api.connections').attach_pick()
 end
 
 ---Detach connection from current buffer
 function Ssns.detach()
-  local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
-  ConnectionPicker.detach()
+  require('ssns.api.connections').detach()
 end
 
 ---Get current connection info for buffer
 ---@param bufnr number? Buffer number (defaults to current)
 ---@return string? db_key The connection key or nil
 function Ssns.get_connection(bufnr)
-  local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
-  return ConnectionPicker.get_current_connection(bufnr)
+  return require('ssns.api.connections').get_connection(bufnr)
 end
 
 ---Change database for current server connection
 function Ssns.change_database()
-  local ConnectionPicker = require('ssns.ui.pickers.connection_picker')
-  ConnectionPicker.show_database_picker()
+  require('ssns.api.connections').change_database()
 end
+
+-- Diagnostics Functions (delegate to api/diagnostics)
 
 ---Show cache statistics
 function Ssns.show_stats()
-  local Cache = require('ssns.cache')
-  local UiFloat = require('ssns.ui.core.float')
-  local ContentBuilder = require('ssns.ui.core.content_builder')
-  local stats = Cache.get_stats()
-
-  local cb = ContentBuilder.new()
-  
-  cb:header("SSNS Statistics")
-  cb:separator("=", 50)
-  cb:blank()
-  
-  cb:key_value("Servers", stats.server_count)
-  cb:key_value("Connected Servers", stats.connected_servers)
-  cb:key_value("Total Databases", stats.total_databases)
-  cb:key_value("Connected Databases", stats.connected_databases)
-  cb:blank()
-  
-  cb:section("Servers")
-  for _, server_stats in ipairs(stats.servers) do
-    local status_style = server_stats.connected and "success" or "error"
-    local status_icon = server_stats.connected and "✓" or "✗"
-    cb:spans({
-      { text = "  " .. status_icon .. " ", style = status_style },
-      { text = server_stats.name, style = "server" },
-      { text = " (" },
-      { text = server_stats.db_type or "unknown", style = "muted" },
-      { text = ") - " },
-      { text = tostring(server_stats.database_count), style = "number" },
-      { text = " databases" },
-    })
-  end
-  cb:separator("=", 50)
-
-  UiFloat.create_styled(cb, {
-    title = "SSNS Statistics",
-    min_width = 60,
-    footer = "q/Esc: close",
-  })
+  require('ssns.api.diagnostics').show_stats()
 end
 
 ---Debug cache contents
 function Ssns.debug()
-  local Cache = require('ssns.cache')
-  Cache.debug_print()
+  require('ssns.api.diagnostics').debug()
 end
 
 ---Show query history
 function Ssns.show_history()
-  local UiHistory = require('ssns.ui.panels.history')
-  UiHistory.show_history()
+  require('ssns.api.connections').show_history()
 end
 
 ---Show database object search UI
 function Ssns.show_object_search()
-  local UiObjectSearch = require('ssns.ui.panels.object_search')
-  UiObjectSearch.show()
+  require('ssns.api.connections').show_object_search()
 end
 
 ---Clear query history
 function Ssns.clear_history()
-  local QueryHistory = require('ssns.query_history')
-  QueryHistory.clear_all()
+  require('ssns.api.connections').clear_history()
 end
 
 ---Export query history
 ---@param filepath string? Optional file path
 function Ssns.export_history(filepath)
-  local QueryHistory = require('ssns.query_history')
-
-  if not filepath or filepath == "" then
-    filepath = vim.fn.stdpath('data') .. '/ssns/history_export.txt'
-  end
-
-  local format = filepath:match("%.([^.]+)$")
-  if format == "json" then
-    format = "json"
-  else
-    format = "txt"
-  end
-
-  if QueryHistory.export(filepath, format) then
-    vim.notify("History exported to " .. filepath, vim.log.levels.INFO)
-  end
-end
-
----Get current version
----@return string version
-function Ssns.get_version()
-  return Ssns.version
-end
-
----Get cache instance (for advanced usage)
----@return Cache
-function Ssns.get_cache()
-  return require('ssns.cache')
-end
-
----Get factory instance (for advanced usage)
----@return Factory
-function Ssns.get_factory()
-  return require('ssns.factory')
-end
-
----Get config instance (for advanced usage)
----@return Config
-function Ssns.get_config()
-  return require('ssns.config')
+  require('ssns.api.connections').export_history(filepath)
 end
 
 ---Show completion performance statistics
 function Ssns.show_completion_stats()
-  local Source = require('ssns.completion.source')
-  local UiFloat = require('ssns.ui.core.float')
-  local ContentBuilder = require('ssns.ui.core.content_builder')
-
-  -- Try to get stats from the source module
-  local success, result = pcall(function()
-    local temp_source = Source.new()
-    return temp_source:get_stats()
-  end)
-
-  if not success then
-    vim.notify("SSNS: Failed to get completion stats: " .. tostring(result), vim.log.levels.ERROR)
-    return
-  end
-
-  local stats = result
-  local cb = ContentBuilder.new()
-  
-  cb:header("SSNS Completion Performance Statistics")
-  cb:separator("=", 50)
-  cb:blank()
-  
-  cb:key_value("Total Requests", stats.total_requests)
-  cb:spans({
-    { text = "Average Time: ", style = "label" },
-    { text = string.format("%.2fms", stats.avg_time_ms), style = "number" },
-  })
-  
-  local slow_pct = stats.total_requests > 0 and (stats.slow_requests / stats.total_requests * 100) or 0
-  local slow_style = slow_pct > 10 and "warning" or "success"
-  cb:spans({
-    { text = "Slow Requests (>100ms): ", style = "label" },
-    { text = tostring(stats.slow_requests), style = slow_style },
-    { text = string.format(" (%.1f%%)", slow_pct), style = "muted" },
-  })
-  cb:blank()
-  
-  cb:spans({
-    { text = "Cache Hits: ", style = "label" },
-    { text = tostring(stats.cache_hits), style = "success" },
-  })
-  cb:spans({
-    { text = "Cache Misses: ", style = "label" },
-    { text = tostring(stats.cache_misses), style = "warning" },
-  })
-  
-  if stats.cache_hits + stats.cache_misses > 0 then
-    local hit_rate = stats.cache_hits / (stats.cache_hits + stats.cache_misses) * 100
-    local rate_style = hit_rate > 70 and "success" or (hit_rate > 40 and "warning" or "error")
-    cb:spans({
-      { text = "Cache Hit Rate: ", style = "label" },
-      { text = string.format("%.1f%%", hit_rate), style = rate_style },
-    })
-  else
-    cb:spans({
-      { text = "Cache Hit Rate: ", style = "label" },
-      { text = "N/A", style = "muted" },
-    })
-  end
-  cb:blank()
-  
-  cb:section("Requests by Type")
-
-  -- Sort by request count (descending)
-  local types = {}
-  for type_name, type_stats in pairs(stats.requests_by_type) do
-    table.insert(types, { name = type_name, stats = type_stats })
-  end
-  table.sort(types, function(a, b)
-    return a.stats.count > b.stats.count
-  end)
-
-  for _, type_data in ipairs(types) do
-    cb:spans({
-      { text = "  " },
-      { text = type_data.name, style = "emphasis" },
-      { text = ": " },
-      { text = tostring(type_data.stats.count), style = "number" },
-      { text = " requests, avg " },
-      { text = string.format("%.2fms", type_data.stats.avg_ms), style = "number" },
-    })
-  end
-
-  if #types == 0 then
-    cb:styled("  (no requests recorded)", "muted")
-  end
-
-  cb:blank()
-  cb:styled("Note: Stats only tracked when debug mode is enabled", "comment")
-  cb:separator("=", 50)
-
-  UiFloat.create_styled(cb, {
-    title = "Completion Stats",
-    min_width = 70,
-    max_width = 70,
-    footer = "q/Esc: close",
-  })
+  require('ssns.api.diagnostics').show_completion_stats()
 end
 
 ---Reset completion performance statistics
 function Ssns.reset_completion_stats()
-  local Source = require('ssns.completion.source')
-
-  -- Reset stats through the source module
-  local success, err = pcall(function()
-    local temp_source = Source.new()
-    temp_source:reset_stats()
-  end)
-
-  if success then
-    vim.notify("SSNS: Completion statistics reset", vim.log.levels.INFO)
-  else
-    vim.notify("SSNS: Failed to reset completion stats: " .. tostring(err), vim.log.levels.ERROR)
-  end
+  require('ssns.api.diagnostics').reset_completion_stats()
 end
 
 ---Show usage-based completion statistics
 function Ssns.show_usage_stats()
-  local UsageTracker = require('ssns.completion.usage_tracker')
-  local Cache = require('ssns.cache')
-  local UiFloat = require('ssns.ui.core.float')
-  local ContentBuilder = require('ssns.ui.core.content_builder')
-
-  -- Get active database
-  local active_db = Cache.get_active_database()
-  if not active_db then
-    vim.notify("No active database connection", vim.log.levels.WARN)
-    return
-  end
-
-  local server = active_db.parent
-  local connection = {
-    connection_config = server.connection_config,
-    database = active_db.name
-  }
-
-  -- Get statistics
-  local stats = UsageTracker.get_stats(connection)
-
-  -- Build styled content
-  local cb = ContentBuilder.new()
-  
-  cb:header("Usage Statistics")
-  cb:separator("=", 50)
-  cb:blank()
-  
-  cb:spans({
-    { text = "Connection: ", style = "label" },
-    { text = server.name, style = "server" },
-  })
-  cb:spans({
-    { text = "Database: ", style = "label" },
-    { text = active_db.name, style = "database" },
-  })
-  cb:blank()
-  
-  cb:key_value("Total Items Tracked", stats.total_items)
-  cb:blank()
-  
-  cb:section("By Type")
-  for type_name, count in pairs(stats.by_type) do
-    cb:spans({
-      { text = "  " },
-      { text = type_name, style = "emphasis" },
-      { text = ": " },
-      { text = tostring(count), style = "number" },
-    })
-  end
-  cb:blank()
-
-  -- Show top 10 tables
-  if stats.top_tables and #stats.top_tables > 0 then
-    cb:section("Top 10 Tables")
-    for i = 1, math.min(10, #stats.top_tables) do
-      local item = stats.top_tables[i]
-      cb:spans({
-        { text = string.format("  %2d. ", i), style = "muted" },
-        { text = item.path, style = "table" },
-        { text = " (weight: " },
-        { text = tostring(item.weight), style = "number" },
-        { text = ")" },
-      })
-    end
-    cb:blank()
-  end
-
-  -- Show top 10 columns
-  if stats.top_columns and #stats.top_columns > 0 then
-    cb:section("Top 10 Columns")
-    for i = 1, math.min(10, #stats.top_columns) do
-      local item = stats.top_columns[i]
-      cb:spans({
-        { text = string.format("  %2d. ", i), style = "muted" },
-        { text = item.path, style = "column" },
-        { text = " (weight: " },
-        { text = tostring(item.weight), style = "number" },
-        { text = ")" },
-      })
-    end
-    cb:blank()
-  end
-
-  -- Show top 10 procedures
-  if stats.top_procedures and #stats.top_procedures > 0 then
-    cb:section("Top 10 Procedures")
-    for i = 1, math.min(10, #stats.top_procedures) do
-      local item = stats.top_procedures[i]
-      cb:spans({
-        { text = string.format("  %2d. ", i), style = "muted" },
-        { text = item.path, style = "procedure" },
-        { text = " (weight: " },
-        { text = tostring(item.weight), style = "number" },
-        { text = ")" },
-      })
-    end
-  end
-
-  UiFloat.create_styled(cb, {
-    title = "Usage Statistics",
-    min_width = 80,
-    max_width = 80,
-    footer = "q/Esc: close",
-  })
+  require('ssns.api.diagnostics').show_usage_stats()
 end
 
 ---Clear all usage weights
 function Ssns.clear_usage_weights()
-  local UsageTracker = require('ssns.completion.usage_tracker')
-
-  -- Confirm with user
-  local confirm = vim.fn.input("Clear ALL usage weights? This cannot be undone. (yes/no): ")
-  if confirm:lower() ~= "yes" then
-    vim.notify("Cancelled", vim.log.levels.INFO)
-    return
-  end
-
-  -- Clear all weights
-  UsageTracker.clear_weights()
-  UsageTracker.save_to_file()
-
-  vim.notify("Usage weights cleared", vim.log.levels.INFO)
+  require('ssns.api.diagnostics').clear_usage_weights()
 end
 
 ---Clear usage weights for current connection only
 function Ssns.clear_usage_weights_current()
-  local UsageTracker = require('ssns.completion.usage_tracker')
-  local Cache = require('ssns.cache')
-
-  -- Get active database
-  local active_db = Cache.get_active_database()
-  if not active_db then
-    vim.notify("No active database connection", vim.log.levels.WARN)
-    return
-  end
-
-  local server = active_db.parent
-  local Connections = require('ssns.connections')
-  local connection_key = Connections.generate_connection_key(server.connection_config)
-
-  -- Confirm with user
-  local confirm = vim.fn.input(string.format("Clear weights for '%s'? (yes/no): ", server.name))
-  if confirm:lower() ~= "yes" then
-    vim.notify("Cancelled", vim.log.levels.INFO)
-    return
-  end
-
-  -- Clear weights for this connection
-  UsageTracker.clear_weights(connection_key)
-  UsageTracker.save_to_file()
-
-  vim.notify(string.format("Usage weights cleared for '%s'", server.name), vim.log.levels.INFO)
+  require('ssns.api.diagnostics').clear_usage_weights_current()
 end
 
 ---Export usage weights to a JSON file
 ---@param filepath string? Optional file path
 function Ssns.export_usage_weights(filepath)
-  local UsageTracker = require('ssns.completion.usage_tracker')
-
-  -- Get file path from args or prompt
-  local file_path = filepath
-  if not file_path or file_path == "" then
-    file_path = vim.fn.input("Export to file: ", "", "file")
-    if file_path == "" then
-      vim.notify("Cancelled", vim.log.levels.INFO)
-      return
-    end
-  end
-
-  -- Expand path
-  file_path = vim.fn.expand(file_path)
-
-  -- Check if file exists
-  if vim.fn.filereadable(file_path) == 1 then
-    local confirm = vim.fn.input(string.format("File '%s' exists. Overwrite? (yes/no): ", file_path))
-    if confirm:lower() ~= "yes" then
-      vim.notify("Cancelled", vim.log.levels.INFO)
-      return
-    end
-  end
-
-  -- Export (copy current persistence file to target)
-  local success, err = pcall(function()
-    local source = UsageTracker.persist_file
-    local content = vim.fn.readfile(source)
-    vim.fn.writefile(content, file_path)
-  end)
-
-  if success then
-    vim.notify(string.format("Usage weights exported to '%s'", file_path), vim.log.levels.INFO)
-  else
-    vim.notify(string.format("Export failed: %s", err), vim.log.levels.ERROR)
-  end
+  require('ssns.api.diagnostics').export_usage_weights(filepath)
 end
 
 ---Import usage weights from a JSON file
 ---@param filepath string? Optional file path
 function Ssns.import_usage_weights(filepath)
-  local UsageTracker = require('ssns.completion.usage_tracker')
-
-  -- Get file path from args or prompt
-  local file_path = filepath
-  if not file_path or file_path == "" then
-    file_path = vim.fn.input("Import from file: ", "", "file")
-    if file_path == "" then
-      vim.notify("Cancelled", vim.log.levels.INFO)
-      return
-    end
-  end
-
-  -- Expand path
-  file_path = vim.fn.expand(file_path)
-
-  -- Check if file exists
-  if vim.fn.filereadable(file_path) ~= 1 then
-    vim.notify(string.format("File not found: %s", file_path), vim.log.levels.ERROR)
-    return
-  end
-
-  -- Confirm merge or replace
-  local action = vim.fn.input("Import action: (m)erge or (r)eplace existing weights? (m/r): ")
-  if action:lower() ~= "m" and action:lower() ~= "r" then
-    vim.notify("Cancelled", vim.log.levels.INFO)
-    return
-  end
-
-  local merge = (action:lower() == "m")
-
-  -- Import
-  local success, err = pcall(function()
-    if not merge then
-      -- Replace: clear existing first
-      UsageTracker.weights = { connections = {} }
-    end
-
-    -- Read and decode file
-    local content = vim.fn.readfile(file_path)
-    local json_str = table.concat(content, "\n")
-    local imported_data = vim.json.decode(json_str)
-
-    if not imported_data or not imported_data.connections then
-      error("Invalid usage data format")
-    end
-
-    -- Merge imported data
-    if merge then
-      for conn_key, conn_data in pairs(imported_data.connections) do
-        if not UsageTracker.weights.connections[conn_key] then
-          UsageTracker.weights.connections[conn_key] = conn_data
-        else
-          -- Merge weights (add them together)
-          for type_key, type_data in pairs(conn_data) do
-            if not UsageTracker.weights.connections[conn_key][type_key] then
-              UsageTracker.weights.connections[conn_key][type_key] = type_data
-            else
-              for path, weight_data in pairs(type_data) do
-                if UsageTracker.weights.connections[conn_key][type_key][path] then
-                  -- Add weights together
-                  local existing = UsageTracker.weights.connections[conn_key][type_key][path]
-                  if type(existing) == "table" and existing.weight then
-                    existing.weight = existing.weight + (weight_data.weight or weight_data)
-                  else
-                    UsageTracker.weights.connections[conn_key][type_key][path] = (existing or 0) + (weight_data.weight or weight_data)
-                  end
-                else
-                  UsageTracker.weights.connections[conn_key][type_key][path] = weight_data
-                end
-              end
-            end
-          end
-        end
-      end
-    else
-      -- Replace
-      UsageTracker.weights = imported_data
-    end
-
-    -- Save to file
-    UsageTracker.save_to_file()
-  end)
-
-  if success then
-    local mode_str = merge and "merged" or "replaced"
-    vim.notify(string.format("Usage weights %s from '%s'", mode_str, file_path), vim.log.levels.INFO)
-  else
-    vim.notify(string.format("Import failed: %s", err), vim.log.levels.ERROR)
-  end
+  require('ssns.api.diagnostics').import_usage_weights(filepath)
 end
 
 ---Toggle usage tracking on/off
 function Ssns.toggle_usage_tracking()
-  local Config = require('ssns.config')
-  local config = Config.get()
-
-  -- Toggle setting
-  config.completion.track_usage = not config.completion.track_usage
-
-  -- Notify user
-  local status = config.completion.track_usage and "enabled" or "disabled"
-  vim.notify(string.format("Usage tracking %s", status), vim.log.levels.INFO)
+  require('ssns.api.diagnostics').toggle_usage_tracking()
 end
 
 ---Toggle semantic highlighting for current buffer
 function Ssns.toggle_semantic_highlighting()
-  local SemanticHighlighter = require('ssns.highlighting.semantic')
-  local bufnr = vim.api.nvim_get_current_buf()
-
-  if SemanticHighlighter.is_enabled(bufnr) then
-    SemanticHighlighter.disable_buffer(bufnr)
-    vim.notify("Semantic highlighting disabled for this buffer", vim.log.levels.INFO)
-  else
-    SemanticHighlighter.setup_buffer(bufnr)
-    vim.notify("Semantic highlighting enabled for this buffer", vim.log.levels.INFO)
-  end
+  require('ssns.api.diagnostics').toggle_semantic_highlighting()
 end
+
+-- Testing Functions
 
 ---Run all IntelliSense tests
 function Ssns.run_all_tests()
@@ -1492,10 +436,7 @@ function Ssns.run_category_tests(category)
     return
   end
 
-  -- Display results
   Testing.reporter.display_results(results)
-
-  -- Write markdown report
   local output_path = vim.fn.stdpath("data") .. string.format("/ssns/test_results_%s.md", category)
   local success = Testing.reporter.write_markdown(results, output_path)
 
@@ -1517,15 +458,39 @@ end
 function Ssns.view_test_results()
   local results_path = vim.fn.stdpath("data") .. "/ssns/test_results.md"
 
-  -- Check if file exists
   if vim.fn.filereadable(results_path) ~= 1 then
     vim.notify("Test results file not found. Run :SSNSRunTests first.", vim.log.levels.WARN)
     return
   end
 
-  -- Open file in a new buffer
   vim.cmd("edit " .. vim.fn.fnameescape(results_path))
   vim.notify("Opened test results: " .. results_path, vim.log.levels.INFO)
+end
+
+-- Advanced API accessors
+
+---Get current version
+---@return string version
+function Ssns.get_version()
+  return Ssns.version
+end
+
+---Get cache instance
+---@return Cache
+function Ssns.get_cache()
+  return require('ssns.cache')
+end
+
+---Get factory instance
+---@return Factory
+function Ssns.get_factory()
+  return require('ssns.factory')
+end
+
+---Get config instance
+---@return Config
+function Ssns.get_config()
+  return require('ssns.config')
 end
 
 return Ssns
