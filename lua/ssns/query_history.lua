@@ -208,9 +208,9 @@ function QueryHistory.add_entry(bufnr, buffer_name, entry)
     table.remove(buffer_history.entries)
   end
 
-  -- Auto-save if enabled
+  -- Auto-save if enabled (async to avoid blocking)
   if QueryHistory.auto_persist then
-    QueryHistory.save_to_file()
+    QueryHistory.save_to_file_async()
   end
 
   return true
@@ -280,9 +280,9 @@ function QueryHistory.add_auto_save_entry(bufnr, buffer_name, content, server_na
     table.remove(buffer_history.entries)
   end
 
-  -- Auto-save to file if enabled
+  -- Auto-save to file if enabled (async to avoid blocking)
   if QueryHistory.auto_persist then
-    QueryHistory.save_to_file()
+    QueryHistory.save_to_file_async()
   end
 
   return true
@@ -348,7 +348,7 @@ function QueryHistory.clear_buffer_history(bufnr_or_id, buffer_name)
   end
 
   if QueryHistory.auto_persist then
-    QueryHistory.save_to_file()
+    QueryHistory.save_to_file_async()
   end
 
   vim.notify("Buffer history cleared", vim.log.levels.INFO)
@@ -374,7 +374,7 @@ function QueryHistory.clear_all()
   QueryHistory.buffer_lru = {}
 
   if QueryHistory.auto_persist then
-    QueryHistory.save_to_file()
+    QueryHistory.save_to_file_async()
   end
 
   vim.notify(

@@ -91,7 +91,7 @@ function Ssns.setup(user_config)
   local SemanticHighlighter = require('ssns.highlighting.semantic')
   SemanticHighlighter.setup()
 
-  -- Initialize query history
+  -- Initialize query history (async to avoid blocking startup)
   local QueryHistory = require('ssns.query_history')
   local config = Config.get()
   QueryHistory.max_buffers = config.query_history.max_buffers
@@ -100,7 +100,13 @@ function Ssns.setup(user_config)
   QueryHistory.persist_file = config.query_history.persist_file
   QueryHistory.exclude_patterns = config.query_history.exclude_patterns
   if config.query_history.enabled then
-    QueryHistory.init()
+    QueryHistory.init_async(function(success, err)
+      if not success and err then
+        vim.schedule(function()
+          vim.notify("SSNS: Failed to load query history: " .. err, vim.log.levels.WARN)
+        end)
+      end
+    end)
   end
 
   -- Register commands via commands module
