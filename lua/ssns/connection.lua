@@ -532,4 +532,259 @@ function Connection.escape_string(str)
   return str:gsub("'", "''")
 end
 
+-- ============================================================================
+-- ASYNC EXECUTION METHODS
+-- ============================================================================
+
+---@class AsyncExecuteOpts
+---@field use_cache boolean? Use query cache (default: true)
+---@field ttl number? Cache TTL
+---@field bufnr number? Buffer to show spinner in
+---@field spinner_text string? Custom spinner text
+---@field show_runtime boolean? Show runtime in spinner (default: true)
+---@field timeout_ms number? Timeout in milliseconds (default: 30000)
+---@field on_complete fun(result: table, error: string?)? Completion callback
+---@field on_progress fun(pct: number, message: string?)? Progress callback
+---@field cancel_token CancellationToken? External cancellation token
+
+---Execute a query asynchronously with optional spinner
+---@param connection_config ConnectionData The connection configuration
+---@param query string The SQL query to execute
+---@param opts AsyncExecuteOpts? Options
+---@return string task_id Task ID for tracking/cancellation
+function Connection.execute_async(connection_config, query, opts)
+  opts = opts or {}
+  local Async = require('ssns.async')
+
+  -- If bufnr provided, use spinner in buffer
+  if opts.bufnr then
+    return Async.run_in_buffer(opts.bufnr, function(ctx)
+      -- Check cancellation before starting
+      if ctx.is_cancelled() then
+        return nil, "Operation cancelled"
+      end
+
+      ctx.report_progress(0, opts.spinner_text or "Executing query...")
+
+      -- Execute the sync query (the RPC is atomic, can't cancel mid-flight)
+      local result = Connection.execute(connection_config, query, {
+        use_cache = opts.use_cache,
+        ttl = opts.ttl,
+      })
+
+      ctx.report_progress(100, "Complete")
+      return result
+    end, {
+      name = "Execute Query",
+      spinner_text = opts.spinner_text or "Executing query...",
+      show_runtime = opts.show_runtime ~= false,
+      timeout_ms = opts.timeout_ms or 30000,
+      cancel_token = opts.cancel_token,
+      on_progress = opts.on_progress,
+      on_complete = opts.on_complete,
+    })
+  else
+    -- No buffer, run without spinner
+    return Async.run(function(ctx)
+      if ctx.is_cancelled() then
+        return nil, "Operation cancelled"
+      end
+
+      return Connection.execute(connection_config, query, {
+        use_cache = opts.use_cache,
+        ttl = opts.ttl,
+      })
+    end, {
+      name = "Execute Query",
+      timeout_ms = opts.timeout_ms or 30000,
+      cancel_token = opts.cancel_token,
+      on_progress = opts.on_progress,
+      on_complete = opts.on_complete,
+    })
+  end
+end
+
+---@class AsyncBufferContextOpts : AsyncExecuteOpts
+---@field line number? Line to show spinner on (default: 0)
+
+---Execute query with buffer context asynchronously
+---Handles multi-database queries with USE statements and GO separators
+---@param connection_config ConnectionData The connection configuration
+---@param query string The SQL query (may contain USE statements and GO)
+---@param buffer_database string|nil Current buffer database context
+---@param opts AsyncBufferContextOpts? Options
+---@return string task_id Task ID for tracking/cancellation
+function Connection.execute_with_buffer_context_async(connection_config, query, buffer_database, opts)
+  opts = opts or {}
+  local Async = require('ssns.async')
+
+  -- Always use buffer spinner for context execution (user query)
+  if opts.bufnr then
+    return Async.run_in_buffer(opts.bufnr, function(ctx)
+      if ctx.is_cancelled() then
+        return nil, "Operation cancelled"
+      end
+
+      ctx.report_progress(0, opts.spinner_text or "Executing query...")
+
+      -- Execute the sync version
+      local result, last_database = Connection.execute_with_buffer_context(
+        connection_config,
+        query,
+        buffer_database
+      )
+
+      ctx.report_progress(100, "Complete")
+
+      -- Return both result and last_database as a table
+      return { result = result, last_database = last_database }
+    end, {
+      name = "Execute Query",
+      spinner_text = opts.spinner_text or "Executing query...",
+      show_runtime = opts.show_runtime ~= false,
+      line = opts.line or 0,
+      timeout_ms = opts.timeout_ms or 60000, -- 60 seconds for user queries
+      cancel_token = opts.cancel_token,
+      on_progress = opts.on_progress,
+      on_complete = function(combined, err)
+        if opts.on_complete then
+          if err then
+            opts.on_complete(nil, nil, err)
+          elseif combined then
+            opts.on_complete(combined.result, combined.last_database, nil)
+          else
+            opts.on_complete(nil, nil, "No result returned")
+          end
+        end
+      end,
+    })
+  else
+    -- No buffer provided, run without spinner
+    return Async.run(function(ctx)
+      if ctx.is_cancelled() then
+        return nil, "Operation cancelled"
+      end
+
+      local result, last_database = Connection.execute_with_buffer_context(
+        connection_config,
+        query,
+        buffer_database
+      )
+
+      return { result = result, last_database = last_database }
+    end, {
+      name = "Execute Query",
+      timeout_ms = opts.timeout_ms or 60000,
+      cancel_token = opts.cancel_token,
+      on_progress = opts.on_progress,
+      on_complete = function(combined, err)
+        if opts.on_complete then
+          if err then
+            opts.on_complete(nil, nil, err)
+          elseif combined then
+            opts.on_complete(combined.result, combined.last_database, nil)
+          else
+            opts.on_complete(nil, nil, "No result returned")
+          end
+        end
+      end,
+    })
+  end
+end
+
+---Test a database connection asynchronously
+---@param connection_config ConnectionData The connection configuration
+---@param opts { on_complete: fun(success: boolean, error: string?), timeout_ms: number? }? Options
+---@return string task_id Task ID
+function Connection.test_async(connection_config, opts)
+  opts = opts or {}
+  local Async = require('ssns.async')
+
+  return Async.run(function(ctx)
+    if ctx.is_cancelled() then
+      return false, "Operation cancelled"
+    end
+
+    return Connection.test(connection_config)
+  end, {
+    name = "Test Connection",
+    timeout_ms = opts.timeout_ms or 10000, -- 10 seconds for connection test
+    on_complete = function(result, err)
+      if opts.on_complete then
+        if err then
+          opts.on_complete(false, err)
+        elseif type(result) == "table" then
+          -- result is {success, error_message}
+          opts.on_complete(result[1] or result, result[2])
+        else
+          opts.on_complete(result, nil)
+        end
+      end
+    end,
+  })
+end
+
+---Execute batch of queries asynchronously with progress
+---@param connection_config ConnectionData The connection configuration
+---@param queries string[] Array of queries to execute
+---@param opts { on_complete: fun(results: table[], error: string?), on_progress: fun(pct: number, current: number, total: number)?, timeout_ms: number?, bufnr: number? }? Options
+---@return string task_id Task ID
+function Connection.execute_batch_async(connection_config, queries, opts)
+  opts = opts or {}
+  local Async = require('ssns.async')
+
+  local run_fn = function(ctx)
+    if ctx.is_cancelled() then
+      return nil, "Operation cancelled"
+    end
+
+    local Progress = Async.Progress
+    local tracker = Progress.create(#queries, {
+      on_update = function(pct, t)
+        ctx.report_progress(pct, string.format("Query %d/%d", t.current, t.total))
+        if opts.on_progress then
+          opts.on_progress(pct, t.current, t.total)
+        end
+      end,
+    })
+
+    local all_results = {}
+
+    for i, query in ipairs(queries) do
+      -- Check cancellation before each query
+      if ctx.is_cancelled() then
+        return all_results, "Operation cancelled after " .. (i - 1) .. " queries"
+      end
+
+      local result = Connection.execute(connection_config, query)
+
+      if not result.success then
+        local error_msg = result.error and result.error.message or "Unknown error"
+        return all_results, string.format("Query %d failed: %s", i, error_msg)
+      end
+
+      table.insert(all_results, result)
+      tracker:advance()
+    end
+
+    return all_results
+  end
+
+  if opts.bufnr then
+    return Async.run_in_buffer(opts.bufnr, run_fn, {
+      name = "Execute Batch",
+      spinner_text = string.format("Executing %d queries...", #queries),
+      show_runtime = true,
+      timeout_ms = opts.timeout_ms or (#queries * 30000), -- 30 seconds per query
+      on_complete = opts.on_complete,
+    })
+  else
+    return Async.run(run_fn, {
+      name = "Execute Batch",
+      timeout_ms = opts.timeout_ms or (#queries * 30000),
+      on_complete = opts.on_complete,
+    })
+  end
+end
+
 return Connection
