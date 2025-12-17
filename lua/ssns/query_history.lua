@@ -552,4 +552,181 @@ function QueryHistory.get_stats()
   }
 end
 
+-- ============================================================================
+-- Async Methods
+-- ============================================================================
+
+---Save history to file asynchronously
+---@param callback fun(success: boolean, error: string?)? Optional callback
+function QueryHistory.save_to_file_async(callback)
+  local FileIO = require('ssns.async.file_io')
+
+  local data = {
+    version = 1,
+    saved_at = os.date("%Y-%m-%d %H:%M:%S"),
+    buffers = QueryHistory.buffers,
+    buffer_lru = QueryHistory.buffer_lru,
+  }
+
+  local ok, json = pcall(vim.fn.json_encode, data)
+  if not ok then
+    if callback then
+      callback(false, "Failed to encode query history: " .. tostring(json))
+    end
+    return
+  end
+
+  -- Ensure directory exists
+  local dir = vim.fn.fnamemodify(QueryHistory.persist_file, ":h")
+  FileIO.mkdir_async(dir, function(mkdir_success, mkdir_err)
+    if not mkdir_success then
+      if callback then
+        callback(false, "Failed to create directory: " .. (mkdir_err or "unknown error"))
+      end
+      return
+    end
+
+    FileIO.write_async(QueryHistory.persist_file, json, function(result)
+      if callback then
+        callback(result.success, result.error)
+      end
+    end)
+  end)
+end
+
+---Load history from file asynchronously
+---@param callback fun(success: boolean, error: string?)
+function QueryHistory.load_from_file_async(callback)
+  local FileIO = require('ssns.async.file_io')
+
+  -- Check if file exists
+  FileIO.exists_async(QueryHistory.persist_file, function(exists, _)
+    if not exists then
+      -- File doesn't exist yet, not an error
+      callback(true, nil)
+      return
+    end
+
+    FileIO.read_async(QueryHistory.persist_file, function(result)
+      if not result.success then
+        callback(false, result.error)
+        return
+      end
+
+      local content = result.data
+      if not content or content == "" then
+        callback(true, nil)
+        return
+      end
+
+      local ok, data = pcall(vim.fn.json_decode, content)
+      if not ok or not data then
+        callback(false, "Failed to parse query history file")
+        return
+      end
+
+      QueryHistory.buffers = data.buffers or {}
+      QueryHistory.buffer_lru = data.buffer_lru or {}
+
+      callback(true, nil)
+    end)
+  end)
+end
+
+---Initialize query history asynchronously
+---@param callback fun(success: boolean, error: string?)
+function QueryHistory.init_async(callback)
+  local FileIO = require('ssns.async.file_io')
+
+  -- Create data directory if needed
+  local data_dir = vim.fn.stdpath('data') .. '/ssns'
+
+  FileIO.mkdir_async(data_dir, function(mkdir_success, mkdir_err)
+    if not mkdir_success then
+      callback(false, "Failed to create data directory: " .. (mkdir_err or "unknown error"))
+      return
+    end
+
+    -- Load from file if auto_persist enabled
+    if QueryHistory.auto_persist then
+      QueryHistory.load_from_file_async(callback)
+    else
+      callback(true, nil)
+    end
+  end)
+end
+
+---Export history to file asynchronously
+---@param filepath string Output file path
+---@param format "json"|"txt" Export format
+---@param callback fun(success: boolean, error: string?)
+function QueryHistory.export_async(filepath, format, callback)
+  local FileIO = require('ssns.async.file_io')
+  format = format or "json"
+
+  local content
+
+  if format == "json" then
+    local data = {
+      version = 1,
+      exported_at = os.date("%Y-%m-%d %H:%M:%S"),
+      buffers = QueryHistory.buffers,
+      buffer_lru = QueryHistory.buffer_lru,
+    }
+
+    local ok, json = pcall(vim.fn.json_encode, data)
+    if not ok then
+      callback(false, "Failed to encode JSON: " .. tostring(json))
+      return
+    end
+    content = json
+
+  elseif format == "txt" then
+    local lines = {}
+    table.insert(lines, "SSNS Query History Export")
+    table.insert(lines, "Exported: " .. os.date("%Y-%m-%d %H:%M:%S"))
+    table.insert(lines, string.rep("=", 80))
+    table.insert(lines, "")
+
+    for _, buffer_id in ipairs(QueryHistory.buffer_lru) do
+      local buffer_history = QueryHistory.buffers[buffer_id]
+      if buffer_history then
+        table.insert(lines, string.format("Buffer: %s", buffer_history.buffer_name))
+        table.insert(lines, string.format("  Server: %s | Database: %s",
+          buffer_history.server_name, buffer_history.database or "N/A"))
+        table.insert(lines, string.format("  Created: %s | Last Accessed: %s",
+          buffer_history.created_at, buffer_history.last_accessed))
+        table.insert(lines, "")
+
+        for i, entry in ipairs(buffer_history.entries) do
+          table.insert(lines, string.format("  [%d] %s | %s | %dms",
+            i, entry.timestamp, entry.status, entry.execution_time_ms or 0))
+          table.insert(lines, "  " .. string.rep("-", 76))
+
+          for _, query_line in ipairs(vim.split(entry.query, "\n")) do
+            table.insert(lines, "  " .. query_line)
+          end
+
+          if entry.status == "error" and entry.error_message then
+            table.insert(lines, "  ERROR: " .. entry.error_message)
+          end
+          table.insert(lines, "")
+        end
+
+        table.insert(lines, string.rep("=", 80))
+        table.insert(lines, "")
+      end
+    end
+
+    content = table.concat(lines, "\n")
+  else
+    callback(false, "Unsupported export format: " .. format)
+    return
+  end
+
+  FileIO.write_async(filepath, content, function(result)
+    callback(result.success, result.error)
+  end)
+end
+
 return QueryHistory
