@@ -616,4 +616,186 @@ function UsageTracker.get_stats(connection)
   return stats
 end
 
+-- ============================================================================
+-- Async Methods
+-- ============================================================================
+
+---Save weights to JSON file asynchronously
+---@param callback fun(success: boolean, error: string?)? Optional callback
+function UsageTracker.save_to_file_async(callback)
+  local FileIO = require('ssns.async.file_io')
+
+  -- Ensure initialized
+  if not UsageTracker.initialized then
+    UsageTracker.init()
+  end
+
+  -- Prune if needed
+  _prune_weights()
+
+  -- Create data structure
+  local data = {
+    version = 1,
+    saved_at = os.date("%Y-%m-%d %H:%M:%S"),
+    connections = UsageTracker.weights.connections
+  }
+
+  -- Encode to JSON
+  local ok, json = pcall(vim.fn.json_encode, data)
+  if not ok then
+    debug_log("Failed to encode usage data: " .. tostring(json))
+    if callback then
+      callback(false, "Failed to encode usage data: " .. tostring(json))
+    end
+    return
+  end
+
+  -- Ensure directory exists
+  local dir = vim.fn.fnamemodify(UsageTracker.persist_file, ":h")
+  FileIO.mkdir_async(dir, function(mkdir_success, mkdir_err)
+    if not mkdir_success then
+      debug_log("Failed to create directory: " .. (mkdir_err or "unknown"))
+      if callback then
+        callback(false, "Failed to create directory: " .. (mkdir_err or "unknown"))
+      end
+      return
+    end
+
+    -- Write to temp file first (atomic write)
+    local temp_file = UsageTracker.persist_file .. '.tmp'
+    FileIO.write_async(temp_file, json, function(write_result)
+      if not write_result.success then
+        debug_log("Failed to write temp file: " .. (write_result.error or "unknown"))
+        if callback then
+          callback(false, write_result.error)
+        end
+        return
+      end
+
+      -- Rename temp to actual file (sync operation - rename is fast)
+      -- On Windows, os.rename fails if target exists, so remove it first
+      os.remove(UsageTracker.persist_file)
+
+      local rename_ok = os.rename(temp_file, UsageTracker.persist_file)
+      if not rename_ok then
+        debug_log("Failed to rename temp file")
+        os.remove(temp_file)
+        if callback then
+          callback(false, "Failed to rename temp file")
+        end
+        return
+      end
+
+      UsageTracker.is_dirty = false
+      debug_log("Saved usage data to file (async)")
+
+      if callback then
+        callback(true, nil)
+      end
+    end)
+  end)
+end
+
+---Load weights from JSON file asynchronously
+---@param callback fun(success: boolean, error: string?)
+function UsageTracker.load_from_file_async(callback)
+  local FileIO = require('ssns.async.file_io')
+
+  -- Check if file exists
+  FileIO.exists_async(UsageTracker.persist_file, function(exists, _)
+    if not exists then
+      debug_log("No existing usage data file")
+      callback(true, nil)
+      return
+    end
+
+    FileIO.read_async(UsageTracker.persist_file, function(result)
+      if not result.success then
+        debug_log("Failed to read usage data file: " .. (result.error or "unknown"))
+        callback(false, result.error)
+        return
+      end
+
+      local content = result.data
+      if not content or content == "" then
+        debug_log("Empty usage data file")
+        callback(true, nil)
+        return
+      end
+
+      -- Parse JSON
+      local ok, data = pcall(vim.fn.json_decode, content)
+      if not ok or not data then
+        debug_log("Failed to parse usage data file")
+        callback(false, "Failed to parse usage data file")
+        return
+      end
+
+      -- Validate version
+      if data.version ~= 1 then
+        debug_log(string.format("Unsupported data version: %s", tostring(data.version)))
+        callback(false, "Unsupported data version")
+        return
+      end
+
+      -- Load weights
+      UsageTracker.weights.connections = data.connections or {}
+      UsageTracker.weights.saved_at = data.saved_at
+
+      -- Apply decay if configured
+      _apply_decay()
+
+      -- Count loaded items
+      local total_items = 0
+      for _, conn_data in pairs(UsageTracker.weights.connections) do
+        for _, type_data in pairs(conn_data) do
+          for _ in pairs(type_data) do
+            total_items = total_items + 1
+          end
+        end
+      end
+
+      debug_log(string.format("Loaded %d items from file (async)", total_items))
+      callback(true, nil)
+    end)
+  end)
+end
+
+---Initialize the usage tracker asynchronously
+---@param callback fun(success: boolean, error: string?)
+function UsageTracker.init_async(callback)
+  if UsageTracker.initialized then
+    callback(true, nil)
+    return
+  end
+
+  local FileIO = require('ssns.async.file_io')
+
+  -- Create data directory if needed
+  local data_dir = vim.fn.stdpath('data') .. '/ssns'
+
+  FileIO.mkdir_async(data_dir, function(mkdir_success, mkdir_err)
+    if not mkdir_success then
+      callback(false, "Failed to create data directory: " .. (mkdir_err or "unknown"))
+      return
+    end
+
+    -- Load from file
+    UsageTracker.load_from_file_async(function(load_success, load_err)
+      if not load_success then
+        callback(false, load_err)
+        return
+      end
+
+      -- Setup auto-save
+      _setup_auto_save()
+
+      UsageTracker.initialized = true
+      debug_log("UsageTracker initialized (async)")
+
+      callback(true, nil)
+    end)
+  end)
+end
+
 return UsageTracker
