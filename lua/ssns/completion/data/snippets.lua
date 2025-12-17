@@ -139,4 +139,34 @@ function Snippets.load_user_snippets()
   return snippets or {}
 end
 
+-- ============================================================================
+-- Async Methods
+-- ============================================================================
+
+---Load user-defined snippets from file asynchronously
+---@param callback fun(snippets: table[], error: string?)
+function Snippets.load_user_snippets_async(callback)
+  local FileIO = require('ssns.async.file_io')
+
+  local data_path = vim.fn.stdpath('data')
+  local snippets_file = data_path .. '/ssns/snippets.json'
+
+  -- Check if file exists
+  FileIO.exists_async(snippets_file, function(exists, _)
+    if not exists then
+      callback({}, nil)
+      return
+    end
+
+    FileIO.read_json_async(snippets_file, function(data, err)
+      if err then
+        callback({}, err)
+        return
+      end
+
+      callback(data or {}, nil)
+    end)
+  end)
+end
+
 return Snippets
