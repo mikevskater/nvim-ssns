@@ -389,15 +389,15 @@ function ThemeManager.apply_colors(colors)
   vim.api.nvim_set_hl(0, "SsnsFloatInputActive", colors.ui_input_active or { bg = "#3C3C3C", fg = "#FFFFFF", bold = true })
   vim.api.nvim_set_hl(0, "SsnsFloatInputPlaceholder", colors.ui_input_placeholder or { bg = "#2D2D2D", fg = "#666666", italic = true })
 
-  -- Scrollbar highlights (themed - derive from UI title/border colors)
+  -- Scrollbar highlights (themed - derive from SSNS UI title/border colors)
   -- Scrollbar background: transparent to blend with window
   vim.api.nvim_set_hl(0, "SsnsScrollbar", colors.scrollbar or { bg = "NONE" })
-  -- Thumb: uses title color for visibility (the draggable part)
-  vim.api.nvim_set_hl(0, "SsnsScrollbarThumb", colors.scrollbar_thumb or { link = "FloatTitle" })
-  -- Track: dimmer, uses border color (the background track)
-  vim.api.nvim_set_hl(0, "SsnsScrollbarTrack", colors.scrollbar_track or { link = "FloatBorder" })
-  -- Arrows: uses title color for consistency with thumb
-  vim.api.nvim_set_hl(0, "SsnsScrollbarArrow", colors.scrollbar_arrow or { link = "Comment" })
+  -- Thumb: uses SSNS title color for visibility (the draggable part)
+  vim.api.nvim_set_hl(0, "SsnsScrollbarThumb", colors.scrollbar_thumb or { link = "SsnsFloatTitle" })
+  -- Track: dimmer, uses SSNS border color (the background track)
+  vim.api.nvim_set_hl(0, "SsnsScrollbarTrack", colors.scrollbar_track or { link = "SsnsFloatBorder" })
+  -- Arrows: uses SSNS hint color for consistency
+  vim.api.nvim_set_hl(0, "SsnsScrollbarArrow", colors.scrollbar_arrow or { link = "SsnsFloatHint" })
 
   -- Result buffer highlights (foreground only - no background colors)
   vim.api.nvim_set_hl(0, "SsnsResultHeader", colors.result_header or { fg = "#9CDCFE", bold = true })
