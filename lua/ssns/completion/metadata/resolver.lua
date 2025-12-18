@@ -686,6 +686,189 @@ function Resolver.get_resolved(resolved_scope, name)
   return nil
 end
 
+-- ============================================================================
+-- Async Methods
+-- ============================================================================
+
+---@class ResolveTableAsyncOpts
+---@field on_complete fun(table_obj: table?, error: string?)? Completion callback
+---@field timeout_ms number? Timeout in milliseconds (default: 5000)
+
+---Resolve table/view/synonym reference to actual object asynchronously
+---Non-blocking version of resolve_table() that uses database:load_async()
+---@param reference string Table reference (could be alias, table name, temp table, or synonym)
+---@param connection table Connection context { server: ServerClass, database: DbClass, connection_config: table }
+---@param context table Pre-built context with aliases
+---@param opts ResolveTableAsyncOpts? Options with on_complete callback
+function Resolver.resolve_table_async(reference, connection, context, opts)
+  opts = opts or {}
+  local on_complete = opts.on_complete or function() end
+
+  if not reference or not connection or not connection.database then
+    vim.schedule(function()
+      on_complete(nil, "Invalid reference or connection")
+    end)
+    return
+  end
+
+  -- Step 0: Check if reference is a temp table (#temp or ##temp)
+  if TokenContext.is_temp_table(reference) then
+    if TokenContext.is_global_temp_table(reference) then
+      local result = Resolver._find_in_tempdb(reference, connection)
+      vim.schedule(function()
+        on_complete(result, nil)
+      end)
+      return
+    end
+    -- Local temp tables not supported without buffer context
+    vim.schedule(function()
+      on_complete(nil, nil)
+    end)
+    return
+  end
+
+  -- Step 1: Try to resolve as alias first using pre-built context
+  local resolved_name = Resolver.resolve_alias_with_scope(reference, context)
+
+  if resolved_name then
+    reference = resolved_name
+
+    -- Check again if resolved name is a temp table
+    if TokenContext.is_temp_table(reference) then
+      if TokenContext.is_global_temp_table(reference) then
+        local result = Resolver._find_in_tempdb(reference, connection)
+        vim.schedule(function()
+          on_complete(result, nil)
+        end)
+        return
+      end
+      vim.schedule(function()
+        on_complete(nil, nil)
+      end)
+      return
+    end
+  end
+
+  -- Step 2: Parse schema-qualified name if present
+  local db_name, schema, table_name = Resolver._parse_qualified_name(reference)
+
+  -- Step 3: Determine which database to search in
+  local database = connection.database
+  local server = connection.server
+
+  -- Helper function to search in database once loaded
+  local function search_in_database(db)
+    local default_schema = Resolver._get_default_schema(connection.server)
+
+    -- Helper function to search in a collection of objects
+    local function search_in_collection(objects)
+      for _, obj in ipairs(objects) do
+        local obj_name = obj.name or obj.table_name or obj.view_name or obj.synonym_name
+        local obj_schema = obj.schema or obj.schema_name
+
+        if obj_name and obj_name:lower() == table_name:lower() then
+          if schema then
+            if obj_schema and obj_schema:lower() == schema:lower() then
+              if obj.object_type == 'synonym' then
+                return Resolver._resolve_synonym(obj, 10)
+              end
+              return obj
+            end
+          else
+            if default_schema and obj_schema and obj_schema:lower() == default_schema:lower() then
+              if obj.object_type == 'synonym' then
+                return Resolver._resolve_synonym(obj, 10)
+              end
+              return obj
+            elseif not default_schema then
+              if obj.object_type == 'synonym' then
+                return Resolver._resolve_synonym(obj, 10)
+              end
+              return obj
+            end
+          end
+        end
+      end
+
+      -- Second pass: if no default schema match found and no schema specified
+      if not schema then
+        for _, obj in ipairs(objects) do
+          local obj_name = obj.name or obj.table_name or obj.view_name or obj.synonym_name
+          if obj_name and obj_name:lower() == table_name:lower() then
+            if obj.object_type == 'synonym' then
+              return Resolver._resolve_synonym(obj, 10)
+            end
+            return obj
+          end
+        end
+      end
+
+      return nil
+    end
+
+    -- Search in tables
+    local tables = db:get_tables(schema)
+    local result = search_in_collection(tables)
+    if result then return result end
+
+    -- Search in views
+    local views = db:get_views(schema)
+    result = search_in_collection(views)
+    if result then return result end
+
+    -- Search in synonyms
+    local synonyms = db:get_synonyms(schema)
+    result = search_in_collection(synonyms)
+    if result then return result end
+
+    return nil
+  end
+
+  -- Function to handle database loading and searching
+  local function load_and_search(target_db)
+    if target_db.is_loaded then
+      -- Already loaded, search immediately
+      local result = search_in_database(target_db)
+      vim.schedule(function()
+        on_complete(result, nil)
+      end)
+    else
+      -- Need to load async
+      target_db:load_async({
+        timeout_ms = opts.timeout_ms or 5000,
+        on_complete = function(success, err)
+          if not success then
+            debug_log(string.format("[RESOLVER ASYNC] Failed to load database: %s", err or "unknown"))
+            on_complete(nil, err)
+            return
+          end
+          local result = search_in_database(target_db)
+          on_complete(result, nil)
+        end,
+      })
+    end
+  end
+
+  -- If reference specifies a different database, switch to it
+  if db_name and server then
+    local target_db = server:get_database(db_name)
+    if target_db then
+      database = target_db
+      debug_log(string.format("[RESOLVER ASYNC] Cross-database reference: switching to database '%s'", db_name))
+      load_and_search(target_db)
+    else
+      debug_log(string.format("[RESOLVER ASYNC] Cross-database reference: database '%s' not found on server", db_name))
+      vim.schedule(function()
+        on_complete(nil, nil)
+      end)
+    end
+    return
+  end
+
+  -- Load main database if needed and search
+  load_and_search(database)
+end
+
 ---Resolve table-valued function (TVF) columns from database metadata
 ---Looks up the function in the cached UI tree and returns its result columns
 ---@param function_name string The function name
