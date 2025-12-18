@@ -537,6 +537,139 @@ function FloatWindow:update_lines(lines)
   end
 end
 
+---@class FloatChunkedUpdateOpts
+---@field chunk_size number? Lines per chunk (default 100)
+---@field on_progress fun(written: number, total: number)? Progress callback
+---@field on_complete fun()? Completion callback
+
+---Active chunked update state
+---@type { timer: number?, cancelled: boolean }?
+FloatWindow._chunked_state = nil
+
+---Update window content in chunks to avoid blocking UI
+---For large line counts, writes lines in chunks with vim.schedule() between each
+---@param lines string[] New content lines
+---@param opts FloatChunkedUpdateOpts? Options for chunked update
+function FloatWindow:update_lines_chunked(lines, opts)
+  if not self:is_valid() then
+    if opts and opts.on_complete then opts.on_complete() end
+    return
+  end
+
+  opts = opts or {}
+  local chunk_size = opts.chunk_size or 100
+  local on_progress = opts.on_progress
+  local on_complete = opts.on_complete
+  local total_lines = #lines
+
+  -- Cancel any existing chunked update
+  self:cancel_chunked_update()
+
+  -- For small line counts, use sync update
+  if total_lines <= chunk_size then
+    self:update_lines(lines)
+    if on_progress then on_progress(total_lines, total_lines) end
+    if on_complete then on_complete() end
+    return
+  end
+
+  -- Initialize chunked state
+  self._chunked_state = {
+    timer = nil,
+    cancelled = false,
+  }
+
+  local state = self._chunked_state
+  local bufnr = self.bufnr
+  local current_idx = 1
+
+  -- Store lines for later (will be set after all chunks written)
+  local final_lines = lines
+
+  -- Make buffer modifiable for the duration of chunked write
+  vim.api.nvim_buf_set_option(bufnr, 'modifiable', true)
+
+  -- Clear buffer first
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
+
+  local float_self = self
+
+  local function write_next_chunk()
+    -- Check if cancelled or buffer no longer valid
+    if state.cancelled or not float_self:is_valid() then
+      float_self._chunked_state = nil
+      return
+    end
+
+    local end_idx = math.min(current_idx + chunk_size - 1, total_lines)
+
+    -- Extract chunk of lines
+    local chunk = {}
+    for i = current_idx, end_idx do
+      table.insert(chunk, lines[i])
+    end
+
+    -- Append chunk to buffer
+    local append_start = current_idx - 1  -- 0-indexed
+    vim.api.nvim_buf_set_lines(bufnr, append_start, append_start, false, chunk)
+
+    -- Report progress
+    if on_progress then
+      on_progress(end_idx, total_lines)
+    end
+
+    current_idx = end_idx + 1
+
+    if current_idx <= total_lines then
+      -- Schedule next chunk
+      state.timer = vim.fn.timer_start(0, function()
+        state.timer = nil
+        vim.schedule(write_next_chunk)
+      end)
+    else
+      -- All chunks written - finalize
+      float_self.lines = final_lines
+      vim.api.nvim_buf_set_option(bufnr, 'modifiable', float_self.config.modifiable)
+
+      -- Update scrollbar if enabled
+      if float_self.config.scrollbar then
+        Scrollbar.update(float_self)
+      end
+
+      float_self._chunked_state = nil
+
+      if on_complete then
+        on_complete()
+      end
+    end
+  end
+
+  -- Start writing first chunk
+  write_next_chunk()
+end
+
+---Cancel any in-progress chunked update
+function FloatWindow:cancel_chunked_update()
+  if self._chunked_state then
+    self._chunked_state.cancelled = true
+    if self._chunked_state.timer then
+      vim.fn.timer_stop(self._chunked_state.timer)
+      self._chunked_state.timer = nil
+    end
+    -- Restore buffer to configured modifiable state if it exists
+    if self:is_valid() then
+      pcall(vim.api.nvim_buf_set_option, self.bufnr, 'modifiable', self.config.modifiable)
+    end
+    self._chunked_state = nil
+  end
+end
+
+---Check if a chunked update is currently in progress
+---@return boolean
+function FloatWindow:is_chunked_update_active()
+  return self._chunked_state ~= nil and not self._chunked_state.cancelled
+end
+
 ---Close the floating window
 function FloatWindow:close()
   -- Clean up scrollbar first

@@ -325,33 +325,49 @@ function MultiPanelWindow:render_panel(panel_name)
   lines = lines or {}
   highlights = highlights or {}
 
-  -- Update buffer content using FloatWindow (handles scrollbar automatically)
-  panel.float:update_lines(lines)
+  -- Get chunked render threshold from config
+  local Config = require('ssns.config')
+  local ui_config = Config.get_ui()
+  local threshold = ui_config.chunked_render_threshold or 200
 
-  -- Apply panel-specific highlights
-  vim.api.nvim_buf_clear_namespace(panel.float.bufnr, panel.namespace, 0, -1)
-  for _, hl in ipairs(highlights) do
-    -- Support both array format {line, col_start, col_end, hl_group}
-    -- and named format {line=, col_start=, col_end=, hl_group=} from ContentBuilder
-    local line = hl.line or hl[1]
-    local col_start = hl.col_start or hl[2]
-    local col_end = hl.col_end or hl[3]
-    local hl_group = hl.hl_group or hl[4]
+  -- Helper to apply highlights (used in both sync and async paths)
+  local function apply_highlights()
+    vim.api.nvim_buf_clear_namespace(panel.float.bufnr, panel.namespace, 0, -1)
+    for _, hl in ipairs(highlights) do
+      -- Support both array format {line, col_start, col_end, hl_group}
+      -- and named format {line=, col_start=, col_end=, hl_group=} from ContentBuilder
+      local line = hl.line or hl[1]
+      local col_start = hl.col_start or hl[2]
+      local col_end = hl.col_end or hl[3]
+      local hl_group = hl.hl_group or hl[4]
 
-    if line and col_start and col_end and hl_group then
-      vim.api.nvim_buf_add_highlight(
-        panel.float.bufnr, panel.namespace,
-        hl_group, line, col_start, col_end
-      )
+      if line and col_start and col_end and hl_group then
+        vim.api.nvim_buf_add_highlight(
+          panel.float.bufnr, panel.namespace,
+          hl_group, line, col_start, col_end
+        )
+      end
+    end
+
+    -- Apply basic SQL highlighting if requested (tokenization-only, no DB connection)
+    if def.use_basic_highlighting then
+      local ok, SemanticHighlighter = pcall(require, 'ssns.highlighting.semantic')
+      if ok and SemanticHighlighter.apply_basic_highlighting then
+        SemanticHighlighter.apply_basic_highlighting(panel.float.bufnr)
+      end
     end
   end
 
-  -- Apply basic SQL highlighting if requested (tokenization-only, no DB connection)
-  if def.use_basic_highlighting then
-    local ok, SemanticHighlighter = pcall(require, 'ssns.highlighting.semantic')
-    if ok and SemanticHighlighter.apply_basic_highlighting then
-      SemanticHighlighter.apply_basic_highlighting(panel.float.bufnr)
-    end
+  -- Use chunked rendering for large panels
+  if #lines > threshold then
+    panel.float:update_lines_chunked(lines, {
+      chunk_size = 100,
+      on_complete = apply_highlights,
+    })
+  else
+    -- Sync rendering for small panels
+    panel.float:update_lines(lines)
+    apply_highlights()
   end
 end
 
