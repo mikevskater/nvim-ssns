@@ -33,6 +33,7 @@
 local Connections = {}
 
 local JsonUtils = require('ssns.utils.json')
+local FileIO = require('ssns.async.file_io')
 
 -- Current file format version
 local FILE_VERSION = 2
@@ -80,6 +81,36 @@ function Connections.load()
   return data.connections or {}
 end
 
+---Load connections from JSON file asynchronously
+---@param callback fun(connections: ConnectionData[], error: string?) Callback with connections array
+function Connections.load_async(callback)
+  local path = Connections.get_file_path()
+
+  -- Check if file exists first
+  FileIO.exists_async(path, function(exists, err)
+    if err then
+      callback({}, err)
+      return
+    end
+
+    if not exists then
+      callback({}, nil)
+      return
+    end
+
+    -- Read and parse JSON asynchronously
+    FileIO.read_json_async(path, function(data, read_err)
+      if read_err then
+        vim.notify("SSNS: Failed to parse connections file", vim.log.levels.WARN)
+        callback({}, read_err)
+        return
+      end
+
+      callback(data and data.connections or {}, nil)
+    end)
+  end)
+end
+
 ---Save connections to JSON file
 ---@param connections ConnectionData[] Array of connection objects
 ---@return boolean success
@@ -103,6 +134,34 @@ function Connections.save(connections)
   end
 
   return true
+end
+
+---Save connections to JSON file asynchronously
+---@param connections ConnectionData[] Array of connection objects
+---@param callback fun(success: boolean, error: string?) Callback with result
+function Connections.save_async(connections, callback)
+  -- Ensure directory exists first (sync, but fast)
+  Connections.ensure_directory()
+  local path = Connections.get_file_path()
+
+  local data = {
+    version = FILE_VERSION,
+    connections = connections,
+  }
+
+  -- Prettify using shared JsonUtils
+  local lines = JsonUtils.prettify_lines(data)
+  local content = table.concat(lines, "\n")
+
+  -- Write asynchronously
+  FileIO.write_async(path, content, function(result)
+    if not result.success then
+      vim.notify("SSNS: Failed to write connections file", vim.log.levels.ERROR)
+      callback(false, result.error)
+      return
+    end
+    callback(true, nil)
+  end)
 end
 
 ---Validate a connection data object
