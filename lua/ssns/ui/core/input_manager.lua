@@ -54,6 +54,9 @@ local _any_dropdown_open = false
 ---@field values table<string, string> Current input values
 ---@field original_keymaps table Stored original keymaps
 
+-- Debounce delay for TextChangedI rendering (ms)
+local TEXT_CHANGED_DEBOUNCE_MS = 30
+
 ---Create a new InputManager
 ---@param config InputManagerConfig
 ---@return InputManager
@@ -87,6 +90,7 @@ function InputManager.new(config)
   self.multi_dropdown_values = {}
   self._namespace = vim.api.nvim_create_namespace("ssns_input_manager")
   self._autocmd_group = nil
+  self._text_changed_timer = nil  -- Debounce timer for TextChangedI rendering
 
   -- Dropdown state (single-select)
   self._dropdown_open = false
@@ -229,14 +233,29 @@ function InputManager:setup()
   })
   
   -- Handle text changes in insert mode - sync value and adjust width in real-time
+  -- Uses debounce to prevent excessive re-rendering on rapid typing
   vim.api.nvim_create_autocmd("TextChangedI", {
     group = self._autocmd_group,
     buffer = self.bufnr,
     callback = function()
       if self.in_input_mode and self.active_input then
+        -- Always sync value immediately (lightweight operation)
         self:_sync_input_value()
-        -- Re-render to adjust width in real-time as user types
-        self:_render_input_realtime(self.active_input)
+
+        -- Debounce the re-render (heavier operation involving buffer updates)
+        if self._text_changed_timer then
+          vim.fn.timer_stop(self._text_changed_timer)
+        end
+        local active_key = self.active_input
+        self._text_changed_timer = vim.fn.timer_start(TEXT_CHANGED_DEBOUNCE_MS, function()
+          self._text_changed_timer = nil
+          vim.schedule(function()
+            -- Verify still in input mode for the same input
+            if self.in_input_mode and self.active_input == active_key then
+              self:_render_input_realtime(active_key)
+            end
+          end)
+        end)
       end
     end,
   })
@@ -2211,6 +2230,12 @@ function InputManager:destroy()
   -- Close any open multi-dropdown
   if self._multi_dropdown_open then
     self:_close_multi_dropdown(true)
+  end
+
+  -- Cancel any pending text change timer
+  if self._text_changed_timer then
+    vim.fn.timer_stop(self._text_changed_timer)
+    self._text_changed_timer = nil
   end
 
   if self._autocmd_group then
