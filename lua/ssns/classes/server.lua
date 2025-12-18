@@ -529,6 +529,121 @@ function ServerClass:load_async(opts)
   })
 end
 
+---Load databases from the server using true non-blocking RPC async
+---This method does NOT block the UI - the query runs in Node.js
+---and calls back when complete.
+---NOTE: Server must already be connected. Use connect_and_load_rpc_async() for combined operation.
+---@param opts ServerRPCAsyncOpts? Options
+---@return string callback_id Callback ID for tracking/cancellation
+function ServerClass:load_rpc_async(opts)
+  opts = opts or {}
+  local Connection = require('ssns.connection')
+
+  -- Already loaded - return immediately via callback
+  if self.is_loaded then
+    if opts.on_complete then
+      vim.schedule(function()
+        opts.on_complete(true, nil)
+      end)
+    end
+    return "already_loaded"
+  end
+
+  -- Must be connected to load databases
+  if not self:is_connected() then
+    if opts.on_complete then
+      vim.schedule(function()
+        opts.on_complete(false, "Server not connected. Call connect_rpc_async() first or use connect_and_load_rpc_async()")
+      end)
+    end
+    return "not_connected"
+  end
+
+  -- No adapter available
+  if not self.adapter then
+    if opts.on_complete then
+      vim.schedule(function()
+        opts.on_complete(false, self.error_message or "No adapter available")
+      end)
+    end
+    return "no_adapter"
+  end
+
+  -- Get the databases query from adapter (sync - just builds SQL string)
+  local query_success, query = pcall(self.adapter.get_databases_query, self.adapter)
+  if not query_success then
+    local err_msg = "Failed to get databases query: " .. tostring(query)
+    self.error_message = err_msg
+    if opts.on_complete then
+      vim.schedule(function()
+        opts.on_complete(false, err_msg)
+      end)
+    end
+    return "query_error"
+  end
+
+  -- Initialize databases array
+  self.databases = {}
+
+  local server_self = self  -- Capture self for callback
+
+  -- Execute via true async RPC (non-blocking)
+  return Connection.execute_rpc_async(self.connection_config, query, {
+    timeout_ms = opts.timeout_ms or 30000,
+    on_complete = function(result, err)
+      if err then
+        server_self.error_message = err
+        if opts.on_complete then
+          opts.on_complete(false, err)
+        end
+        return
+      end
+
+      if not result or not result.success then
+        local error_msg = (result and result.error and result.error.message) or "Failed to load databases"
+        server_self.error_message = error_msg
+        if opts.on_complete then
+          opts.on_complete(false, error_msg)
+        end
+        return
+      end
+
+      -- Parse databases from result
+      local parse_success, databases = pcall(server_self.adapter.parse_databases, server_self.adapter, result)
+      if not parse_success then
+        local error_msg = "Failed to parse databases: " .. tostring(databases)
+        server_self.error_message = error_msg
+        if opts.on_complete then
+          opts.on_complete(false, error_msg)
+        end
+        return
+      end
+
+      -- Create database objects
+      local DbClass = require('ssns.classes.database')
+      for _, db_data in ipairs(databases) do
+        local db = DbClass.new({
+          name = db_data.name,
+          parent = server_self,
+        })
+        table.insert(server_self.databases, db)
+      end
+
+      server_self.is_loaded = true
+
+      if opts.on_complete then
+        opts.on_complete(true, nil)
+      end
+    end,
+    on_error = function(err)
+      server_self.error_message = err
+      if opts.on_complete then
+        opts.on_complete(false, err)
+      end
+    end,
+  })
+end
+
 ---Connect and load databases asynchronously (combined operation)
 ---@param opts ServerAsyncOpts? Options
 ---@return string task_id Task ID for tracking/cancellation
@@ -564,6 +679,51 @@ function ServerClass:connect_and_load_async(opts)
     timeout_ms = opts.timeout_ms,
     cancel_token = opts.cancel_token,
     on_complete = opts.on_complete,
+  })
+end
+
+---Connect and load databases using true non-blocking RPC async (combined operation)
+---This method does NOT block the UI - both connection test and database load run in Node.js
+---and call back when complete.
+---@param opts ServerRPCAsyncOpts? Options
+---@return string callback_id Callback ID for tracking/cancellation
+function ServerClass:connect_and_load_rpc_async(opts)
+  opts = opts or {}
+
+  -- Already connected and loaded - return immediately via callback
+  if self:is_connected() and self.is_loaded then
+    if opts.on_complete then
+      vim.schedule(function()
+        opts.on_complete(true, nil)
+      end)
+    end
+    return "already_complete"
+  end
+
+  -- Already connected but not loaded - just load
+  if self:is_connected() then
+    return self:load_rpc_async(opts)
+  end
+
+  -- Not connected - connect first, then load
+  local server_self = self  -- Capture self for callback
+
+  return self:connect_rpc_async({
+    timeout_ms = opts.timeout_ms,
+    on_complete = function(success, err)
+      if not success then
+        if opts.on_complete then
+          opts.on_complete(false, err)
+        end
+        return
+      end
+
+      -- Connection successful - now load databases
+      server_self:load_rpc_async({
+        timeout_ms = opts.timeout_ms,
+        on_complete = opts.on_complete,
+      })
+    end,
   })
 end
 
