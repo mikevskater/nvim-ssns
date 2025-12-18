@@ -12,8 +12,19 @@ local enabled_buffers = {}
 -- Pending highlight timers per buffer (for minimal debounce)
 local pending_timers = {}
 
--- Debounce delay in ms (prevents excessive updates on rapid typing)
-local DEBOUNCE_MS = 50
+-- Default debounce delay in ms (fallback if config not available)
+local DEFAULT_DEBOUNCE_MS = 50
+
+---Get the debounce delay from config
+---@return number
+local function get_debounce_ms()
+  local ok, Config = pcall(require, 'ssns.config')
+  if ok then
+    local config = Config.get_semantic_highlighting()
+    return config.debounce_ms or DEFAULT_DEBOUNCE_MS
+  end
+  return DEFAULT_DEBOUNCE_MS
+end
 
 ---Setup the semantic highlighter (call once during plugin init)
 function SemanticHighlighter.setup()
@@ -30,8 +41,9 @@ local function schedule_update(bufnr)
     pending_timers[bufnr] = nil
   end
 
-  -- Schedule new update with minimal debounce
-  pending_timers[bufnr] = vim.fn.timer_start(DEBOUNCE_MS, function()
+  -- Schedule new update with configurable debounce
+  local debounce_ms = get_debounce_ms()
+  pending_timers[bufnr] = vim.fn.timer_start(debounce_ms, function()
     pending_timers[bufnr] = nil
     vim.schedule(function()
       if vim.api.nvim_buf_is_valid(bufnr) and enabled_buffers[bufnr] then

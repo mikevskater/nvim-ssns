@@ -238,6 +238,7 @@
 ---@field highlight_databases boolean Highlight database names (default: true)
 ---@field highlight_parameters boolean Highlight @parameters and @@system_variables (default: true)
 ---@field highlight_unresolved boolean Highlight unresolved identifiers (default: true)
+---@field debounce_ms number Debounce delay for highlighting updates (default: 50)
 
 ---@class FormatterConfig
 ---@field enabled boolean Enable/disable formatter (default: true)
@@ -257,6 +258,7 @@
 ---@field operator_spacing boolean Add space around operators (default: true)
 ---@field preserve_comments boolean Keep comments in place (default: true)
 ---@field format_on_save boolean Auto-format on buffer save (default: false)
+---@field async_threshold_bytes number File size threshold for async formatting (default: 50000)
 -- SELECT clause rules (Phase 1)
 ---@field select_list_style string "inline"|"stacked"|"stacked_indent" - Columns layout: inline=all on one line, stacked=one per line with first on SELECT line, stacked_indent=one per line with first on new line (default: "stacked")
 ---@field select_star_expand boolean Auto-expand SELECT * to column list (default: false)
@@ -825,6 +827,7 @@ local default_config = {
     highlight_databases = true,  -- Highlight database names
     highlight_parameters = true, -- Highlight @parameters and @@system_variables
     highlight_unresolved = true, -- Highlight unresolved identifiers in gray
+    debounce_ms = 50,            -- Debounce delay for highlighting updates (ms)
   },
 
   -- SQL formatter configuration
@@ -846,6 +849,7 @@ local default_config = {
     operator_spacing = true,     -- Add space around operators
     preserve_comments = true,    -- Keep comments in place
     format_on_save = false,      -- Auto-format on buffer save
+    async_threshold_bytes = 50000, -- File size threshold for async formatting (50KB)
 
     -- SELECT clause rules (Phase 1)
     select_list_style = "stacked",       -- "inline"|"stacked" - Columns layout
@@ -1218,6 +1222,16 @@ function Config.validate(config)
     end
   end
 
+  -- Validate semantic highlighting configuration
+  if config.semantic_highlighting then
+    if config.semantic_highlighting.enabled ~= nil and type(config.semantic_highlighting.enabled) ~= "boolean" then
+      return false, "semantic_highlighting.enabled must be a boolean"
+    end
+    if config.semantic_highlighting.debounce_ms and (type(config.semantic_highlighting.debounce_ms) ~= "number" or config.semantic_highlighting.debounce_ms < 0) then
+      return false, "semantic_highlighting.debounce_ms must be a non-negative number"
+    end
+  end
+
   -- Validate formatter configuration
   if config.formatter then
     if config.formatter.enabled ~= nil and type(config.formatter.enabled) ~= "boolean" then
@@ -1282,6 +1296,9 @@ function Config.validate(config)
     end
     if config.formatter.format_on_save ~= nil and type(config.formatter.format_on_save) ~= "boolean" then
       return false, "formatter.format_on_save must be a boolean"
+    end
+    if config.formatter.async_threshold_bytes and (type(config.formatter.async_threshold_bytes) ~= "number" or config.formatter.async_threshold_bytes < 0) then
+      return false, "formatter.async_threshold_bytes must be a non-negative number"
     end
   end
 
