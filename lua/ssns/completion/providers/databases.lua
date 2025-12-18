@@ -54,4 +54,31 @@ function DatabasesProvider._get_completions_impl(ctx)
   return items
 end
 
+-- ============================================================================
+-- Async Methods
+-- ============================================================================
+
+---@class DatabasesProviderAsyncOpts
+---@field on_complete fun(items: table[], error: string?)? Completion callback
+
+---Get database completions asynchronously
+---@param ctx table Context { bufnr, connection, sql_context }
+---@param opts DatabasesProviderAsyncOpts? Options with on_complete callback
+function DatabasesProvider.get_completions_async(ctx, opts)
+  opts = opts or {}
+  local on_complete = opts.on_complete or function() end
+
+  -- Databases are already cached on server, just schedule sync impl
+  vim.schedule(function()
+    local success, result = pcall(function()
+      return DatabasesProvider._get_completions_impl(ctx)
+    end)
+    if success then
+      on_complete(result or {}, nil)
+    else
+      on_complete({}, tostring(result))
+    end
+  end)
+end
+
 return DatabasesProvider
