@@ -168,6 +168,10 @@ function Ssns.setup(user_config)
   local Snippets = require('ssns.completion.data.snippets')
   Snippets.init_async()
 
+  -- Pre-load lualine colors cache asynchronously
+  local LualineColors = require('ssns.lualine_colors')
+  LualineColors.init_async()
+
   -- Register commands via commands module
   local Commands = require('ssns.commands')
   Commands.register()

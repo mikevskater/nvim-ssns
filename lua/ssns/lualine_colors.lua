@@ -2,6 +2,11 @@
 ---Provides interactive color setting and persistence for server/database connections
 local M = {}
 
+-- Cache for loaded colors (to avoid repeated file reads)
+local colors_cache = nil
+local cache_timestamp = 0
+local CACHE_TTL_MS = 5000  -- 5 seconds cache TTL
+
 ---Prompt user to set color for a server or database
 ---@param name string Server or database name
 ---@param is_server boolean True if setting color for server, false for database
@@ -199,6 +204,121 @@ function M.list_colors()
   for conn, color in pairs(colors) do
     print(string.format('  %s: %s', conn, vim.inspect(color)))
   end
+end
+
+-- ============================================================================
+-- Async Methods
+-- ============================================================================
+
+---Get the colors file path
+---@return string path
+local function get_colors_file_path()
+  return vim.fn.stdpath('data') .. '/ssns/lualine_colors.json'
+end
+
+---Check if cache is still valid
+---@return boolean
+local function is_cache_valid()
+  if not colors_cache then return false end
+  local elapsed = (vim.loop.hrtime() - cache_timestamp) / 1e6
+  return elapsed < CACHE_TTL_MS
+end
+
+---Invalidate the colors cache
+function M.invalidate_cache()
+  colors_cache = nil
+  cache_timestamp = 0
+end
+
+---Get the current cache (for sync access from lualine component)
+---Returns nil if cache not yet populated
+---@return table? cached_colors
+function M._get_cache()
+  return colors_cache
+end
+
+---Load colors from file asynchronously
+---@param callback fun(colors: table?, error: string?)
+function M.load_colors_async(callback)
+  -- Return cached if valid
+  if is_cache_valid() then
+    callback(colors_cache, nil)
+    return
+  end
+
+  local FileIO = require('ssns.async.file_io')
+  local colors_file = get_colors_file_path()
+
+  FileIO.exists_async(colors_file, function(exists)
+    if not exists then
+      colors_cache = {}
+      cache_timestamp = vim.loop.hrtime()
+      callback({}, nil)
+      return
+    end
+
+    FileIO.read_json_async(colors_file, function(data, err)
+      if err then
+        callback(nil, err)
+        return
+      end
+
+      colors_cache = data or {}
+      cache_timestamp = vim.loop.hrtime()
+      callback(colors_cache, nil)
+    end)
+  end)
+end
+
+---Get color for a connection asynchronously
+---@param name string Server or database name
+---@param callback fun(color: table?)
+function M.get_color_async(name, callback)
+  M.load_colors_async(function(colors, err)
+    if err or not colors then
+      callback(nil)
+      return
+    end
+
+    -- Check exact match first
+    if colors[name] then
+      callback(colors[name])
+      return
+    end
+
+    -- Check pattern matches
+    for pattern, color in pairs(colors) do
+      local lua_pattern = pattern:gsub('%*', '.*'):gsub('%?', '.')
+      if name:match(lua_pattern) then
+        callback(color)
+        return
+      end
+    end
+
+    callback(nil)
+  end)
+end
+
+---List all saved colors asynchronously
+---@param callback fun(colors: table?, error: string?)
+function M.list_colors_async(callback)
+  M.load_colors_async(function(colors, err)
+    if err then
+      callback(nil, err)
+      return
+    end
+    callback(colors or {}, nil)
+  end)
+end
+
+---Initialize colors cache asynchronously (call at startup)
+---@param callback fun(success: boolean)?
+function M.init_async(callback)
+  M.load_colors_async(function(_, err)
+    if callback then
+      callback(not err)
+    end
+  end)
 end
 
 return M

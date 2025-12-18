@@ -45,12 +45,32 @@
 
 local M = {}
 
--- Load saved colors from JSON file
+-- Load saved colors from JSON file (uses cached lualine_colors module)
 local function load_colors_from_file()
-  -- Get save location from config
-  local Config = require('ssns.config')
-  local config = Config.get()
+  -- Use the lualine_colors module which has caching
+  local ok, lualine_colors = pcall(require, 'ssns.lualine_colors')
+  if ok then
+    -- Try to get from cache first (sync call, but uses cached data)
+    -- The cache is populated asynchronously at startup
+    local colors_ok, colors = pcall(function()
+      -- Check if cache is populated
+      if lualine_colors._get_cache then
+        return lualine_colors._get_cache() or {}
+      end
+      -- Fallback to sync load if no cache method
+      return load_colors_from_file_sync()
+    end)
+    if colors_ok then
+      return colors
+    end
+  end
 
+  -- Fallback to direct file read if module not available
+  return load_colors_from_file_sync()
+end
+
+-- Direct sync file read (fallback)
+local function load_colors_from_file_sync()
   local save_location = vim.fn.stdpath('data') .. '/ssns'
   local colors_file = save_location .. '/lualine_colors.json'
 
@@ -66,6 +86,7 @@ local function load_colors_from_file()
   end
 
   local json_str = table.concat(content, '\n')
+  local saved_colors
   ok, saved_colors = pcall(vim.json.decode, json_str)
   if not ok then
     return {}
