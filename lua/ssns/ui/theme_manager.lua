@@ -457,6 +457,48 @@ function ThemeManager.load_preference()
   end
 end
 
+---Save theme preference asynchronously
+---@param callback fun(success: boolean)? Optional callback
+function ThemeManager.save_preference_async(callback)
+  local FileIO = require('ssns.async.file_io')
+  local content = current_theme or ""
+
+  FileIO.write_async(persistence_file, content, function(result)
+    if not result.success then
+      vim.notify("SSNS: Failed to save theme preference", vim.log.levels.WARN)
+    end
+    if callback then
+      callback(result.success)
+    end
+  end)
+end
+
+---Load theme preference from file asynchronously
+---@param callback fun(theme: string?) Callback with loaded theme name
+function ThemeManager.load_preference_async(callback)
+  local FileIO = require('ssns.async.file_io')
+
+  FileIO.exists_async(persistence_file, function(exists)
+    if not exists then
+      callback(nil)
+      return
+    end
+
+    FileIO.read_async(persistence_file, function(result)
+      if result.success and result.data and result.data ~= "" then
+        -- Trim whitespace/newlines
+        local theme = result.data:match("^%s*(.-)%s*$")
+        if theme and theme ~= "" then
+          current_theme = theme
+          callback(theme)
+          return
+        end
+      end
+      callback(nil)
+    end)
+  end)
+end
+
 ---Refresh all open SSNS buffers to use current theme
 function ThemeManager.refresh_open_buffers()
   -- Refresh tree buffer if open
