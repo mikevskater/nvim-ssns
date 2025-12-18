@@ -777,35 +777,36 @@ function TreeActions.toggle_favorite(UiTree)
     return
   end
 
-  -- Check if this server has a saved connection
-  local conn = Connections.find(obj.name)
-  if not conn then
-    -- Offer to save the connection first
-    vim.notify(string.format("'%s' is not saved. Use :SSNSAddServer to save it first.", obj.name), vim.log.levels.WARN)
-    return
-  end
-
-  -- Toggle favorite
-  local success, new_state = Connections.toggle_favorite(obj.name)
-
-  if success then
-    local status = new_state and "added to" or "removed from"
-    vim.notify(string.format("'%s' %s favorites", obj.name, status), vim.log.levels.INFO)
-
-    -- Re-render tree to show updated star icon
-    UiTree.render()
-
-    -- Restore cursor position with smart column
-    local col = smart_positioning and Buffer.get_name_column(line_number) or 0
-    Buffer.set_cursor(line_number, col)
-    if smart_positioning then
-      Buffer.last_indent_info = {
-        line = line_number,
-        indent_level = Buffer.get_indent_level(line_number),
-        column = col,
-      }
+  -- Check if this server has a saved connection (async)
+  Connections.find_async(obj.name, function(conn, _)
+    if not conn then
+      -- Offer to save the connection first
+      vim.notify(string.format("'%s' is not saved. Use :SSNSAddServer to save it first.", obj.name), vim.log.levels.WARN)
+      return
     end
-  end
+
+    -- Toggle favorite (async)
+    Connections.toggle_favorite_async(obj.name, function(success, new_state, _)
+      if success then
+        local status = new_state and "added to" or "removed from"
+        vim.notify(string.format("'%s' %s favorites", obj.name, status), vim.log.levels.INFO)
+
+        -- Re-render tree to show updated star icon
+        UiTree.render()
+
+        -- Restore cursor position with smart column
+        local col = smart_positioning and Buffer.get_name_column(line_number) or 0
+        Buffer.set_cursor(line_number, col)
+        if smart_positioning then
+          Buffer.last_indent_info = {
+            line = line_number,
+            indent_level = Buffer.get_indent_level(line_number),
+            column = col,
+          }
+        end
+      end
+    end)
+  end)
 end
 
 ---Set lualine color for current server or database

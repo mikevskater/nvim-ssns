@@ -517,18 +517,22 @@ function AddServerUI.delete_selected()
     return
   end
 
-  -- Remove from file
-  if Connections.remove(conn.name) then
-    vim.notify(string.format("Deleted '%s'", conn.name), vim.log.levels.INFO)
+  -- Remove from file (async)
+  Connections.remove_async(conn.name, function(success, err)
+    if success then
+      vim.notify(string.format("Deleted '%s'", conn.name), vim.log.levels.INFO)
 
-    -- Adjust selected index if needed
-    if selected_index > #connections_list - 1 then
-      selected_index = math.max(1, #connections_list - 1)
+      -- Adjust selected index if needed
+      if selected_index > #connections_list - 1 then
+        selected_index = math.max(1, #connections_list - 1)
+      end
+
+      -- Refresh list
+      AddServerUI.show_connection_list()
+    elseif err then
+      vim.notify(string.format("Failed to delete: %s", err), vim.log.levels.ERROR)
     end
-
-    -- Refresh list
-    AddServerUI.show_connection_list()
-  end
+  end)
 end
 
 ---Edit the selected connection
@@ -556,20 +560,21 @@ function AddServerUI.toggle_favorite_selected()
     return
   end
 
-  local success, new_state = Connections.toggle_favorite(conn.name)
+  -- Toggle favorite (async)
+  Connections.toggle_favorite_async(conn.name, function(success, new_state, _)
+    if success then
+      local status = new_state and "added to" or "removed from"
+      vim.notify(string.format("'%s' %s favorites", conn.name, status), vim.log.levels.INFO)
 
-  if success then
-    local status = new_state and "added to" or "removed from"
-    vim.notify(string.format("'%s' %s favorites", conn.name, status), vim.log.levels.INFO)
+      -- Refresh list
+      AddServerUI.show_connection_list()
 
-    -- Refresh list
-    AddServerUI.show_connection_list()
-
-    -- Restore cursor position
-    if current_float and current_float:is_valid() then
-      current_float:set_cursor(1 + selected_index, 0)
+      -- Restore cursor position
+      if current_float and current_float:is_valid() then
+        current_float:set_cursor(1 + selected_index, 0)
+      end
     end
-  end
+  end)
 end
 
 ---Show the new connection form
@@ -884,26 +889,12 @@ function AddServerUI.save_connection(form_state, edit_connection)
   -- Build structured connection data
   local connection = build_connection_data(form_state)
 
-  local success
-  if edit_connection then
-    -- Update existing
-    success = Connections.update(edit_connection.name, connection)
-    if success then
-      vim.notify(string.format("Updated '%s'", connection.name), vim.log.levels.INFO)
-    end
-  else
-    -- Add new
-    success = Connections.add(connection)
-    if success then
-      vim.notify(string.format("Saved '%s'", connection.name), vim.log.levels.INFO)
-    end
-  end
-
-  if success then
+  -- Common post-save handler
+  local function on_save_success()
     -- If favorite is set, automatically add to tree (if not already there)
     if connection.favorite or connection.auto_connect then
       if not Cache.server_exists(connection.name) then
-        local server, err = Cache.add_server_from_connection(connection)
+        local server, _ = Cache.add_server_from_connection(connection)
         if server then
           -- If auto_connect, also connect the server
           if connection.auto_connect then
@@ -918,6 +909,28 @@ function AddServerUI.save_connection(form_state, edit_connection)
 
     -- Reload list and show it (async load + render)
     AddServerUI.show_connection_list()
+  end
+
+  if edit_connection then
+    -- Update existing (async)
+    Connections.update_async(edit_connection.name, connection, function(success, err)
+      if success then
+        vim.notify(string.format("Updated '%s'", connection.name), vim.log.levels.INFO)
+        on_save_success()
+      elseif err then
+        vim.notify(string.format("Failed to update: %s", err), vim.log.levels.ERROR)
+      end
+    end)
+  else
+    -- Add new (async)
+    Connections.add_async(connection, function(success, err)
+      if success then
+        vim.notify(string.format("Saved '%s'", connection.name), vim.log.levels.INFO)
+        on_save_success()
+      elseif err then
+        vim.notify(string.format("Failed to save: %s", err), vim.log.levels.ERROR)
+      end
+    end)
   end
 end
 
