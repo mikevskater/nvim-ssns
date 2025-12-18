@@ -380,6 +380,129 @@ function TablesProvider._collect_databases(server)
   return items
 end
 
+-- ============================================================================
+-- Async Methods
+-- ============================================================================
+
+---@class TablesProviderAsyncOpts
+---@field on_complete fun(items: table[], error: string?)? Completion callback
+---@field timeout_ms number? Timeout in milliseconds (default: 5000)
+
+---Get table/view/synonym completions asynchronously
+---Non-blocking version that loads databases async before collecting items
+---@param ctx table Context from source
+---@param opts TablesProviderAsyncOpts? Options with on_complete callback
+function TablesProvider.get_completions_async(ctx, opts)
+  opts = opts or {}
+  local on_complete = opts.on_complete or function() end
+
+  local connection_info = ctx.connection
+  if not connection_info then
+    vim.schedule(function()
+      on_complete({}, nil)
+    end)
+    return
+  end
+
+  local server = connection_info.server
+  local database = connection_info.database
+
+  if not server or not server:is_connected() then
+    vim.schedule(function()
+      on_complete({}, nil)
+    end)
+    return
+  end
+
+  if not database then
+    vim.schedule(function()
+      on_complete({}, nil)
+    end)
+    return
+  end
+
+  -- Get sql_context for filter_database
+  local sql_context = ctx.sql_context or {}
+  local filter_database = sql_context.filter_database
+
+  -- Determine all databases that need to be loaded
+  local databases_to_load = {}
+  table.insert(databases_to_load, database)
+
+  -- If cross-database reference, also need to load target database
+  local target_db = database
+  if filter_database and server then
+    target_db = server:get_database(filter_database)
+    if target_db and target_db ~= database then
+      table.insert(databases_to_load, target_db)
+    end
+  end
+
+  if not target_db then
+    vim.schedule(function()
+      on_complete({}, nil)
+    end)
+    return
+  end
+
+  -- Load all databases async using callback aggregation
+  local pending = 0
+  local has_error = false
+
+  for _, db in ipairs(databases_to_load) do
+    if not db.is_loaded then
+      pending = pending + 1
+    end
+  end
+
+  -- If all databases are already loaded, run sync impl immediately
+  if pending == 0 then
+    vim.schedule(function()
+      local success, result = pcall(function()
+        return TablesProvider._get_completions_impl(ctx)
+      end)
+      if success then
+        on_complete(result or {}, nil)
+      else
+        on_complete({}, tostring(result))
+      end
+    end)
+    return
+  end
+
+  -- Load databases async
+  local function check_complete()
+    pending = pending - 1
+    if pending == 0 and not has_error then
+      -- All databases loaded, now run sync impl
+      local success, result = pcall(function()
+        return TablesProvider._get_completions_impl(ctx)
+      end)
+      if success then
+        on_complete(result or {}, nil)
+      else
+        on_complete({}, tostring(result))
+      end
+    end
+  end
+
+  for _, db in ipairs(databases_to_load) do
+    if not db.is_loaded then
+      db:load_async({
+        timeout_ms = opts.timeout_ms or 5000,
+        on_complete = function(success, err)
+          if not success and not has_error then
+            has_error = true
+            on_complete({}, err)
+            return
+          end
+          check_complete()
+        end,
+      })
+    end
+  end
+end
+
 ---Collect schema completion items from database (for qualified queries)
 ---@param database table Database object
 ---@return table[] items Array of CompletionItems
