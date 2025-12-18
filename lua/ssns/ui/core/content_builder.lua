@@ -1044,16 +1044,153 @@ end
 ---@return number ns_id The namespace ID used
 function ContentBuilder:render_to_buffer(bufnr, ns_id)
   local lines = self:build_lines()
-  
+
   -- Set buffer content
   vim.api.nvim_buf_set_option(bufnr, 'modifiable', true)
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
   vim.api.nvim_buf_set_option(bufnr, 'modifiable', false)
-  
+
   -- Apply highlights
   ns_id = self:apply_to_buffer(bufnr, ns_id)
-  
+
   return lines, ns_id
+end
+
+---@class ChunkedRenderOpts
+---@field chunk_size number? Lines per chunk (default 100)
+---@field on_progress fun(written: number, total: number)? Progress callback
+---@field on_complete fun(lines: string[], ns_id: number)? Completion callback
+
+---Active chunked render state (per buffer)
+---@type table<number, { timer: number?, cancelled: boolean }>
+ContentBuilder._chunked_state = {}
+
+---Build everything and apply to a buffer in chunks to avoid blocking UI
+---For large line counts, this writes lines and applies highlights in chunks
+---@param bufnr number Buffer number
+---@param ns_id number? Namespace ID
+---@param opts ChunkedRenderOpts? Options for chunked rendering
+function ContentBuilder:render_to_buffer_chunked(bufnr, ns_id, opts)
+  local lines = self:build_lines()
+  local highlights = self:build_highlights()
+
+  opts = opts or {}
+  local chunk_size = opts.chunk_size or 100
+  local on_progress = opts.on_progress
+  local on_complete = opts.on_complete
+  local total_lines = #lines
+
+  ns_id = ns_id or vim.api.nvim_create_namespace("ssns_content_builder")
+
+  -- Cancel any existing chunked render for this buffer
+  ContentBuilder.cancel_chunked_render(bufnr)
+
+  -- For small line counts, use sync render
+  if total_lines <= chunk_size then
+    self:render_to_buffer(bufnr, ns_id)
+    if on_progress then on_progress(total_lines, total_lines) end
+    if on_complete then on_complete(lines, ns_id) end
+    return
+  end
+
+  -- Initialize chunked state for this buffer
+  ContentBuilder._chunked_state[bufnr] = {
+    timer = nil,
+    cancelled = false,
+  }
+
+  local state = ContentBuilder._chunked_state[bufnr]
+  local current_idx = 1
+
+  -- Make buffer modifiable for the duration of chunked write
+  vim.api.nvim_buf_set_option(bufnr, 'modifiable', true)
+
+  -- Clear buffer first
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
+
+  -- Clear existing highlights
+  vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
+
+  local function write_next_chunk()
+    -- Check if cancelled or buffer no longer valid
+    if state.cancelled or not vim.api.nvim_buf_is_valid(bufnr) then
+      ContentBuilder._chunked_state[bufnr] = nil
+      return
+    end
+
+    local end_idx = math.min(current_idx + chunk_size - 1, total_lines)
+
+    -- Extract chunk of lines
+    local chunk = {}
+    for i = current_idx, end_idx do
+      table.insert(chunk, lines[i])
+    end
+
+    -- Append chunk to buffer
+    local append_start = current_idx - 1  -- 0-indexed
+    vim.api.nvim_buf_set_lines(bufnr, append_start, append_start, false, chunk)
+
+    -- Apply highlights for lines in this chunk
+    for _, hl in ipairs(highlights) do
+      local line_0idx = hl.line
+      local line_1idx = line_0idx + 1  -- Convert to 1-indexed for comparison
+      if line_1idx >= current_idx and line_1idx <= end_idx then
+        pcall(vim.api.nvim_buf_add_highlight, bufnr, ns_id, hl.hl_group, line_0idx, hl.col_start, hl.col_end)
+      end
+    end
+
+    -- Report progress
+    if on_progress then
+      on_progress(end_idx, total_lines)
+    end
+
+    current_idx = end_idx + 1
+
+    if current_idx <= total_lines then
+      -- Schedule next chunk
+      state.timer = vim.fn.timer_start(0, function()
+        state.timer = nil
+        vim.schedule(write_next_chunk)
+      end)
+    else
+      -- All chunks written - finalize
+      vim.api.nvim_buf_set_option(bufnr, 'modifiable', false)
+      ContentBuilder._chunked_state[bufnr] = nil
+
+      if on_complete then
+        on_complete(lines, ns_id)
+      end
+    end
+  end
+
+  -- Start writing first chunk
+  write_next_chunk()
+end
+
+---Cancel any in-progress chunked render for a buffer
+---@param bufnr number Buffer number
+function ContentBuilder.cancel_chunked_render(bufnr)
+  local state = ContentBuilder._chunked_state[bufnr]
+  if state then
+    state.cancelled = true
+    if state.timer then
+      vim.fn.timer_stop(state.timer)
+      state.timer = nil
+    end
+    -- Restore buffer to non-modifiable state if it exists
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      pcall(vim.api.nvim_buf_set_option, bufnr, 'modifiable', false)
+    end
+    ContentBuilder._chunked_state[bufnr] = nil
+  end
+end
+
+---Check if a chunked render is currently in progress for a buffer
+---@param bufnr number Buffer number
+---@return boolean
+function ContentBuilder.is_chunked_render_active(bufnr)
+  local state = ContentBuilder._chunked_state[bufnr]
+  return state ~= nil and not state.cancelled
 end
 
 ---Get available style names

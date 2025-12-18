@@ -616,8 +616,22 @@ function QueryResults.display_results(result, sql, execution_time_ms, query_bufn
   -- Clear any existing highlights in this namespace
   vim.api.nvim_buf_clear_namespace(result_buf, ns_id, 0, -1)
 
-  -- Render styled content to buffer (sets lines and applies highlights)
-  builder:render_to_buffer(result_buf, ns_id)
+  -- Get chunked render threshold from config (reuse UI threshold)
+  local Config = require('ssns.config')
+  local ui_config = Config.get_ui()
+  local threshold = ui_config.chunked_render_threshold or 200
+
+  -- Check estimated line count (fast approximation from builder)
+  local estimated_lines = #builder:build_lines()
+
+  -- Render styled content to buffer (use chunked rendering for large results)
+  if estimated_lines > threshold then
+    builder:render_to_buffer_chunked(result_buf, ns_id, {
+      chunk_size = 100,
+    })
+  else
+    builder:render_to_buffer(result_buf, ns_id)
+  end
 
   -- Check if buffer is already visible in a window
   local result_win = nil
@@ -711,7 +725,23 @@ function QueryResults.toggle_results(query_bufnr)
 
     -- Create namespace and render styled content
     local ns_id = vim.api.nvim_create_namespace("ssns_results")
-    builder:render_to_buffer(result_buf, ns_id)
+
+    -- Get chunked render threshold from config
+    local Config = require('ssns.config')
+    local ui_config = Config.get_ui()
+    local threshold = ui_config.chunked_render_threshold or 200
+
+    -- Check estimated line count
+    local estimated_lines = #builder:build_lines()
+
+    -- Use chunked rendering for large results
+    if estimated_lines > threshold then
+      builder:render_to_buffer_chunked(result_buf, ns_id, {
+        chunk_size = 100,
+      })
+    else
+      builder:render_to_buffer(result_buf, ns_id)
+    end
   end
 
   -- Check if buffer is visible in a window
