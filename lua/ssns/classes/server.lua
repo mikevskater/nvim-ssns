@@ -428,6 +428,88 @@ function ServerClass:connect_async(opts)
   })
 end
 
+---@class ServerRPCAsyncOpts
+---@field timeout_ms number? Timeout in milliseconds (default: 30000)
+---@field on_complete fun(success: boolean, error: string?)? Completion callback
+
+---Connect to the database server using true non-blocking RPC async
+---This method does NOT block the UI - the connection test runs in Node.js
+---and calls back when complete.
+---@param opts ServerRPCAsyncOpts? Options
+---@return string callback_id Callback ID for tracking/cancellation
+function ServerClass:connect_rpc_async(opts)
+  opts = opts or {}
+  local Connection = require('ssns.connection')
+
+  -- Already connected - return immediately via callback
+  if self.connection_state == ConnectionState.CONNECTED then
+    if opts.on_complete then
+      vim.schedule(function()
+        opts.on_complete(true, nil)
+      end)
+    end
+    return "already_connected"
+  end
+
+  -- No adapter available
+  if not self.adapter then
+    if opts.on_complete then
+      vim.schedule(function()
+        opts.on_complete(false, self.error_message or "No adapter available")
+      end)
+    end
+    return "no_adapter"
+  end
+
+  -- Set state to connecting
+  self.connection_state = ConnectionState.CONNECTING
+  self.error_message = nil
+
+  -- Use true async RPC to test connection (SELECT 1 AS test)
+  local test_query = "SELECT 1 AS test"
+  local server_self = self  -- Capture self for callback
+
+  return Connection.execute_rpc_async(self.connection_config, test_query, {
+    timeout_ms = opts.timeout_ms or 30000,
+    on_complete = function(result, err)
+      if err then
+        server_self.connection_state = ConnectionState.ERROR
+        server_self.error_message = err
+        if opts.on_complete then
+          opts.on_complete(false, err)
+        end
+        return
+      end
+
+      if not result or not result.success then
+        local error_msg = (result and result.error and result.error.message) or "Connection test failed"
+        server_self.connection_state = ConnectionState.ERROR
+        server_self.error_message = error_msg
+        if opts.on_complete then
+          opts.on_complete(false, error_msg)
+        end
+        return
+      end
+
+      -- Connection successful - create/get connection from pool
+      server_self.connection = Connection.get_or_create(server_self.connection_config)
+      server_self.connection_state = ConnectionState.CONNECTED
+      server_self.last_connected_at = os.time()
+
+      if opts.on_complete then
+        opts.on_complete(true, nil)
+      end
+    end,
+    on_error = function(err)
+      server_self.connection_state = ConnectionState.ERROR
+      server_self.error_message = err
+      if opts.on_complete then
+        opts.on_complete(false, err)
+      end
+    end,
+  })
+end
+
 ---Load databases from the server asynchronously
 ---@param opts ServerAsyncOpts? Options
 ---@return string task_id Task ID for tracking/cancellation
