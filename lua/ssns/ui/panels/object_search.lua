@@ -904,9 +904,10 @@ end
 ---@param text string Text to search in
 ---@param pattern string Search pattern
 ---@param regex table? Compiled regex
+---@param pattern_lower string? Pre-computed lowercase pattern (for case-insensitive searches)
 ---@return boolean matched
 ---@return string? matched_text
-local function text_matches_pattern(text, pattern, regex)
+local function text_matches_pattern(text, pattern, regex, pattern_lower)
   if not text or text == "" then
     return false, nil
   end
@@ -923,7 +924,8 @@ local function text_matches_pattern(text, pattern, regex)
     local search_for = pattern
     if not ui_state.case_sensitive then
       search_in = text:lower()
-      search_for = pattern:lower()
+      -- Use pre-computed lowercase pattern if available
+      search_for = pattern_lower or pattern:lower()
     end
 
     if ui_state.whole_word then
@@ -978,6 +980,8 @@ function UiObjectSearch._apply_search(pattern)
 
   local filtered = {}
   local regex = nil
+  -- Pre-compute lowercase pattern once (optimization to avoid repeated string:lower() calls)
+  local pattern_lower = not ui_state.case_sensitive and pattern:lower() or nil
 
   -- Compile regex if in regex mode
   if ui_state.use_regex then
@@ -1019,7 +1023,7 @@ function UiObjectSearch._apply_search(pattern)
 
     -- Search in name
     if ui_state.search_names then
-      local matched, matched_text = text_matches_pattern(searchable.name, pattern, regex)
+      local matched, matched_text = text_matches_pattern(searchable.name, pattern, regex, pattern_lower)
       if matched then
         matched_name = true
         table.insert(match_details, { field = "name", matched_text = matched_text or "" })
@@ -1030,7 +1034,7 @@ function UiObjectSearch._apply_search(pattern)
     if ui_state.search_definitions and not matched_name then
       local definition = load_definition(searchable)
       if definition then
-        local matched, matched_text = text_matches_pattern(definition, pattern, regex)
+        local matched, matched_text = text_matches_pattern(definition, pattern, regex, pattern_lower)
         if matched then
           matched_def = true
           table.insert(match_details, { field = "definition", matched_text = matched_text or "" })
@@ -1042,7 +1046,7 @@ function UiObjectSearch._apply_search(pattern)
     if ui_state.search_metadata and not matched_name and not matched_def then
       local metadata = load_metadata_text(searchable)
       if metadata then
-        local matched, matched_text = text_matches_pattern(metadata, pattern, regex)
+        local matched, matched_text = text_matches_pattern(metadata, pattern, regex, pattern_lower)
         if matched then
           matched_meta = true
           table.insert(match_details, { field = "metadata", matched_text = matched_text or "" })
