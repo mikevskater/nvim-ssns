@@ -288,9 +288,93 @@ function TreeActions.load_node_async(UiTree, obj, line_number)
     hl_group = "Comment",
   })
 
-  -- Force display update before blocking RPC call
+  -- Force display update before RPC call
   vim.cmd('redraw')
 
+  -- Common completion handler for both async paths
+  local function handle_load_complete(success, err)
+    -- Stop the animated spinner
+    Spinner.stop(spinner_id)
+
+    -- Clear loading state and cancel function
+    obj.ui_state.loading = false
+    obj._cancel_load = nil
+
+    -- Handle cancellation
+    if err and (tostring(err):match("cancelled") or tostring(err):match("Cancelled")) then
+      -- Silently handle cancellation - don't show error
+      UiTree.render()
+      return
+    end
+
+    -- Handle errors
+    if err then
+      obj.ui_state.error = tostring(err)
+      vim.notify(string.format("SSNS: Failed to load %s: %s", obj.name, err), vim.log.levels.ERROR)
+      UiTree.render()
+      return
+    end
+
+    -- Check if load failed
+    if not success then
+      local error_msg = obj.error_message or "Unknown error"
+      obj.ui_state.error = error_msg
+      vim.notify(string.format("SSNS: Failed to load %s: %s", obj.name, error_msg), vim.log.levels.ERROR)
+    end
+
+    -- Re-render tree with results or error
+    UiTree.render()
+
+    -- Position cursor at first child if loaded successfully
+    if success and obj:has_children() then
+      local child_line = line_number + 1
+      local child_col = smart_positioning and Buffer.get_name_column(child_line) or 0
+      Buffer.set_cursor(child_line, child_col)
+      -- Update indent tracking
+      if smart_positioning then
+        Buffer.last_indent_info = {
+          line = child_line,
+          indent_level = Buffer.get_indent_level(child_line),
+          column = child_col,
+        }
+      end
+    else
+      -- Error or no children, stay on current line
+      local current_col = smart_positioning and Buffer.get_name_column(line_number) or 0
+      Buffer.set_cursor(line_number, current_col)
+      -- Update indent tracking
+      if smart_positioning then
+        Buffer.last_indent_info = {
+          line = line_number,
+          indent_level = Buffer.get_indent_level(line_number),
+          column = current_col,
+        }
+      end
+    end
+  end
+
+  -- Check if object supports true async RPC (ServerClass)
+  if obj.load_rpc_async then
+    -- Use true non-blocking RPC async - UI stays responsive
+    local callback_id = obj:load_rpc_async({
+      timeout_ms = 60000, -- 60 seconds for metadata loads
+      on_complete = handle_load_complete,
+    })
+
+    -- Store cancel function for external cancellation
+    obj._cancel_load = function()
+      local AsyncRPC = require('ssns.async.rpc')
+      AsyncRPC.cancel(callback_id)
+      Spinner.stop(spinner_id)
+      obj.ui_state.loading = false
+      obj._cancel_load = nil
+      UiTree.render()
+    end
+
+    return -- Early return - completion handled by callback
+  end
+
+  -- Fallback: Use Async.run() for objects without true async (still blocks during RPC)
   -- Create cancellation token
   local cancel_token = Async.create_cancel_token()
 
@@ -300,7 +384,7 @@ function TreeActions.load_node_async(UiTree, obj, line_number)
     Spinner.stop(spinner_id)
   end
 
-  -- Load asynchronously using Executor
+  -- Load asynchronously using Executor (wraps blocking call)
   Async.run(function(ctx)
     -- Check cancellation before starting
     if ctx.is_cancelled() then
@@ -323,74 +407,29 @@ function TreeActions.load_node_async(UiTree, obj, line_number)
     cancel_token = cancel_token,
     timeout_ms = 60000, -- 60 seconds for metadata loads
     on_complete = function(load_result, err)
-      -- Stop the animated spinner
-      Spinner.stop(spinner_id)
-
-      -- Clear loading state and cancel function
-      obj.ui_state.loading = false
-      obj._cancel_load = nil
-
-      -- Handle cancellation
-      if err and (err:match("cancelled") or err:match("Cancelled")) then
-        -- Silently handle cancellation - don't show error
-        UiTree.render()
-        return
-      end
-
-      -- Handle errors
+      -- Extract success/error from the wrapped result
       if err then
-        obj.ui_state.error = tostring(err)
-        vim.notify(string.format("SSNS: Failed to load %s: %s", obj.name, err), vim.log.levels.ERROR)
-        UiTree.render()
+        handle_load_complete(false, err)
         return
       end
 
-      local success = load_result and load_result.success
-      local result = load_result and load_result.result
+      local pcall_success = load_result and load_result.success
+      local load_return = load_result and load_result.result
 
       -- Check if pcall failed (threw error)
-      if not success then
-        obj.ui_state.error = tostring(result)
-        vim.notify(string.format("SSNS: Failed to load %s: %s", obj.name, result), vim.log.levels.ERROR)
+      if not pcall_success then
+        handle_load_complete(false, tostring(load_return))
+        return
+      end
+
       -- Check if load() returned false (failed without throwing)
-      elseif result == false then
-        local error_msg = obj.error_message or "Unknown error"
-        obj.ui_state.error = error_msg
-        vim.notify(string.format("SSNS: Failed to load %s: %s", obj.name, error_msg), vim.log.levels.ERROR)
+      if load_return == false then
+        handle_load_complete(false, nil)
+        return
       end
 
-      -- Update success flag based on both checks
-      success = success and result ~= false
-
-      -- Re-render tree with results or error
-      UiTree.render()
-
-      -- Position cursor at first child if loaded successfully
-      if success and obj:has_children() then
-        local child_line = line_number + 1
-        local child_col = smart_positioning and Buffer.get_name_column(child_line) or 0
-        Buffer.set_cursor(child_line, child_col)
-        -- Update indent tracking
-        if smart_positioning then
-          Buffer.last_indent_info = {
-            line = child_line,
-            indent_level = Buffer.get_indent_level(child_line),
-            column = child_col,
-          }
-        end
-      else
-        -- Error or no children, stay on current line
-        local current_col = smart_positioning and Buffer.get_name_column(line_number) or 0
-        Buffer.set_cursor(line_number, current_col)
-        -- Update indent tracking
-        if smart_positioning then
-          Buffer.last_indent_info = {
-            line = line_number,
-            indent_level = Buffer.get_indent_level(line_number),
-            column = current_col,
-          }
-        end
-      end
+      -- Success
+      handle_load_complete(true, nil)
     end,
   })
 end
