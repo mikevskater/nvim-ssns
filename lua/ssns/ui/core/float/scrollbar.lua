@@ -14,6 +14,9 @@ local CHARS = {
 -- Highlight namespace for scrollbar
 local NS_NAME = "ssns_scrollbar"
 
+-- Throttle interval for scrollbar updates (ms)
+local THROTTLE_MS = 50
+
 ---Setup the scrollbar overlay window
 ---@param float FloatWindow The parent FloatWindow instance
 function Scrollbar.setup(float)
@@ -72,11 +75,34 @@ function Scrollbar.setup(float)
   -- Initial scrollbar render
   Scrollbar.update(float)
 
-  -- Setup autocmd to track scrolling in main window
+  -- Setup autocmd to track scrolling in main window (with throttling)
+  float._scrollbar_last_update = 0  -- Track last update time for throttling
+  float._scrollbar_pending_timer = nil  -- Timer for trailing throttle update
   float._scrollbar_autocmd = vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "WinScrolled" }, {
     buffer = float.bufnr,
     callback = function()
-      Scrollbar.update(float)
+      local now = vim.loop.now()
+      local elapsed = now - (float._scrollbar_last_update or 0)
+
+      if elapsed >= THROTTLE_MS then
+        -- Enough time has passed, update immediately
+        float._scrollbar_last_update = now
+        Scrollbar.update(float)
+      else
+        -- Schedule a trailing update if not already scheduled
+        if not float._scrollbar_pending_timer then
+          local delay = THROTTLE_MS - elapsed
+          float._scrollbar_pending_timer = vim.fn.timer_start(delay, function()
+            float._scrollbar_pending_timer = nil
+            vim.schedule(function()
+              if float:is_valid() then
+                float._scrollbar_last_update = vim.loop.now()
+                Scrollbar.update(float)
+              end
+            end)
+          end)
+        end
+      end
     end,
   })
 end
@@ -194,6 +220,12 @@ end
 ---Close the scrollbar window
 ---@param float FloatWindow The parent FloatWindow instance
 function Scrollbar.close(float)
+  -- Cancel pending throttle timer
+  if float._scrollbar_pending_timer then
+    vim.fn.timer_stop(float._scrollbar_pending_timer)
+    float._scrollbar_pending_timer = nil
+  end
+
   -- Remove autocmd
   if float._scrollbar_autocmd then
     pcall(vim.api.nvim_del_autocmd, float._scrollbar_autocmd)
