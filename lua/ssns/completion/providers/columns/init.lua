@@ -195,6 +195,7 @@ end
 function ColumnsProvider.get_completions_async(ctx, opts)
   opts = opts or {}
   local on_complete = opts.on_complete or function() end
+  local cancel_token = opts.cancel_token
 
   local connection = ctx.connection
   local sql_context = ctx.sql_context or {}
@@ -207,6 +208,10 @@ function ColumnsProvider.get_completions_async(ctx, opts)
        sql_context.mode == "where_qualified" or
        sql_context.mode == "qualified_bracket" then
       vim.schedule(function()
+        -- Check cancellation
+        if cancel_token and cancel_token:is_cancelled() then
+          return
+        end
         local success, result = pcall(function()
           return ColumnsProvider._get_completions_impl(ctx)
         end)
@@ -227,11 +232,15 @@ function ColumnsProvider.get_completions_async(ctx, opts)
 
   local database = connection.database
 
-  -- Load database async if needed
+  -- Load database async if needed (use true async RPC)
   if not database.is_loaded then
-    database:load_async({
+    database:load_rpc_async({
       timeout_ms = opts.timeout_ms or 5000,
       on_complete = function(success, err)
+        -- Check cancellation after load
+        if cancel_token and cancel_token:is_cancelled() then
+          return
+        end
         if not success then
           on_complete({}, err)
           return
@@ -255,38 +264,52 @@ function ColumnsProvider._async_with_resolved_scope(ctx, opts, on_complete)
   local connection = ctx.connection
   local sql_context = ctx.sql_context or {}
   local Resolver = require('ssns.completion.metadata.resolver')
+  local cancel_token = opts.cancel_token
 
   -- Check if we need to pre-resolve scope (for column completion)
   local has_tables_to_resolve = sql_context.tables_in_scope and #sql_context.tables_in_scope > 0
 
   -- Helper to run the completion after pre-resolution
   local function run_completion()
+    -- Check cancellation before running
+    if cancel_token and cancel_token:is_cancelled() then
+      return
+    end
+
     -- Route to async methods based on mode to avoid blocking on Resolver.get_columns
     local mode = sql_context.mode
     if mode == "qualified" or mode == "select_qualified" or mode == "where_qualified" then
       -- Use async qualified column resolution
       get_qualified().get_qualified_columns_async(sql_context, connection, sql_context, {
+        cancel_token = cancel_token,
         on_complete = on_complete,
       })
     elseif mode == "qualified_bracket" then
       -- Use async bracketed qualified column resolution
       get_qualified().get_qualified_bracket_columns_async(sql_context, connection, sql_context, {
+        cancel_token = cancel_token,
         on_complete = on_complete,
       })
     elseif mode == "select" or mode == "order_by" or mode == "group_by" or
            mode == "having" or mode == "set" then
       -- Use async unqualified column resolution (fetches columns from all tables in parallel)
       get_unqualified().get_all_columns_from_query_async(connection, sql_context, {
+        cancel_token = cancel_token,
         on_complete = on_complete,
       })
     elseif mode == "where" then
       -- Use async WHERE clause column resolution (with type compatibility)
       get_unqualified().get_where_clause_columns_async(connection, sql_context, {
+        cancel_token = cancel_token,
         on_complete = on_complete,
       })
     else
       -- Other modes: run sync impl (special cases like ON, INSERT, VALUES, OUTPUT)
       vim.schedule(function()
+        -- Check cancellation before running sync impl
+        if cancel_token and cancel_token:is_cancelled() then
+          return
+        end
         local success, result = pcall(function()
           return ColumnsProvider._get_completions_impl(ctx)
         end)
@@ -303,7 +326,12 @@ function ColumnsProvider._async_with_resolved_scope(ctx, opts, on_complete)
     -- Pre-resolve scope async for better performance
     Resolver.pre_resolve_scope_async(sql_context, connection, {
       timeout_ms = opts.timeout_ms or 5000,
+      cancel_token = cancel_token,
       on_complete = function(resolved_scope, err)
+        -- Check cancellation after pre-resolution
+        if cancel_token and cancel_token:is_cancelled() then
+          return
+        end
         -- Inject resolved scope into context
         sql_context.resolved_scope = resolved_scope
         run_completion()

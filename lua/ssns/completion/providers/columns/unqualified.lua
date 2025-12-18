@@ -260,6 +260,7 @@ end
 function M.get_all_columns_from_query_async(connection, context, opts)
   opts = opts or {}
   local on_complete = opts.on_complete or function() end
+  local cancel_token = opts.cancel_token
 
   local Resolver = require('ssns.completion.metadata.resolver')
   local Utils = require('ssns.completion.utils')
@@ -281,6 +282,10 @@ function M.get_all_columns_from_query_async(connection, context, opts)
   local function check_complete()
     pending = pending - 1
     if pending == 0 and not has_error then
+      -- Check cancellation before processing results
+      if cancel_token and cancel_token:is_cancelled() then
+        return
+      end
       -- All columns fetched, now format and deduplicate
       local items = {}
       local seen_columns = {}
@@ -384,12 +389,19 @@ end
 function M.get_where_clause_columns_async(connection, context, opts)
   opts = opts or {}
   local on_complete = opts.on_complete or function() end
+  local cancel_token = opts.cancel_token
 
   local Resolver = require('ssns.completion.metadata.resolver')
 
   -- Get base columns async first
   M.get_all_columns_from_query_async(connection, context, {
+    cancel_token = cancel_token,
     on_complete = function(base_items, err)
+      -- Check cancellation
+      if cancel_token and cancel_token:is_cancelled() then
+        return
+      end
+
       if err then
         on_complete({}, err)
         return
@@ -412,6 +424,11 @@ function M.get_where_clause_columns_async(connection, context, opts)
           -- Use async to get left table columns
           Resolver.get_columns_async(left_table, connection, {
             on_complete = function(left_cols, _)
+              -- Check cancellation
+              if cancel_token and cancel_token:is_cancelled() then
+                return
+              end
+
               for _, col in ipairs(left_cols or {}) do
                 local col_name = col.name or col.column_name
                 if col_name and col_name:lower() == left_col_name:lower() then

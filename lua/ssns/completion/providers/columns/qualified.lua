@@ -358,6 +358,7 @@ end
 function M.get_qualified_columns_async(sql_context, connection, context, opts)
   opts = opts or {}
   local on_complete = opts.on_complete or function() end
+  local cancel_token = opts.cancel_token
 
   local Resolver = require('ssns.completion.metadata.resolver')
   local Utils = require('ssns.completion.utils')
@@ -527,6 +528,11 @@ function M.get_qualified_columns_async(sql_context, connection, context, opts)
   -- Get columns async (true non-blocking)
   Resolver.get_columns_async(table_obj, connection, {
     on_complete = function(columns, err)
+      -- Check cancellation before processing results
+      if cancel_token and cancel_token:is_cancelled() then
+        return
+      end
+
       if not columns or #columns == 0 then
         on_complete({}, err)
         return
@@ -582,6 +588,7 @@ end
 function M.get_qualified_bracket_columns_async(sql_context, connection, context, opts)
   opts = opts or {}
   local on_complete = opts.on_complete or function() end
+  local cancel_token = opts.cancel_token
 
   local Resolver = require('ssns.completion.metadata.resolver')
   local Utils = require('ssns.completion.utils')
@@ -646,6 +653,11 @@ function M.get_qualified_bracket_columns_async(sql_context, connection, context,
   -- Get columns async (true non-blocking)
   Resolver.get_columns_async(table_obj, connection, {
     on_complete = function(columns, err)
+      -- Check cancellation before processing results
+      if cancel_token and cancel_token:is_cancelled() then
+        return
+      end
+
       if not columns or #columns == 0 then
         on_complete({}, err)
         return
