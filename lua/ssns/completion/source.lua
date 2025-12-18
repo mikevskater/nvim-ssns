@@ -508,10 +508,14 @@ function Source:_route_to_provider(context_result, provider_ctx, callback, start
       return
     end
 
-    -- Table/view/synonym completion
-    Debug.log("[COMPLETION] Calling TablesProvider")
+    -- Table/view/synonym completion (async to avoid blocking on database load)
+    Debug.log("[COMPLETION] Calling TablesProvider (async)")
     local TablesProvider = require('ssns.completion.providers.tables')
-    TablesProvider.get_completions(provider_ctx, wrapped_callback)
+    TablesProvider.get_completions_async(provider_ctx, {
+      on_complete = function(items, _)
+        wrapped_callback(items or {})
+      end
+    })
 
   elseif context_result.type == Context.Type.COLUMN then
     Debug.log("[COMPLETION] Calling ColumnsProvider")
