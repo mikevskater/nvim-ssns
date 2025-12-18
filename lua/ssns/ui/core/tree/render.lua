@@ -198,16 +198,40 @@ function TreeRender.render(UiTree)
     end
   end
 
-  -- Write to buffer
-  Buffer.set_lines(lines)
+  -- Get chunked render threshold from config
+  local ui_config = Config.get_ui()
+  local threshold = ui_config.chunked_render_threshold or 200
 
   -- Apply syntax highlighting
   local Highlights = require('ssns.ui.core.highlights')
-  Highlights.apply(UiTree.line_map)
 
-  -- Restore cursor position if we have a saved object
-  if saved_object and Buffer.is_open() then
-    UiTree.restore_cursor_to_object(saved_object, saved_column)
+  -- Use chunked rendering for large trees to avoid blocking UI
+  if #lines > threshold then
+    -- Chunked write with batched highlighting on completion
+    Buffer.set_lines_chunked(lines, {
+      chunk_size = 100,
+      on_complete = function()
+        -- Apply batched highlights after all lines are written
+        Highlights.apply_batched(UiTree.line_map, {
+          batch_size = 100,
+          on_complete = function()
+            -- Restore cursor position after rendering complete
+            if saved_object and Buffer.is_open() then
+              UiTree.restore_cursor_to_object(saved_object, saved_column)
+            end
+          end,
+        })
+      end,
+    })
+  else
+    -- Sync rendering for small trees
+    Buffer.set_lines(lines)
+    Highlights.apply(UiTree.line_map)
+
+    -- Restore cursor position if we have a saved object
+    if saved_object and Buffer.is_open() then
+      UiTree.restore_cursor_to_object(saved_object, saved_column)
+    end
   end
 end
 
