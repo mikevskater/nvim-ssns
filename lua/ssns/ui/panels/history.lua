@@ -29,6 +29,12 @@ local search_augroup = nil
 ---Namespace for search virtual text
 local search_virt_ns = vim.api.nvim_create_namespace("ssns_search_virt")
 
+---@type number? Timer handle for search input debounce
+local search_debounce_timer = nil
+
+-- Debounce delay in ms for live search filtering (prevents excessive updates on rapid typing)
+local SEARCH_DEBOUNCE_MS = 150
+
 ---@type HistoryUIState
 local ui_state = {
   all_buffer_histories = {},
@@ -49,6 +55,12 @@ function UiHistory.close()
   if search_augroup then
     pcall(vim.api.nvim_del_augroup_by_id, search_augroup)
     search_augroup = nil
+  end
+
+  -- Cancel any pending search debounce timer
+  if search_debounce_timer then
+    vim.fn.timer_stop(search_debounce_timer)
+    search_debounce_timer = nil
   end
 
   if multi_panel then
@@ -582,19 +594,35 @@ local function setup_search_autocmds()
 
   search_augroup = vim.api.nvim_create_augroup("SSNSHistorySearch", { clear = true })
 
-  -- Live filtering on text change
+  -- Live filtering on text change (debounced to prevent excessive updates)
   vim.api.nvim_create_autocmd({"TextChangedI", "TextChanged"}, {
     group = search_augroup,
     buffer = search_buf,
     callback = function()
-      local lines = vim.api.nvim_buf_get_lines(search_buf, 0, 1, false)
-      local text = (lines[1] or ""):gsub("^%s+", "")  -- Trim leading space
-      apply_search_filter(text)
-      if multi_panel then
-        multi_panel:render_panel("buffers")
-        multi_panel:render_panel("history")
-        multi_panel:render_panel("preview")
+      -- Cancel existing debounce timer
+      if search_debounce_timer then
+        vim.fn.timer_stop(search_debounce_timer)
+        search_debounce_timer = nil
       end
+
+      -- Start new debounce timer
+      search_debounce_timer = vim.fn.timer_start(SEARCH_DEBOUNCE_MS, function()
+        search_debounce_timer = nil
+        vim.schedule(function()
+          -- Verify buffer is still valid before processing
+          if not search_buf or not vim.api.nvim_buf_is_valid(search_buf) then
+            return
+          end
+          local lines = vim.api.nvim_buf_get_lines(search_buf, 0, 1, false)
+          local text = (lines[1] or ""):gsub("^%s+", "")  -- Trim leading space
+          apply_search_filter(text)
+          if multi_panel then
+            multi_panel:render_panel("buffers")
+            multi_panel:render_panel("history")
+            multi_panel:render_panel("preview")
+          end
+        end)
+      end)
     end,
   })
 
