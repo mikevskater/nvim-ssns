@@ -126,6 +126,8 @@ local ui_state = {
   definitions_cache = {},
   -- Cached visible object count (invalidated on filter changes)
   _visible_count_cache = nil,
+  -- Cached server options (loaded async)
+  _cached_saved_connections = nil,
 }
 
 ---Start the text spinner animation
@@ -254,6 +256,8 @@ local function reset_state()
     filtered_results = {},
     selected_result_idx = 1,
     definitions_cache = {},
+    -- Cached saved connections (loaded async)
+    _cached_saved_connections = nil,
   }
 end
 
@@ -1250,6 +1254,7 @@ local function render_filters(state)
 end
 
 ---Build server dropdown options from cache and connections
+---Uses cached saved connections (loaded async on panel open)
 ---@return DropdownOption[] options
 local function get_server_options()
   local options = {}
@@ -1267,9 +1272,8 @@ local function get_server_options()
     end
   end
 
-  -- Saved connections
-  local Connections = require('ssns.connections')
-  local saved_connections = Connections.load()
+  -- Saved connections (from async cache)
+  local saved_connections = ui_state._cached_saved_connections or {}
   for _, conn in ipairs(saved_connections) do
     if not seen[conn.name] then
       seen[conn.name] = true
@@ -2125,11 +2129,11 @@ end
 -- Forward declaration for show_database_picker (called from show_server_picker)
 local show_database_picker
 
----Show server picker
-local function show_server_picker()
+---Internal: Build and show server picker with given saved connections
+---@param saved_connections ConnectionData[] Connections loaded from file
+local function _show_server_picker_with_connections(saved_connections)
   local UiFloatInteractive = require('ssns.ui.base.float_interactive')
   local ContentBuilder = require('ssns.ui.core.content_builder')
-  local Connections = require('ssns.connections')
   local Config = require('ssns.config')
 
   -- Gather all servers
@@ -2148,8 +2152,7 @@ local function show_server_picker()
     end
   end
 
-  -- Saved connections
-  local saved_connections = Connections.load()
+  -- Saved connections (passed in from async load)
   for _, conn in ipairs(saved_connections) do
     if not seen[conn.name] then
       seen[conn.name] = true
@@ -2257,6 +2260,19 @@ local function show_server_picker()
       end
     end,
   })
+end
+
+---Show server picker (loads connections async then shows picker)
+local function show_server_picker()
+  local Connections = require('ssns.connections')
+
+  -- Load connections asynchronously, then show picker
+  Connections.load_async(function(connections, err)
+    local saved_connections = err and {} or connections
+    vim.schedule(function()
+      _show_server_picker_with_connections(saved_connections)
+    end)
+  end)
 end
 
 ---Show database multi-picker
@@ -2460,6 +2476,22 @@ function UiObjectSearch.show(options)
 
   -- Initialize state
   reset_state()
+
+  -- Load saved connections asynchronously (for server dropdown)
+  local Connections = require('ssns.connections')
+  Connections.load_async(function(connections, err)
+    if not err then
+      ui_state._cached_saved_connections = connections
+      -- Re-render settings panel if it exists to show new server options
+      vim.schedule(function()
+        if multi_panel and multi_panel:is_valid() then
+          local new_cb = render_settings(multi_panel)
+          multi_panel:update_inputs("settings", new_cb)
+          multi_panel:render_panel("settings")
+        end
+      end)
+    end
+  end)
 
   -- Get keymaps from config
   local km = KeymapManager.get_group("object_search")
