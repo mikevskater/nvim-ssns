@@ -542,9 +542,13 @@ function Source:_route_to_provider(context_result, provider_ctx, callback, start
     ParametersProvider.get_completions(provider_ctx, wrapped_callback)
 
   elseif context_result.type == Context.Type.DATABASE then
-    Debug.log("[COMPLETION] Calling DatabasesProvider")
+    Debug.log("[COMPLETION] Calling DatabasesProvider (async)")
     local DatabasesProvider = require('ssns.completion.providers.databases')
-    DatabasesProvider.get_completions(provider_ctx, wrapped_callback)
+    DatabasesProvider.get_completions_async(provider_ctx, {
+      on_complete = function(items, _)
+        wrapped_callback(items or {})
+      end
+    })
 
   elseif context_result.type == Context.Type.SCHEMA then
     Debug.log("[COMPLETION] Calling SchemasProvider")
