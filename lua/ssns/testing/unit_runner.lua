@@ -250,6 +250,17 @@ function UnitRunner.scan_tests()
     end
   end
 
+  -- Scan async tests
+  local async_path = base_path .. "/async"
+  local async_files = vim.fn.glob(async_path .. "/*.lua", false, true)
+  for _, filepath in ipairs(async_files) do
+    local file_tests = load_test_file(filepath)
+    for _, test in ipairs(file_tests) do
+      test.source_file = filepath
+      table.insert(tests, test)
+    end
+  end
+
   return tests
 end
 
@@ -301,6 +312,8 @@ function UnitRunner.run_test(test)
       result.actual, result.passed, result.error = UnitRunner._run_fk_graph_test(test)
     elseif test.type == "formatter" then
       result.actual, result.passed, result.error = UnitRunner._run_formatter_test(test)
+    elseif test.type == "async" then
+      result.actual, result.passed, result.error = UnitRunner._run_async_test(test)
     else
       error("Unknown test type: " .. tostring(test.type))
     end
@@ -1110,6 +1123,680 @@ function UnitRunner._run_fk_graph_test(test)
   -- 4. Compare actual results with test.expected
   -- For now, return placeholder result
   return {}, true, nil
+end
+
+-- ============================================================================
+-- Async Test Runner
+-- ============================================================================
+
+---Generate a unique temp file path for testing
+---@return string path Unique temp file path
+local function get_temp_file_path()
+  local temp_dir = vim.fn.stdpath("cache") .. "/ssns_test"
+  vim.fn.mkdir(temp_dir, "p")
+  return temp_dir .. "/test_" .. os.time() .. "_" .. math.random(10000, 99999) .. ".tmp"
+end
+
+---Generate a unique temp directory path for testing
+---@return string path Unique temp directory path
+local function get_temp_dir_path()
+  local temp_dir = vim.fn.stdpath("cache") .. "/ssns_test"
+  return temp_dir .. "/dir_" .. os.time() .. "_" .. math.random(10000, 99999)
+end
+
+---Clean up temp file
+---@param path string File path to clean up
+local function cleanup_temp_file(path)
+  pcall(vim.fn.delete, path)
+end
+
+---Clean up temp directory
+---@param path string Directory path to clean up
+local function cleanup_temp_dir(path)
+  pcall(vim.fn.delete, path, "rf")
+end
+
+---Wait for async callback with timeout
+---@param timeout_ms number Timeout in milliseconds
+---@return function waiter Function that waits for callback
+---@return function signal Function to signal completion
+local function create_async_waiter(timeout_ms)
+  local completed = false
+  local result_value = nil
+  local result_error = nil
+
+  local function signal(value, err)
+    completed = true
+    result_value = value
+    result_error = err
+  end
+
+  local function waiter()
+    local start = vim.loop.hrtime()
+    local timeout_ns = timeout_ms * 1000000
+
+    while not completed do
+      -- Check timeout
+      if (vim.loop.hrtime() - start) > timeout_ns then
+        return nil, "Async operation timed out after " .. timeout_ms .. "ms"
+      end
+
+      -- Process pending async callbacks
+      vim.wait(10, function() return completed end, 5)
+    end
+
+    return result_value, result_error
+  end
+
+  return waiter, signal
+end
+
+---Run async file I/O test
+---@param test table Test definition
+---@return table actual Actual output
+---@return boolean passed Whether test passed
+---@return string? error Error message if failed
+function UnitRunner._run_async_file_io_test(test)
+  local ok, FileIO = pcall(require, "ssns.async.file_io")
+  if not ok then
+    return nil, false, "Failed to load FileIO module: " .. tostring(FileIO)
+  end
+
+  local method = test.method
+  local setup = test.setup or {}
+  local input = test.input or {}
+  local expected = test.expected or {}
+
+  -- Generate temp file path for tests that need it
+  local temp_path = get_temp_file_path()
+  local temp_dir = nil
+  local cleanup_paths = { temp_path }
+
+  -- Setup phase: create temp files if needed
+  if setup.create_file then
+    local f = io.open(temp_path, "w")
+    if f then
+      f:write(setup.content or "")
+      f:close()
+    else
+      return nil, false, "Failed to create setup file"
+    end
+  end
+
+  -- Use input path or temp path
+  local test_path = input.path or temp_path
+
+  -- Create waiter for async callback
+  local waiter, signal = create_async_waiter(5000) -- 5 second timeout
+
+  -- Execute the appropriate async method
+  if method == "read_async" then
+    FileIO.read_async(test_path, function(result)
+      signal(result, nil)
+    end)
+  elseif method == "write_async" then
+    FileIO.write_async(temp_path, input.data or "", function(result)
+      signal(result, nil)
+    end)
+  elseif method == "append_async" then
+    FileIO.append_async(temp_path, input.data or "", function(result)
+      signal(result, nil)
+    end)
+  elseif method == "exists_async" then
+    FileIO.exists_async(test_path, function(exists, err)
+      signal({ exists = exists, error = err }, nil)
+    end)
+  elseif method == "stat_async" then
+    FileIO.stat_async(test_path, function(stat, err)
+      signal({ stat = stat, error = err }, nil)
+    end)
+  elseif method == "read_json_async" then
+    FileIO.read_json_async(test_path, function(data, err)
+      signal({ data = data, error = err }, nil)
+    end)
+  elseif method == "write_json_async" then
+    FileIO.write_json_async(temp_path, input.data or {}, function(success, err)
+      signal({ success = success, error = err }, nil)
+    end)
+  elseif method == "read_lines_async" then
+    FileIO.read_lines_async(test_path, function(lines, err)
+      signal({ lines = lines, error = err }, nil)
+    end)
+  elseif method == "write_lines_async" then
+    FileIO.write_lines_async(temp_path, input.lines or {}, function(success, err)
+      signal({ success = success, error = err }, nil)
+    end)
+  elseif method == "mkdir_async" then
+    temp_dir = get_temp_dir_path()
+    table.insert(cleanup_paths, temp_dir)
+    FileIO.mkdir_async(temp_dir, function(success, err)
+      signal({ success = success, error = err, dir_path = temp_dir }, nil)
+    end)
+  else
+    for _, path in ipairs(cleanup_paths) do
+      cleanup_temp_file(path)
+    end
+    return nil, false, "Unknown FileIO method: " .. tostring(method)
+  end
+
+  -- Wait for result
+  local result, wait_err = waiter()
+  if wait_err then
+    for _, path in ipairs(cleanup_paths) do
+      cleanup_temp_file(path)
+    end
+    return nil, false, wait_err
+  end
+
+  -- Verify results
+  local passed = true
+  local error_msg = nil
+
+  -- Check success/failure expectation
+  if expected.success ~= nil then
+    if method == "read_async" or method == "write_async" or method == "append_async" then
+      if result.success ~= expected.success then
+        passed = false
+        error_msg = string.format("Expected success=%s, got %s", tostring(expected.success), tostring(result.success))
+      end
+    elseif method == "write_json_async" or method == "write_lines_async" or method == "mkdir_async" then
+      if result.success ~= expected.success then
+        passed = false
+        error_msg = string.format("Expected success=%s, got %s", tostring(expected.success), tostring(result.success))
+      end
+    end
+  end
+
+  -- Check data expectation
+  if passed and expected.data ~= nil then
+    if method == "read_async" then
+      if result.data ~= expected.data then
+        passed = false
+        error_msg = string.format("Expected data='%s', got '%s'", expected.data, result.data or "nil")
+      end
+    elseif method == "read_json_async" then
+      -- Deep compare for JSON
+      if type(expected.data) == "table" then
+        for k, v in pairs(expected.data) do
+          if result.data[k] ~= v then
+            passed = false
+            error_msg = string.format("JSON key '%s' mismatch: expected %s, got %s", k, tostring(v), tostring(result.data[k]))
+            break
+          end
+        end
+      end
+    end
+  end
+
+  -- Check lines expectation
+  if passed and expected.lines ~= nil then
+    if result.lines then
+      for i, line in ipairs(expected.lines) do
+        if result.lines[i] ~= line then
+          passed = false
+          error_msg = string.format("Line %d mismatch: expected '%s', got '%s'", i, line, result.lines[i] or "nil")
+          break
+        end
+      end
+    else
+      passed = false
+      error_msg = "Expected lines but got nil"
+    end
+  end
+
+  -- Check exists expectation
+  if passed and expected.exists ~= nil then
+    if result.exists ~= expected.exists then
+      passed = false
+      error_msg = string.format("Expected exists=%s, got %s", tostring(expected.exists), tostring(result.exists))
+    end
+  end
+
+  -- Check has_error expectation
+  if passed and expected.has_error ~= nil then
+    local has_error = result.error ~= nil
+    if has_error ~= expected.has_error then
+      passed = false
+      error_msg = string.format("Expected has_error=%s, got %s (error: %s)", tostring(expected.has_error), tostring(has_error), tostring(result.error))
+    end
+  end
+
+  -- Check has_stat expectation
+  if passed and expected.has_stat ~= nil then
+    local has_stat = result.stat ~= nil
+    if has_stat ~= expected.has_stat then
+      passed = false
+      error_msg = string.format("Expected has_stat=%s, got %s", tostring(expected.has_stat), tostring(has_stat))
+    end
+  end
+
+  -- Check min_size expectation for stat
+  if passed and expected.min_size ~= nil and result.stat then
+    if result.stat.size < expected.min_size then
+      passed = false
+      error_msg = string.format("Expected min_size=%d, got %d", expected.min_size, result.stat.size)
+    end
+  end
+
+  -- Verify file content after write
+  if passed and expected.verify_content ~= nil then
+    local f = io.open(temp_path, "r")
+    if f then
+      local content = f:read("*all")
+      f:close()
+      if content ~= expected.verify_content then
+        passed = false
+        error_msg = string.format("Verify content mismatch: expected '%s', got '%s'", expected.verify_content, content)
+      end
+    else
+      passed = false
+      error_msg = "Failed to read file for content verification"
+    end
+  end
+
+  -- Verify directory exists after mkdir
+  if passed and expected.dir_exists ~= nil and result.dir_path then
+    local dir_exists = vim.fn.isdirectory(result.dir_path) == 1
+    if dir_exists ~= expected.dir_exists then
+      passed = false
+      error_msg = string.format("Expected dir_exists=%s, got %s", tostring(expected.dir_exists), tostring(dir_exists))
+    end
+  end
+
+  -- Cleanup
+  for _, path in ipairs(cleanup_paths) do
+    if path:match("%.tmp$") then
+      cleanup_temp_file(path)
+    else
+      cleanup_temp_dir(path)
+    end
+  end
+
+  return result, passed, error_msg
+end
+
+---Run async connections test
+---@param test table Test definition
+---@return table actual Actual output
+---@return boolean passed Whether test passed
+---@return string? error Error message if failed
+function UnitRunner._run_async_connections_test(test)
+  local ok, Connections = pcall(require, "ssns.connections")
+  if not ok then
+    return nil, false, "Failed to load Connections module: " .. tostring(Connections)
+  end
+
+  local FileIO = require("ssns.async.file_io")
+  local method = test.method
+  local setup = test.setup or {}
+  local input = test.input or {}
+  local expected = test.expected or {}
+
+  -- Create a temp connections file for isolation
+  local temp_dir = vim.fn.stdpath("cache") .. "/ssns_test_connections"
+  vim.fn.mkdir(temp_dir, "p")
+  local temp_file = temp_dir .. "/connections_" .. os.time() .. "_" .. math.random(10000, 99999) .. ".json"
+
+  -- Override the file path temporarily
+  local orig_get_file_path = Connections.get_file_path
+  Connections.get_file_path = function() return temp_file end
+
+  -- Override ensure_directory to use temp
+  local orig_ensure_directory = Connections.ensure_directory
+  Connections.ensure_directory = function()
+    vim.fn.mkdir(temp_dir, "p")
+  end
+
+  -- Setup phase: create connections file if needed
+  if setup.connections_file then
+    local data = {
+      version = 2,
+      connections = setup.connections or {},
+    }
+    local json = vim.fn.json_encode(data)
+    local f = io.open(temp_file, "w")
+    if f then
+      f:write(json)
+      f:close()
+    end
+  end
+
+  -- Create waiter for async callback
+  local waiter, signal = create_async_waiter(5000)
+
+  -- Execute the appropriate async method
+  if method == "load_async" then
+    Connections.load_async(function(connections, err)
+      signal({ connections = connections, error = err }, nil)
+    end)
+  elseif method == "save_async" then
+    Connections.save_async(input.connections or {}, function(success, err)
+      signal({ success = success, error = err }, nil)
+    end)
+  elseif method == "add_async" then
+    Connections.add_async(input.connection, function(success, err)
+      signal({ success = success, error = err }, nil)
+    end)
+  elseif method == "remove_async" then
+    Connections.remove_async(input.name, function(success, err)
+      signal({ success = success, error = err }, nil)
+    end)
+  elseif method == "update_async" then
+    Connections.update_async(input.name, input.connection, function(success, err)
+      signal({ success = success, error = err }, nil)
+    end)
+  elseif method == "find_async" then
+    Connections.find_async(input.name, function(connection, err)
+      signal({ connection = connection, error = err }, nil)
+    end)
+  elseif method == "toggle_favorite_async" then
+    Connections.toggle_favorite_async(input.name, function(success, new_state, err)
+      signal({ success = success, new_state = new_state, error = err }, nil)
+    end)
+  else
+    -- Restore original functions
+    Connections.get_file_path = orig_get_file_path
+    Connections.ensure_directory = orig_ensure_directory
+    cleanup_temp_file(temp_file)
+    return nil, false, "Unknown Connections method: " .. tostring(method)
+  end
+
+  -- Wait for result
+  local result, wait_err = waiter()
+
+  -- Restore original functions
+  Connections.get_file_path = orig_get_file_path
+  Connections.ensure_directory = orig_ensure_directory
+
+  if wait_err then
+    cleanup_temp_file(temp_file)
+    return nil, false, wait_err
+  end
+
+  -- Verify results
+  local passed = true
+  local error_msg = nil
+
+  -- Check success expectation
+  if expected.success ~= nil then
+    local success_val = result.success
+    -- For load_async, success is implied by no error
+    if method == "load_async" then
+      success_val = result.error == nil
+    end
+    if success_val ~= expected.success then
+      passed = false
+      error_msg = string.format("Expected success=%s, got %s (error: %s)", tostring(expected.success), tostring(success_val), tostring(result.error))
+    end
+  end
+
+  -- Check connections_count expectation
+  if passed and expected.connections_count ~= nil then
+    local count = result.connections and #result.connections or 0
+    if count ~= expected.connections_count then
+      passed = false
+      error_msg = string.format("Expected %d connections, got %d", expected.connections_count, count)
+    end
+  end
+
+  -- Check has_connection expectation
+  if passed and expected.has_connection then
+    local found = false
+    for _, conn in ipairs(result.connections or {}) do
+      if conn.name == expected.has_connection then
+        found = true
+        break
+      end
+    end
+    if not found then
+      passed = false
+      error_msg = string.format("Expected to find connection '%s'", expected.has_connection)
+    end
+  end
+
+  -- Check has_error expectation
+  if passed and expected.has_error ~= nil then
+    local has_error = result.error ~= nil
+    if has_error ~= expected.has_error then
+      passed = false
+      error_msg = string.format("Expected has_error=%s, got %s", tostring(expected.has_error), tostring(has_error))
+    end
+  end
+
+  -- Check new_state for toggle_favorite
+  if passed and expected.new_state ~= nil then
+    if result.new_state ~= expected.new_state then
+      passed = false
+      error_msg = string.format("Expected new_state=%s, got %s", tostring(expected.new_state), tostring(result.new_state))
+    end
+  end
+
+  -- Check found for find_async
+  if passed and expected.found ~= nil then
+    local found = result.connection ~= nil
+    if found ~= expected.found then
+      passed = false
+      error_msg = string.format("Expected found=%s, got %s", tostring(expected.found), tostring(found))
+    end
+  end
+
+  -- Check connection_name for find_async
+  if passed and expected.connection_name and result.connection then
+    if result.connection.name ~= expected.connection_name then
+      passed = false
+      error_msg = string.format("Expected connection name '%s', got '%s'", expected.connection_name, result.connection.name)
+    end
+  end
+
+  -- Verify file exists after save
+  if passed and expected.verify_file_exists then
+    if vim.fn.filereadable(temp_file) ~= 1 then
+      passed = false
+      error_msg = "Expected file to exist after save"
+    end
+  end
+
+  -- Verify connection in file after operation
+  if passed and expected.verify_has_connection then
+    local f = io.open(temp_file, "r")
+    if f then
+      local content = f:read("*all")
+      f:close()
+      local data = vim.fn.json_decode(content)
+      local found = false
+      for _, conn in ipairs(data.connections or {}) do
+        if conn.name == expected.verify_has_connection then
+          found = true
+          break
+        end
+      end
+      if not found then
+        passed = false
+        error_msg = string.format("Expected connection '%s' in file", expected.verify_has_connection)
+      end
+    end
+  end
+
+  -- Verify connection NOT in file after removal
+  if passed and expected.verify_no_connection then
+    local f = io.open(temp_file, "r")
+    if f then
+      local content = f:read("*all")
+      f:close()
+      local data = vim.fn.json_decode(content)
+      for _, conn in ipairs(data.connections or {}) do
+        if conn.name == expected.verify_no_connection then
+          passed = false
+          error_msg = string.format("Connection '%s' should not be in file", expected.verify_no_connection)
+          break
+        end
+      end
+    end
+  end
+
+  -- Verify connection host after update
+  if passed and expected.verify_connection_host then
+    local f = io.open(temp_file, "r")
+    if f then
+      local content = f:read("*all")
+      f:close()
+      local data = vim.fn.json_decode(content)
+      local name = expected.verify_connection_host.name
+      local exp_host = expected.verify_connection_host.host
+      for _, conn in ipairs(data.connections or {}) do
+        if conn.name == name then
+          if conn.server.host ~= exp_host then
+            passed = false
+            error_msg = string.format("Expected host '%s' for '%s', got '%s'", exp_host, name, conn.server.host)
+          end
+          break
+        end
+      end
+    end
+  end
+
+  -- Cleanup
+  cleanup_temp_file(temp_file)
+
+  return result, passed, error_msg
+end
+
+---Run async debug logger test
+---@param test table Test definition
+---@return table actual Actual output
+---@return boolean passed Whether test passed
+---@return string? error Error message if failed
+function UnitRunner._run_async_debug_test(test)
+  -- Note: Debug module has special initialization behavior
+  -- We need to be careful not to interfere with the global state too much
+  local ok, Debug = pcall(require, "ssns.debug")
+  if not ok then
+    return nil, false, "Failed to load Debug module: " .. tostring(Debug)
+  end
+
+  local method = test.method
+  local setup = test.setup or {}
+  local input = test.input or {}
+  local expected = test.expected or {}
+
+  local passed = true
+  local error_msg = nil
+  local result = {}
+
+  -- Get initial buffer size
+  local initial_size = Debug.get_buffer_size()
+
+  -- Setup phase: pre-log messages if needed
+  if setup.pre_log then
+    for _, msg in ipairs(setup.pre_log) do
+      Debug.log(msg)
+    end
+  end
+
+  -- Execute the appropriate method
+  if method == "log" then
+    local size_before = Debug.get_buffer_size()
+    Debug.log(input.message or "test")
+    local size_after = Debug.get_buffer_size()
+    result.buffer_increased = size_after > size_before
+
+    if expected.buffer_increased and not result.buffer_increased then
+      passed = false
+      error_msg = "Expected buffer to increase after log"
+    end
+  elseif method == "log_multiple" then
+    local size_before = Debug.get_buffer_size()
+    for _, msg in ipairs(input.messages or {}) do
+      Debug.log(msg)
+    end
+    local size_after = Debug.get_buffer_size()
+    result.buffer_size = size_after
+
+    if expected.min_buffer_size and size_after < expected.min_buffer_size then
+      passed = false
+      error_msg = string.format("Expected min buffer size %d, got %d", expected.min_buffer_size, size_after)
+    end
+  elseif method == "flush_test" then
+    local size_before = Debug.get_buffer_size()
+    Debug.flush()
+    -- Wait a bit for async flush
+    vim.wait(50, function() return false end)
+    local size_after = Debug.get_buffer_size()
+    result.buffer_cleared = size_after < size_before
+
+    if expected.buffer_cleared and size_after >= size_before then
+      passed = false
+      error_msg = string.format("Expected buffer to be cleared: before=%d, after=%d", size_before, size_after)
+    end
+  elseif method == "flush_sync_test" then
+    Debug.flush_sync()
+    local size_after = Debug.get_buffer_size()
+    result.buffer_cleared = size_after == 0
+
+    if expected.buffer_cleared and size_after > 0 then
+      passed = false
+      error_msg = string.format("Expected buffer to be cleared by sync flush, size=%d", size_after)
+    end
+
+    -- Check file contains expected content
+    if expected.file_contains then
+      local log_path = Debug.get_log_path()
+      local f = io.open(log_path, "r")
+      if f then
+        local content = f:read("*all")
+        f:close()
+        if not content:find(expected.file_contains, 1, true) then
+          passed = false
+          error_msg = string.format("Expected log file to contain '%s'", expected.file_contains)
+        end
+      end
+    end
+  elseif method == "get_log_path" then
+    local path = Debug.get_log_path()
+    result.path = path
+    result.has_path = path ~= nil and path ~= ""
+
+    if expected.has_path and not result.has_path then
+      passed = false
+      error_msg = "Expected valid log path"
+    end
+
+    if expected.path_contains and not path:find(expected.path_contains, 1, true) then
+      passed = false
+      error_msg = string.format("Expected path to contain '%s', got '%s'", expected.path_contains, path)
+    end
+  elseif method == "get_buffer_size_test" then
+    local size = Debug.get_buffer_size()
+    result.buffer_size = size
+
+    if expected.min_buffer_size and size < expected.min_buffer_size then
+      passed = false
+      error_msg = string.format("Expected min buffer size %d, got %d", expected.min_buffer_size, size)
+    end
+  else
+    return nil, false, "Unknown Debug method: " .. tostring(method)
+  end
+
+  return result, passed, error_msg
+end
+
+---Run async test - dispatcher to specific async test runners
+---@param test table Test definition
+---@return table actual Actual output
+---@return boolean passed Whether test passed
+---@return string? error Error message if failed
+function UnitRunner._run_async_test(test)
+  local module = test.module
+
+  if module == "ssns.async.file_io" then
+    return UnitRunner._run_async_file_io_test(test)
+  elseif module == "ssns.connections" then
+    return UnitRunner._run_async_connections_test(test)
+  elseif module == "ssns.debug" then
+    return UnitRunner._run_async_debug_test(test)
+  else
+    return nil, false, "Unknown async test module: " .. tostring(module)
+  end
 end
 
 ---Run formatter test
