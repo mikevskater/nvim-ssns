@@ -124,6 +124,8 @@ local ui_state = {
   filtered_results = {},
   selected_result_idx = 1,
   definitions_cache = {},
+  -- Cached visible object count (invalidated on filter changes)
+  _visible_count_cache = nil,
 }
 
 ---Start the text spinner animation
@@ -1153,9 +1155,22 @@ local function get_object_types_values()
   return values
 end
 
----Calculate visible object count based on current filters
+---Invalidate the visible object count cache
+---Called automatically by apply_current_search() when filters change
+---Also called when loaded_objects changes to ensure count stays accurate
+local function invalidate_visible_count_cache()
+  ui_state._visible_count_cache = nil
+end
+
+---Calculate visible object count based on current filters (cached)
 ---@return number
 local function get_visible_object_count()
+  -- Return cached value if available
+  if ui_state._visible_count_cache ~= nil then
+    return ui_state._visible_count_cache
+  end
+
+  -- Calculate and cache
   local count = 0
   for _, obj in ipairs(ui_state.loaded_objects) do
     -- Check system filter
@@ -1166,6 +1181,8 @@ local function get_visible_object_count()
       end
     end
   end
+
+  ui_state._visible_count_cache = count
   return count
 end
 
@@ -1716,6 +1733,9 @@ end
 
 ---Helper to apply search from current search term or buffer
 local function apply_current_search()
+  -- Invalidate visible count cache since filters may have changed
+  invalidate_visible_count_cache()
+
   -- Only read from buffer if we're actively editing the search
   if ui_state.search_editing then
     local search_buf = multi_panel and multi_panel:get_panel_buffer("search")
