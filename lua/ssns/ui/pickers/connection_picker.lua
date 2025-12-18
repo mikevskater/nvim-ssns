@@ -100,6 +100,7 @@ local function get_database_from_buffer_context(bufnr)
   return last_database
 end
 
+---Get all servers synchronously (for backward compatibility)
 ---@return table[] servers List of server entries
 local function get_all_servers()
   local servers = {}
@@ -144,6 +145,54 @@ local function get_all_servers()
   end
 
   return servers
+end
+
+---Get all servers asynchronously (non-blocking)
+---@param callback fun(servers: table[]) Callback with server list
+local function get_all_servers_async(callback)
+  -- Add currently connected servers first (sync - just in-memory)
+  local servers = {}
+  local seen = {}
+
+  for _, server in ipairs(Cache.servers) do
+    if not seen[server.name] then
+      seen[server.name] = true
+      table.insert(servers, {
+        server_name = server.name,
+        server = server,
+        connected = server:is_connected(),
+      })
+    end
+  end
+
+  -- Load saved connections async
+  Connections.load_async(function(saved_connections, _)
+    for _, conn in ipairs(saved_connections or {}) do
+      if not seen[conn.name] then
+        seen[conn.name] = true
+        table.insert(servers, {
+          server_name = conn.name,
+          connection_config = conn,
+          connected = false,
+        })
+      end
+    end
+
+    -- Add connections from config (sync - just in-memory)
+    local config_connections = Config.get_connections()
+    for name, cfg in pairs(config_connections) do
+      if not seen[name] then
+        seen[name] = true
+        table.insert(servers, {
+          server_name = name,
+          connection_config = cfg,
+          connected = false,
+        })
+      end
+    end
+
+    callback(servers)
+  end)
 end
 
 ---Attach a connection to a buffer
@@ -353,20 +402,10 @@ local function render_server_list(servers, selected_idx, current_key)
   return cb:build_lines(), cb:build_highlights()
 end
 
----Show the server picker for the current buffer (database determined by context)
----@param bufnr number? Buffer number (defaults to current)
-function UiConnectionPicker.show(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-
-  -- Check if buffer is a SQL file
-  local filetype = vim.api.nvim_buf_get_option(bufnr, 'filetype')
-  if filetype ~= 'sql' then
-    vim.notify("SSNS: Current buffer is not a SQL file", vim.log.levels.WARN)
-    return
-  end
-
-  local servers = get_all_servers()
-
+---Internal function to show picker after servers are loaded
+---@param bufnr number Buffer number
+---@param servers table[] Server list
+local function show_picker_with_servers(bufnr, servers)
   if #servers == 0 then
     vim.notify("SSNS: No saved connections found. Use :SSNSAddServer to add one.", vim.log.levels.WARN)
     return
@@ -420,6 +459,24 @@ function UiConnectionPicker.show(bufnr)
     vim.api.nvim_set_option_value('number', false, { win = state.winid })
     vim.api.nvim_set_option_value('relativenumber', false, { win = state.winid })
   end
+end
+
+---Show the server picker for the current buffer (database determined by context)
+---@param bufnr number? Buffer number (defaults to current)
+function UiConnectionPicker.show(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+
+  -- Check if buffer is a SQL file
+  local filetype = vim.api.nvim_buf_get_option(bufnr, 'filetype')
+  if filetype ~= 'sql' then
+    vim.notify("SSNS: Current buffer is not a SQL file", vim.log.levels.WARN)
+    return
+  end
+
+  -- Load servers asynchronously to avoid blocking
+  get_all_servers_async(function(servers)
+    show_picker_with_servers(bufnr, servers)
+  end)
 end
 
 ---Render hierarchical picker content using ContentBuilder
@@ -499,20 +556,10 @@ local function render_hierarchical(st)
   return cb:build_lines(), cb:build_highlights()
 end
 
----Show hierarchical server→database picker
----@param bufnr number? Buffer number (defaults to current)
-function UiConnectionPicker.show_hierarchical(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-
-  -- Check if buffer is a SQL file
-  local filetype = vim.api.nvim_buf_get_option(bufnr, 'filetype')
-  if filetype ~= 'sql' then
-    vim.notify("SSNS: Current buffer is not a SQL file", vim.log.levels.WARN)
-    return
-  end
-
-  local servers = get_all_servers()
-
+---Internal function to show hierarchical picker after servers are loaded
+---@param bufnr number Buffer number
+---@param servers table[] Server list
+local function show_hierarchical_with_servers(bufnr, servers)
   if #servers == 0 then
     vim.notify("SSNS: No servers found. Use :SSNSAddServer to add one.", vim.log.levels.WARN)
     return
@@ -640,6 +687,24 @@ function UiConnectionPicker.show_hierarchical(bufnr)
     vim.api.nvim_set_option_value('number', false, { win = state.winid })
     vim.api.nvim_set_option_value('relativenumber', false, { win = state.winid })
   end
+end
+
+---Show hierarchical server→database picker
+---@param bufnr number? Buffer number (defaults to current)
+function UiConnectionPicker.show_hierarchical(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+
+  -- Check if buffer is a SQL file
+  local filetype = vim.api.nvim_buf_get_option(bufnr, 'filetype')
+  if filetype ~= 'sql' then
+    vim.notify("SSNS: Current buffer is not a SQL file", vim.log.levels.WARN)
+    return
+  end
+
+  -- Load servers asynchronously to avoid blocking
+  get_all_servers_async(function(servers)
+    show_hierarchical_with_servers(bufnr, servers)
+  end)
 end
 
 ---Get current connection info for a buffer
