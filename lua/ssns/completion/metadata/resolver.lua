@@ -869,6 +869,127 @@ function Resolver.resolve_table_async(reference, connection, context, opts)
   load_and_search(database)
 end
 
+---@class PreResolveScopeAsyncOpts
+---@field on_complete fun(resolved_scope: table, error: string?)? Completion callback
+---@field timeout_ms number? Timeout in milliseconds per resolution (default: 5000)
+
+---Pre-resolve all aliases and tables in scope asynchronously
+---Parallel resolution of all tables with callback aggregation
+---@param sql_context table The context from statement_context
+---@param connection table Connection info {server, database, connection_config}
+---@param opts PreResolveScopeAsyncOpts? Options with on_complete callback
+function Resolver.pre_resolve_scope_async(sql_context, connection, opts)
+  opts = opts or {}
+  local on_complete = opts.on_complete or function() end
+
+  local resolved_scope = {
+    resolved_aliases = {},  -- alias_name -> table_obj or nil
+    resolved_tables = {},   -- table_name -> table_obj or nil
+  }
+
+  if not sql_context then
+    debug_log("[RESOLVER ASYNC] pre_resolve_scope_async: No sql_context provided")
+    vim.schedule(function()
+      on_complete(resolved_scope, nil)
+    end)
+    return
+  end
+
+  debug_log("[RESOLVER ASYNC] pre_resolve_scope_async: Starting parallel pre-resolution")
+
+  -- Collect all items that need to be resolved
+  local resolve_tasks = {}  -- { type = "alias"|"table", key = string, table_ref = string }
+
+  -- Collect aliases
+  if sql_context.aliases then
+    for alias_name, table_ref in pairs(sql_context.aliases) do
+      if table_ref and type(table_ref) == "string" and not TokenContext.is_temp_table(table_ref) then
+        table.insert(resolve_tasks, {
+          type = "alias",
+          key = alias_name:lower(),
+          table_ref = table_ref,
+          alias_name = alias_name,
+        })
+      end
+    end
+  end
+
+  -- Collect direct table references
+  if sql_context.tables_in_scope then
+    local seen_tables = {}
+    for _, table_info in ipairs(sql_context.tables_in_scope) do
+      local table_name = table_info.table
+      if table_name and type(table_name) == "string" and not TokenContext.is_temp_table(table_name) then
+        local key = table_name:lower()
+        if not seen_tables[key] then
+          seen_tables[key] = true
+          table.insert(resolve_tasks, {
+            type = "table",
+            key = key,
+            table_ref = table_name,
+          })
+        end
+      end
+    end
+  end
+
+  -- If nothing to resolve, return immediately
+  if #resolve_tasks == 0 then
+    debug_log("[RESOLVER ASYNC] pre_resolve_scope_async: No items to resolve")
+    vim.schedule(function()
+      on_complete(resolved_scope, nil)
+    end)
+    return
+  end
+
+  debug_log(string.format("[RESOLVER ASYNC] pre_resolve_scope_async: Resolving %d items in parallel", #resolve_tasks))
+
+  -- Callback aggregation pattern: track pending count
+  local pending = #resolve_tasks
+  local has_completed = false
+
+  local function check_complete()
+    if has_completed then return end
+    pending = pending - 1
+    if pending == 0 then
+      has_completed = true
+      debug_log(string.format("[RESOLVER ASYNC] pre_resolve_scope_async: Complete - %d aliases, %d tables",
+        vim.tbl_count(resolved_scope.resolved_aliases),
+        vim.tbl_count(resolved_scope.resolved_tables)))
+      on_complete(resolved_scope, nil)
+    end
+  end
+
+  -- Resolve all items in parallel
+  for _, task in ipairs(resolve_tasks) do
+    Resolver.resolve_table_async(task.table_ref, connection, sql_context, {
+      timeout_ms = opts.timeout_ms or 5000,
+      on_complete = function(resolved, err)
+        if resolved then
+          if task.type == "alias" then
+            resolved_scope.resolved_aliases[task.key] = resolved
+            debug_log(string.format("[RESOLVER ASYNC] pre_resolve_scope_async: Resolved alias '%s' -> '%s'",
+              task.alias_name, task.table_ref))
+          else
+            resolved_scope.resolved_tables[task.key] = resolved
+            debug_log(string.format("[RESOLVER ASYNC] pre_resolve_scope_async: Resolved table '%s'",
+              task.table_ref))
+          end
+        else
+          if task.type == "alias" then
+            debug_log(string.format("[RESOLVER ASYNC] pre_resolve_scope_async: Failed to resolve alias '%s' -> '%s'",
+              task.alias_name, task.table_ref))
+          else
+            debug_log(string.format("[RESOLVER ASYNC] pre_resolve_scope_async: Failed to resolve table '%s'",
+              task.table_ref))
+          end
+        end
+        check_complete()
+      end,
+    })
+  end
+end
+
 ---Resolve table-valued function (TVF) columns from database metadata
 ---Looks up the function in the cached UI tree and returns its result columns
 ---@param function_name string The function name
