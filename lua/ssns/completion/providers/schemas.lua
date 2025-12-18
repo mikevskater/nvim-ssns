@@ -115,4 +115,66 @@ function SchemasProvider._get_completions_impl(ctx)
   return items
 end
 
+-- ============================================================================
+-- Async Methods
+-- ============================================================================
+
+---@class SchemasProviderAsyncOpts
+---@field on_complete fun(items: table[], error: string?)? Completion callback
+---@field timeout_ms number? Timeout in milliseconds (default: 5000)
+
+---Get schema completions asynchronously
+---Loads target database schemas async before collecting items
+---@param ctx table Context { bufnr, connection, sql_context }
+---@param opts SchemasProviderAsyncOpts? Options with on_complete callback
+function SchemasProvider.get_completions_async(ctx, opts)
+  opts = opts or {}
+  local on_complete = opts.on_complete or function() end
+  local Debug = require('ssns.debug')
+
+  local connection = ctx.connection
+  if not connection or not connection.database then
+    vim.schedule(function()
+      on_complete({}, nil)
+    end)
+    return
+  end
+
+  local server = connection.server
+  local database = connection.database
+
+  -- Check if we need schemas from a different database
+  local sql_context = ctx.sql_context or {}
+  local target_db_name = sql_context.filter_database or sql_context.potential_database
+
+  local target_db = database
+  if target_db_name and server then
+    local check_db = server:get_database(target_db_name)
+    if check_db then
+      target_db = check_db
+    end
+  end
+
+  if not target_db then
+    vim.schedule(function()
+      on_complete({}, nil)
+    end)
+    return
+  end
+
+  -- Schemas are lightweight to load - just run sync in vim.schedule
+  -- (get_schemas doesn't load full objects, just schema names)
+  vim.schedule(function()
+    local success, result = pcall(function()
+      return SchemasProvider._get_completions_impl(ctx)
+    end)
+    if success then
+      on_complete(result or {}, nil)
+    else
+      Debug.log(string.format("[SchemasProvider] Async error: %s", tostring(result)))
+      on_complete({}, tostring(result))
+    end
+  end)
+end
+
 return SchemasProvider
