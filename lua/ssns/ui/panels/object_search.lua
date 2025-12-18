@@ -91,6 +91,15 @@ local search_cancel_token = nil
 ---@type boolean Whether a chunked search is in progress
 local search_in_progress = false
 
+---@type number Search progress (0-100)
+local search_progress = 0
+
+---@type number Start time of current search (for elapsed time)
+local search_start_time = 0
+
+---@type TextSpinner? Text spinner for search filtering animation
+local search_text_spinner = nil
+
 -- Debounce delay in ms for live search filtering (prevents excessive updates on rapid typing)
 local SEARCH_DEBOUNCE_MS = 150
 
@@ -182,6 +191,50 @@ local function stop_spinner_animation()
     loading_text_spinner:stop()
     loading_text_spinner = nil
   end
+end
+
+---Start the search spinner animation
+local function start_search_spinner()
+  if search_text_spinner and search_text_spinner:is_running() then
+    return  -- Already running
+  end
+
+  search_text_spinner = Spinner.create_text_spinner({
+    on_tick = function()
+      -- Stop if search is not in progress
+      if not search_in_progress then
+        if search_text_spinner then
+          search_text_spinner:stop()
+        end
+        return
+      end
+
+      -- Re-render results panel to update spinner
+      if multi_panel then
+        multi_panel:render_panel("results")
+      end
+    end,
+  })
+
+  search_text_spinner:start(100)  -- 100ms interval
+end
+
+---Stop the search spinner animation
+local function stop_search_spinner()
+  if search_text_spinner then
+    search_text_spinner:stop()
+    search_text_spinner = nil
+  end
+end
+
+---Get formatted elapsed time for search
+---@return string
+local function get_search_elapsed_time()
+  if search_start_time == 0 then
+    return "0.0s"
+  end
+  local elapsed_ms = (vim.uv.hrtime() - search_start_time) / 1000000
+  return string.format("%.1fs", elapsed_ms / 1000)
 end
 
 ---System schemas to filter out when show_system is false
@@ -1136,11 +1189,20 @@ function UiObjectSearch._apply_search_async(pattern, callback)
   if not pattern or pattern == "" or total_objects < SEARCH_CHUNK_SIZE then
     UiObjectSearch._apply_search(pattern)
     search_cancel_token = nil
+    search_in_progress = false
+    search_progress = 0
+    stop_search_spinner()
     if callback then callback() end
     return
   end
 
+  -- Initialize search progress tracking
   search_in_progress = true
+  search_progress = 0
+  search_start_time = vim.uv.hrtime()
+
+  -- Start the search spinner for animated progress
+  start_search_spinner()
 
   -- Pre-compute search state
   local filtered = {}
@@ -1172,11 +1234,16 @@ function UiObjectSearch._apply_search_async(pattern, callback)
     -- Check cancellation
     if cancel_token.is_cancelled then
       search_in_progress = false
+      search_progress = 0
+      stop_search_spinner()
       return
     end
 
     -- Process this chunk
     local end_idx = math.min(idx + chunk_size - 1, total_objects)
+
+    -- Update progress
+    search_progress = math.floor((end_idx / total_objects) * 100)
 
     for i = idx, end_idx do
       if #filtered >= max_results then break end
@@ -1281,6 +1348,8 @@ function UiObjectSearch._apply_search_async(pattern, callback)
       -- Done processing - finalize
       if cancel_token.is_cancelled then
         search_in_progress = false
+        search_progress = 0
+        stop_search_spinner()
         return
       end
 
@@ -1299,8 +1368,11 @@ function UiObjectSearch._apply_search_async(pattern, callback)
         ui_state.selected_result_idx = math.max(1, #ui_state.filtered_results)
       end
 
+      -- Reset search progress state
       search_in_progress = false
+      search_progress = 100
       search_cancel_token = nil
+      stop_search_spinner()
 
       -- Final render
       if multi_panel then
@@ -1324,6 +1396,8 @@ function UiObjectSearch.cancel_search()
     search_cancel_token = nil
   end
   search_in_progress = false
+  search_progress = 0
+  stop_search_spinner()
 end
 
 ---Check if an async search is in progress
@@ -1712,6 +1786,30 @@ local function render_results(state)
       { text = " · ", style = "muted" },
       { text = tostring(#ui_state.loaded_objects), style = "value" },
       { text = " objects loaded", style = "muted" },
+    })
+    cb:blank()
+  end
+
+  -- Show search filtering progress when actively searching (separate from object loading)
+  if search_in_progress and search_text_spinner then
+    local spinner_char = search_text_spinner:get_frame()
+    local elapsed = get_search_elapsed_time()
+    local total = #ui_state.loaded_objects
+    local searched = math.floor(total * search_progress / 100)
+
+    cb:spans({
+      { text = " ", style = "normal" },
+      { text = spinner_char, style = "warning" },
+      { text = " Filtering: ", style = "emphasis" },
+      { text = tostring(searched), style = "value" },
+      { text = "/", style = "muted" },
+      { text = tostring(total), style = "value" },
+      { text = string.format(" (%d%%)", search_progress), style = "muted" },
+      { text = " · ", style = "muted" },
+      { text = elapsed, style = "value" },
+      { text = " · ", style = "muted" },
+      { text = tostring(#ui_state.filtered_results), style = "success" },
+      { text = " matches", style = "muted" },
     })
     cb:blank()
   end
