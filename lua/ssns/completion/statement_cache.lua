@@ -425,9 +425,79 @@ function StatementCache._update_cache(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local text = table.concat(lines, '\n')
 
+  -- Check file size against threshold
+  local Config = require('ssns.config')
+  local completion_config = Config.get_completion()
+  local max_bytes = completion_config.statement_cache_max_bytes or 500000
+
+  local is_large_file = #text > max_bytes
+  local partial_parse = false
+  local parse_start_line = 1
+  local parse_end_line = #lines
+
+  if is_large_file then
+    -- For large files, only parse around the cursor position
+    -- Get cursor position if window is available
+    local winnr = vim.fn.bufwinnr(bufnr)
+    if winnr > 0 then
+      local winid = vim.fn.win_getid(winnr)
+      local cursor = vim.api.nvim_win_get_cursor(winid)
+      local cursor_line = cursor[1]
+
+      -- Parse 500 lines around cursor (250 above, 250 below)
+      local buffer_lines = 250
+      parse_start_line = math.max(1, cursor_line - buffer_lines)
+      parse_end_line = math.min(#lines, cursor_line + buffer_lines)
+
+      -- Extract only the relevant lines
+      local partial_lines = {}
+      for i = parse_start_line, parse_end_line do
+        table.insert(partial_lines, lines[i])
+      end
+      text = table.concat(partial_lines, '\n')
+      partial_parse = true
+
+      Debug.log(string.format(
+        "[StatementCache] Large file (%d bytes), partial parse lines %d-%d (cursor at %d)",
+        #text, parse_start_line, parse_end_line, cursor_line
+      ))
+    else
+      -- No window, skip parsing entirely for very large files
+      Debug.log(string.format(
+        "[StatementCache] Large file (%d bytes) with no window, skipping parse",
+        #text
+      ))
+      _cache[bufnr] = {
+        chunks = {},
+        tokens = {},
+        temp_tables = {},
+        go_boundaries = {},
+        last_update = os.clock(),
+        buffer_tick = tick,
+        is_partial = true,
+        skipped_parsing = true,
+      }
+      return
+    end
+  end
+
   -- Parse the buffer (now returns tokens as third value)
   local StatementParser = require('ssns.completion.statement_parser')
   local chunks, temp_tables, tokens = StatementParser.parse(text)
+
+  -- For partial parses, adjust line numbers to account for the offset
+  if partial_parse then
+    local line_offset = parse_start_line - 1
+    for _, chunk in ipairs(chunks) do
+      chunk.start_line = chunk.start_line + line_offset
+      chunk.end_line = chunk.end_line + line_offset
+    end
+    for _, token in ipairs(tokens) do
+      if token.line then
+        token.line = token.line + line_offset
+      end
+    end
+  end
 
   -- Extract GO boundaries (line numbers where GO batch index changes)
   local go_boundaries = {}
@@ -448,6 +518,9 @@ function StatementCache._update_cache(bufnr)
     go_boundaries = go_boundaries,
     last_update = os.clock(),
     buffer_tick = tick,
+    is_partial = partial_parse,
+    parse_start_line = partial_parse and parse_start_line or nil,
+    parse_end_line = partial_parse and parse_end_line or nil,
   }
 
   -- Notify registered callbacks
