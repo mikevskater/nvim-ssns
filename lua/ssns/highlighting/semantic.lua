@@ -12,8 +12,8 @@ local enabled_buffers = {}
 -- Pending highlight timers per buffer (for minimal debounce)
 local pending_timers = {}
 
--- Debounce delay in ms (very short for responsiveness)
-local DEBOUNCE_MS = 0
+-- Debounce delay in ms (prevents excessive updates on rapid typing)
+local DEBOUNCE_MS = 50
 
 ---Setup the semantic highlighter (call once during plugin init)
 function SemanticHighlighter.setup()
