@@ -14,8 +14,9 @@ local CHARS = {
 -- Highlight namespace for scrollbar
 local NS_NAME = "ssns_scrollbar"
 
--- Throttle interval for scrollbar updates (ms)
-local THROTTLE_MS = 50
+-- Debounce interval for scrollbar updates (ms)
+-- Only update scrollbar AFTER scrolling stops to avoid lag during scroll
+local DEBOUNCE_MS = 100
 
 ---Setup the scrollbar overlay window
 ---@param float FloatWindow The parent FloatWindow instance
@@ -41,11 +42,12 @@ function Scrollbar.setup(float)
     return
   end
 
-  -- Create scrollbar buffer
+  -- Create scrollbar buffer (keep modifiable to avoid toggling during updates)
   float._scrollbar_bufnr = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_option(float._scrollbar_bufnr, 'buftype', 'nofile')
   vim.api.nvim_buf_set_option(float._scrollbar_bufnr, 'bufhidden', 'wipe')
   vim.api.nvim_buf_set_option(float._scrollbar_bufnr, 'swapfile', false)
+  vim.api.nvim_buf_set_option(float._scrollbar_bufnr, 'modifiable', true)
 
   -- Calculate scrollbar position
   -- For editor-relative floats, the window row/col is where content starts
@@ -75,34 +77,26 @@ function Scrollbar.setup(float)
   -- Initial scrollbar render
   Scrollbar.update(float)
 
-  -- Setup autocmd to track scrolling in main window (with throttling)
-  float._scrollbar_last_update = 0  -- Track last update time for throttling
-  float._scrollbar_pending_timer = nil  -- Timer for trailing throttle update
+  -- Setup autocmd to track scrolling in main window (with debounce)
+  -- Only update AFTER scrolling stops to avoid lag during scroll
+  float._scrollbar_pending_timer = nil
   float._scrollbar_autocmd = vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "WinScrolled" }, {
     buffer = float.bufnr,
     callback = function()
-      local now = vim.loop.now()
-      local elapsed = now - (float._scrollbar_last_update or 0)
-
-      if elapsed >= THROTTLE_MS then
-        -- Enough time has passed, update immediately
-        float._scrollbar_last_update = now
-        Scrollbar.update(float)
-      else
-        -- Schedule a trailing update if not already scheduled
-        if not float._scrollbar_pending_timer then
-          local delay = THROTTLE_MS - elapsed
-          float._scrollbar_pending_timer = vim.fn.timer_start(delay, function()
-            float._scrollbar_pending_timer = nil
-            vim.schedule(function()
-              if float:is_valid() then
-                float._scrollbar_last_update = vim.loop.now()
-                Scrollbar.update(float)
-              end
-            end)
-          end)
-        end
+      -- Cancel any pending update
+      if float._scrollbar_pending_timer then
+        vim.fn.timer_stop(float._scrollbar_pending_timer)
       end
+
+      -- Schedule update after scroll stops (debounce pattern)
+      float._scrollbar_pending_timer = vim.fn.timer_start(DEBOUNCE_MS, function()
+        float._scrollbar_pending_timer = nil
+        vim.schedule(function()
+          if float:is_valid() then
+            Scrollbar.update(float)
+          end
+        end)
+      end)
     end,
   })
 end
@@ -135,6 +129,13 @@ function Scrollbar.update(float)
   local win_info = vim.fn.getwininfo(float.winid)[1]
   local top_line = win_info and win_info.topline or 1
   local bot_line = math.min(top_line + win_height - 1, total_lines)
+
+  -- Skip update if scroll position hasn't changed (avoids unnecessary redraws)
+  if float._scrollbar_last_top == top_line and float._scrollbar_last_total == total_lines then
+    return
+  end
+  float._scrollbar_last_top = top_line
+  float._scrollbar_last_total = total_lines
 
   -- Build scrollbar content
   local scrollbar_lines = {}
@@ -195,10 +196,15 @@ function Scrollbar.update(float)
     end
   end
 
-  -- Update scrollbar buffer
-  vim.api.nvim_buf_set_option(float._scrollbar_bufnr, 'modifiable', true)
+  -- Check if scrollbar content actually changed (avoid unnecessary updates)
+  local new_content = table.concat(scrollbar_lines, "\n")
+  if float._scrollbar_last_content == new_content then
+    return
+  end
+  float._scrollbar_last_content = new_content
+
+  -- Update scrollbar buffer (buffer is always modifiable - set in setup)
   vim.api.nvim_buf_set_lines(float._scrollbar_bufnr, 0, -1, false, scrollbar_lines)
-  vim.api.nvim_buf_set_option(float._scrollbar_bufnr, 'modifiable', false)
 
   -- Apply themed highlights
   local ns_id = vim.api.nvim_create_namespace(NS_NAME)
@@ -243,6 +249,11 @@ function Scrollbar.close(float)
     vim.api.nvim_buf_delete(float._scrollbar_bufnr, { force = true })
   end
   float._scrollbar_bufnr = nil
+
+  -- Reset tracking state for next instance
+  float._scrollbar_last_top = nil
+  float._scrollbar_last_total = nil
+  float._scrollbar_last_content = nil
 end
 
 ---Reposition scrollbar after window geometry changes (e.g., on resize)

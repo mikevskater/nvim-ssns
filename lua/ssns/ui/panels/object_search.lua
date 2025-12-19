@@ -2361,6 +2361,7 @@ end
 local function navigate_results(direction)
   if #ui_state.filtered_results == 0 then return end
 
+  local old_idx = ui_state.selected_result_idx
   ui_state.selected_result_idx = ui_state.selected_result_idx + direction
 
   if ui_state.selected_result_idx < 1 then
@@ -2370,11 +2371,8 @@ local function navigate_results(direction)
   end
 
   if multi_panel then
-    multi_panel:render_panel("results")
-    multi_panel:render_panel("metadata")
-    multi_panel:render_panel("definition")
-    -- Results list starts at line 2 (line 1 is header)
-    -- Ensure cursor stays within buffer bounds
+    -- DON'T re-render results panel on navigation - just move cursor
+    -- This avoids expensive chunked re-renders on every j/k press
     local results_buf = multi_panel:get_panel_buffer("results")
     if results_buf and vim.api.nvim_buf_is_valid(results_buf) then
       local line_count = vim.api.nvim_buf_line_count(results_buf)
@@ -2382,6 +2380,10 @@ local function navigate_results(direction)
       target_line = math.max(1, target_line)
       multi_panel:set_cursor("results", target_line, 0)
     end
+
+    -- Only re-render metadata and definition panels (they show selected item details)
+    multi_panel:render_panel("metadata")
+    multi_panel:render_panel("definition")
   end
 end
 

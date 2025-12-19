@@ -129,7 +129,8 @@ local function on_selection_change()
   if theme and multi_panel then
     ThemeManager.preview(theme.name)
 
-    -- Re-render both panels to update highlighting and current marker
+    -- Re-render both panels - themes panel needs new colors, preview shows the theme
+    -- (Theme list is typically small, so chunked rendering won't trigger)
     multi_panel:render_panel("themes")
     multi_panel:render_panel("preview")
   end

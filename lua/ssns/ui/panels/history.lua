@@ -744,11 +744,12 @@ local function navigate_history(direction)
     ui_state.selected_entry_idx = 1
   end
 
-  -- Re-render history and preview
+  -- DON'T re-render history panel on navigation - just move cursor
+  -- This avoids expensive re-renders on every j/k press
   if multi_panel then
-    multi_panel:render_panel("history")
-    multi_panel:render_panel("preview")
     multi_panel:set_cursor("history", ui_state.selected_entry_idx + 3, 0)
+    -- Only re-render preview panel (shows selected entry content)
+    multi_panel:render_panel("preview")
   end
 end
 

@@ -582,6 +582,7 @@ function FloatWindow:update_lines_chunked(lines, opts)
   local state = self._chunked_state
   local bufnr = self.bufnr
   local current_idx = 1
+  local is_first_chunk = true
 
   -- Store lines for later (will be set after all chunks written)
   local final_lines = lines
@@ -589,8 +590,8 @@ function FloatWindow:update_lines_chunked(lines, opts)
   -- Make buffer modifiable for the duration of chunked write
   vim.api.nvim_buf_set_option(bufnr, 'modifiable', true)
 
-  -- Clear buffer first
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
+  -- NOTE: Don't clear buffer first - causes visible flash
+  -- First chunk will replace entire buffer content instead
 
   local float_self = self
 
@@ -609,9 +610,16 @@ function FloatWindow:update_lines_chunked(lines, opts)
       table.insert(chunk, lines[i])
     end
 
-    -- Append chunk to buffer
-    local append_start = current_idx - 1  -- 0-indexed
-    vim.api.nvim_buf_set_lines(bufnr, append_start, append_start, false, chunk)
+    -- Write chunk to buffer
+    if is_first_chunk then
+      -- First chunk: replace entire buffer content (avoids flash from clearing first)
+      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, chunk)
+      is_first_chunk = false
+    else
+      -- Subsequent chunks: append at the correct position
+      local append_start = current_idx - 1  -- 0-indexed
+      vim.api.nvim_buf_set_lines(bufnr, append_start, append_start, false, chunk)
+    end
 
     -- Report progress
     if on_progress then

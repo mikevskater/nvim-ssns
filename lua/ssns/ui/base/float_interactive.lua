@@ -159,8 +159,10 @@ function UiFloatInteractive.navigate(state, direction)
     end
   end
 
-  -- Re-render to update selection indicator
-  UiFloatInteractive.render(state)
+  -- DON'T re-render on navigation - just move cursor
+  -- Uses cursorline for selection highlighting, no need to rebuild buffer
+  local cursor_line = state.header_lines + state.selected_idx
+  UiFloatBase.set_cursor(state.winid, cursor_line, 0)
 
   -- Call navigation callback if provided
   if state.config.on_navigate then
