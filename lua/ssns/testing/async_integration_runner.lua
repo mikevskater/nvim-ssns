@@ -108,9 +108,12 @@ local function run_async_completion_test(test_data, opts)
     return result
   end
 
-  -- Clear cache if requested
+  -- Clear cache if requested (for cold load testing)
   if test_data.clear_cache then
-    Cache.clear_all()
+    -- Safely clear cache - ignore errors as cache may be in inconsistent state
+    pcall(function()
+      Cache.clear_all()
+    end)
     -- Re-setup connection after cache clear
     connection_info, conn_err = setup_test_connection(test_data)
     if not connection_info then
@@ -742,7 +745,8 @@ local function run_async_rpc_test(test_data, opts)
       result.passed = result.passed and schemas and #schemas > 0
     end
     if test_data.expected.has_tables then
-      result.passed = result.passed and database:get_all_tables() and #database:get_all_tables() > 0
+      local tables = database:get_tables()
+      result.passed = result.passed and tables and #tables > 0
     end
 
   elseif operation == "connect_and_load" then
@@ -814,10 +818,12 @@ local function run_async_rpc_test(test_data, opts)
       end
 
       if table_obj then
-        Resolver.get_columns_async(table_obj, server, function(columns)
-          callback_called = true
-          signal({ columns = columns })
-        end)
+        Resolver.get_columns_async(table_obj, { server = server, database = database }, {
+          on_complete = function(columns)
+            callback_called = true
+            signal({ columns = columns })
+          end,
+        })
 
         local column_result = waiter()
         result.passed = callback_called

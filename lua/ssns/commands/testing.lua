@@ -82,6 +82,29 @@ function M.register()
     nargs = 0,
     desc = "Open the test results markdown file",
   })
+
+  -- :SSNSRunAsyncTests - Run all async integration tests
+  vim.api.nvim_create_user_command("SSNSRunAsyncTests", function()
+    local testing = require("ssns.testing")
+    testing.run_async_integration_tests()
+  end, {
+    nargs = 0,
+    desc = "Run all SSNS async integration tests",
+  })
+
+  -- :SSNSRunAsyncTest <number> - Run a specific async integration test by ID
+  vim.api.nvim_create_user_command("SSNSRunAsyncTest", function(opts)
+    local test_id = tonumber(opts.args)
+    if not test_id then
+      vim.notify("Invalid test ID. Usage: :SSNSRunAsyncTest <id>", vim.log.levels.ERROR)
+      return
+    end
+    local testing = require("ssns.testing")
+    testing.run_async_integration_test(test_id)
+  end, {
+    nargs = 1,
+    desc = "Run a specific async integration test by ID (10001-10999)",
+  })
 end
 
 return M
