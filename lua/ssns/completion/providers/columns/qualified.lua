@@ -529,7 +529,7 @@ function M.get_qualified_columns_async(sql_context, connection, context, opts)
   Resolver.get_columns_async(table_obj, connection, {
     on_complete = function(columns, err)
       -- Check cancellation before processing results
-      if cancel_token and cancel_token:is_cancelled() then
+      if cancel_token and cancel_token.is_cancelled then
         return
       end
 
@@ -654,7 +654,7 @@ function M.get_qualified_bracket_columns_async(sql_context, connection, context,
   Resolver.get_columns_async(table_obj, connection, {
     on_complete = function(columns, err)
       -- Check cancellation before processing results
-      if cancel_token and cancel_token:is_cancelled() then
+      if cancel_token and cancel_token.is_cancelled then
         return
       end
 

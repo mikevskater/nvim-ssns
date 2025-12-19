@@ -86,7 +86,8 @@ end
 ---@return boolean is_cancellation True if error is from cancellation
 function Cancellation.is_cancellation_error(err)
   if type(err) == "string" then
-    return err:match("^OperationCancelled:") ~= nil
+    -- Look for OperationCancelled anywhere in the string (error() may prepend file:line)
+    return err:find("OperationCancelled:") ~= nil
   end
   return false
 end

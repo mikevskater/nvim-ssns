@@ -283,7 +283,7 @@ function M.get_all_columns_from_query_async(connection, context, opts)
     pending = pending - 1
     if pending == 0 and not has_error then
       -- Check cancellation before processing results
-      if cancel_token and cancel_token:is_cancelled() then
+      if cancel_token and cancel_token.is_cancelled then
         return
       end
       -- All columns fetched, now format and deduplicate
@@ -398,7 +398,7 @@ function M.get_where_clause_columns_async(connection, context, opts)
     cancel_token = cancel_token,
     on_complete = function(base_items, err)
       -- Check cancellation
-      if cancel_token and cancel_token:is_cancelled() then
+      if cancel_token and cancel_token.is_cancelled then
         return
       end
 
@@ -425,7 +425,7 @@ function M.get_where_clause_columns_async(connection, context, opts)
           Resolver.get_columns_async(left_table, connection, {
             on_complete = function(left_cols, _)
               -- Check cancellation
-              if cancel_token and cancel_token:is_cancelled() then
+              if cancel_token and cancel_token.is_cancelled then
                 return
               end
 

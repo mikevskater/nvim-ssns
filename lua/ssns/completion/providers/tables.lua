@@ -462,7 +462,7 @@ function TablesProvider.get_completions_async(ctx, opts)
   if pending == 0 then
     vim.schedule(function()
       -- Check cancellation before running
-      if cancel_token and cancel_token:is_cancelled() then
+      if cancel_token and cancel_token.is_cancelled then
         return
       end
       local success, result = pcall(function()
@@ -482,7 +482,7 @@ function TablesProvider.get_completions_async(ctx, opts)
     pending = pending - 1
     if pending == 0 and not has_error then
       -- Check cancellation before running sync impl
-      if cancel_token and cancel_token:is_cancelled() then
+      if cancel_token and cancel_token.is_cancelled then
         return
       end
       -- All databases loaded, now run sync impl

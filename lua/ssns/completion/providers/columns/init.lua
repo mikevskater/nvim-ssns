@@ -209,7 +209,7 @@ function ColumnsProvider.get_completions_async(ctx, opts)
        sql_context.mode == "qualified_bracket" then
       vim.schedule(function()
         -- Check cancellation
-        if cancel_token and cancel_token:is_cancelled() then
+        if cancel_token and cancel_token.is_cancelled then
           return
         end
         local success, result = pcall(function()
@@ -238,7 +238,7 @@ function ColumnsProvider.get_completions_async(ctx, opts)
       timeout_ms = opts.timeout_ms or 5000,
       on_complete = function(success, err)
         -- Check cancellation after load
-        if cancel_token and cancel_token:is_cancelled() then
+        if cancel_token and cancel_token.is_cancelled then
           return
         end
         if not success then
@@ -272,7 +272,7 @@ function ColumnsProvider._async_with_resolved_scope(ctx, opts, on_complete)
   -- Helper to run the completion after pre-resolution
   local function run_completion()
     -- Check cancellation before running
-    if cancel_token and cancel_token:is_cancelled() then
+    if cancel_token and cancel_token.is_cancelled then
       return
     end
 
@@ -307,7 +307,7 @@ function ColumnsProvider._async_with_resolved_scope(ctx, opts, on_complete)
       -- Other modes: run sync impl (special cases like ON, INSERT, VALUES, OUTPUT)
       vim.schedule(function()
         -- Check cancellation before running sync impl
-        if cancel_token and cancel_token:is_cancelled() then
+        if cancel_token and cancel_token.is_cancelled then
           return
         end
         local success, result = pcall(function()
@@ -329,7 +329,7 @@ function ColumnsProvider._async_with_resolved_scope(ctx, opts, on_complete)
       cancel_token = cancel_token,
       on_complete = function(resolved_scope, err)
         -- Check cancellation after pre-resolution
-        if cancel_token and cancel_token:is_cancelled() then
+        if cancel_token and cancel_token.is_cancelled then
           return
         end
         -- Inject resolved scope into context
