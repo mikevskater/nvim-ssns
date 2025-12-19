@@ -597,9 +597,12 @@ function M.run_async_integration_tests(opts)
   end
 
   -- Display results
-  local pass_rate = results.total > 0 and (results.passed / results.total * 100) or 0
-  vim.notify(string.format("Async Integration Tests: %d/%d passed (%.1f%%)",
-    results.passed, results.total, pass_rate),
+  local executed = results.total - (results.skipped or 0)
+  local pass_rate = executed > 0 and (results.passed / executed * 100) or 0
+  local skip_msg = results.skipped and results.skipped > 0
+      and string.format(", %d skipped", results.skipped) or ""
+  vim.notify(string.format("Async Integration Tests: %d/%d passed (%.1f%%)%s",
+    results.passed, executed, pass_rate, skip_msg),
     results.failed > 0 and vim.log.levels.WARN or vim.log.levels.INFO)
 
   -- Write markdown report

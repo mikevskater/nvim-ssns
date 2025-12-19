@@ -265,6 +265,8 @@ return {
     type = "async_integration",
     name = "Async export - multiple concurrent exports",
     description = "Verify multiple exports can run concurrently",
+    skip = true, -- Concurrent export test requires parallel test execution infrastructure
+    skip_reason = "Concurrent test execution infrastructure not implemented",
     concurrent_exports = {
       {
         mock_results = { columns = { "A" }, rows = { { 1 } } },
