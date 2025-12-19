@@ -1780,6 +1780,1505 @@ function UnitRunner._run_async_debug_test(test)
   return result, passed, error_msg
 end
 
+---Run async cancellation test
+---@param test table Test definition
+---@return table actual Actual output
+---@return boolean passed Whether test passed
+---@return string? error Error message if failed
+function UnitRunner._run_async_cancellation_test(test)
+  local ok, Cancellation = pcall(require, "ssns.async.cancellation")
+  if not ok then
+    return nil, false, "Failed to load Cancellation module: " .. tostring(Cancellation)
+  end
+
+  local method = test.method
+  local input = test.input or {}
+  local expected = test.expected or {}
+
+  local passed = true
+  local error_msg = nil
+  local result = {}
+
+  if method == "create_token" then
+    local token = Cancellation.create_token()
+    result.has_token = token ~= nil
+    result.is_cancelled = token.is_cancelled
+
+    if expected.has_token and not result.has_token then
+      passed = false
+      error_msg = "Expected token to be created"
+    end
+    if expected.is_cancelled ~= nil and result.is_cancelled ~= expected.is_cancelled then
+      passed = false
+      error_msg = string.format("Expected is_cancelled=%s, got %s", tostring(expected.is_cancelled), tostring(result.is_cancelled))
+    end
+
+  elseif method == "cancel_token" then
+    local token = Cancellation.create_token()
+    token:cancel()
+    result.is_cancelled = token.is_cancelled
+
+    if expected.is_cancelled and not result.is_cancelled then
+      passed = false
+      error_msg = "Expected token to be cancelled after cancel()"
+    end
+
+  elseif method == "cancel_with_reason" then
+    local token = Cancellation.create_token()
+    token:cancel(input.reason)
+    result.is_cancelled = token.is_cancelled
+    result.reason = token.reason
+
+    if expected.is_cancelled and not result.is_cancelled then
+      passed = false
+      error_msg = "Expected token to be cancelled"
+    end
+    if expected.reason and result.reason ~= expected.reason then
+      passed = false
+      error_msg = string.format("Expected reason='%s', got '%s'", expected.reason, result.reason or "nil")
+    end
+
+  elseif method == "cancel_without_reason" then
+    local token = Cancellation.create_token()
+    token:cancel()
+    result.is_cancelled = token.is_cancelled
+    result.has_reason = token.reason ~= nil
+
+    if expected.is_cancelled and not result.is_cancelled then
+      passed = false
+      error_msg = "Expected token to be cancelled"
+    end
+    if expected.has_reason and not result.has_reason then
+      passed = false
+      error_msg = "Expected token to have default reason"
+    end
+
+  elseif method == "double_cancel" then
+    local token = Cancellation.create_token()
+    token:cancel("First reason")
+    local first_reason = token.reason
+    token:cancel("Second reason")
+    result.is_cancelled = token.is_cancelled
+    result.first_reason_preserved = token.reason == first_reason
+
+    if expected.is_cancelled and not result.is_cancelled then
+      passed = false
+      error_msg = "Expected token to be cancelled"
+    end
+    if expected.first_reason_preserved and not result.first_reason_preserved then
+      passed = false
+      error_msg = "Expected first reason to be preserved on double cancel"
+    end
+
+  elseif method == "on_cancel_invoked" then
+    local token = Cancellation.create_token()
+    local callback_invoked = false
+    token:on_cancel(function()
+      callback_invoked = true
+    end)
+    token:cancel()
+    -- Wait for vim.schedule if needed
+    vim.wait(50, function() return callback_invoked end, 10)
+    result.callback_invoked = callback_invoked
+
+    if expected.callback_invoked and not result.callback_invoked then
+      passed = false
+      error_msg = "Expected callback to be invoked on cancel"
+    end
+
+  elseif method == "on_cancel_receives_reason" then
+    local token = Cancellation.create_token()
+    local received_reason = nil
+    token:on_cancel(function(reason)
+      received_reason = reason
+    end)
+    token:cancel(input.reason)
+    vim.wait(50, function() return received_reason ~= nil end, 10)
+    result.received_reason = received_reason
+
+    if expected.received_reason and result.received_reason ~= expected.received_reason then
+      passed = false
+      error_msg = string.format("Expected received_reason='%s', got '%s'", expected.received_reason, result.received_reason or "nil")
+    end
+
+  elseif method == "multiple_callbacks" then
+    local token = Cancellation.create_token()
+    local invoke_count = 0
+    token:on_cancel(function() invoke_count = invoke_count + 1 end)
+    token:on_cancel(function() invoke_count = invoke_count + 1 end)
+    token:on_cancel(function() invoke_count = invoke_count + 1 end)
+    token:cancel()
+    vim.wait(50, function() return invoke_count >= 3 end, 10)
+    result.invoke_count = invoke_count
+    result.all_invoked = invoke_count == 3
+
+    if expected.all_invoked and not result.all_invoked then
+      passed = false
+      error_msg = string.format("Expected all 3 callbacks invoked, got %d", invoke_count)
+    end
+
+  elseif method == "on_cancel_already_cancelled" then
+    local token = Cancellation.create_token()
+    token:cancel("Pre-cancelled")
+    local callback_invoked = false
+    token:on_cancel(function()
+      callback_invoked = true
+    end)
+    vim.wait(100, function() return callback_invoked end, 10)
+    result.callback_invoked = callback_invoked
+
+    if expected.callback_invoked and not result.callback_invoked then
+      passed = false
+      error_msg = "Expected callback to be invoked immediately for already cancelled token"
+    end
+
+  elseif method == "unregister_callback" then
+    local token = Cancellation.create_token()
+    local callback_invoked = false
+    local unregister = token:on_cancel(function()
+      callback_invoked = true
+    end)
+    unregister()
+    token:cancel()
+    vim.wait(50, function() return false end, 10) -- Just wait a bit
+    result.callback_not_invoked = not callback_invoked
+
+    if expected.callback_not_invoked and callback_invoked then
+      passed = false
+      error_msg = "Expected callback NOT to be invoked after unregister"
+    end
+
+  elseif method == "throw_not_cancelled" then
+    local token = Cancellation.create_token()
+    local threw = false
+    local throw_ok = pcall(function()
+      token:throw_if_cancelled()
+    end)
+    result.no_error = throw_ok
+
+    if expected.no_error and not result.no_error then
+      passed = false
+      error_msg = "Expected no error for non-cancelled token"
+    end
+
+  elseif method == "throw_when_cancelled" then
+    local token = Cancellation.create_token()
+    token:cancel("Test cancellation")
+    local threw_error = false
+    local is_cancellation = false
+    local throw_ok, err = pcall(function()
+      token:throw_if_cancelled()
+    end)
+    threw_error = not throw_ok
+    if err then
+      is_cancellation = Cancellation.is_cancellation_error(err)
+    end
+    result.threw_error = threw_error
+    result.is_cancellation_error = is_cancellation
+
+    if expected.threw_error and not result.threw_error then
+      passed = false
+      error_msg = "Expected error to be thrown for cancelled token"
+    end
+    if expected.is_cancellation_error and not result.is_cancellation_error then
+      passed = false
+      error_msg = "Expected error to be a cancellation error"
+    end
+
+  elseif method == "linked_token_parent_cancel" then
+    local parent = Cancellation.create_token()
+    local linked = Cancellation.create_linked_token(parent)
+    parent:cancel("Parent cancelled")
+    result.linked_cancelled = linked.is_cancelled
+
+    if expected.linked_cancelled and not result.linked_cancelled then
+      passed = false
+      error_msg = "Expected linked token to be cancelled when parent cancels"
+    end
+
+  elseif method == "linked_token_parent_not_cancelled" then
+    local parent = Cancellation.create_token()
+    local linked = Cancellation.create_linked_token(parent)
+    result.linked_not_cancelled = not linked.is_cancelled
+
+    if expected.linked_not_cancelled and linked.is_cancelled then
+      passed = false
+      error_msg = "Expected linked token NOT to be cancelled when parent is not cancelled"
+    end
+
+  elseif method == "linked_token_already_cancelled_parent" then
+    local parent = Cancellation.create_token()
+    parent:cancel("Already cancelled")
+    local linked = Cancellation.create_linked_token(parent)
+    result.linked_cancelled = linked.is_cancelled
+
+    if expected.linked_cancelled and not result.linked_cancelled then
+      passed = false
+      error_msg = "Expected linked token to be immediately cancelled for already-cancelled parent"
+    end
+
+  elseif method == "linked_token_multiple_parents" then
+    local parent1 = Cancellation.create_token()
+    local parent2 = Cancellation.create_token()
+    local linked = Cancellation.create_linked_token(parent1, parent2)
+    parent2:cancel("Parent 2 cancelled")
+    result.linked_cancelled = linked.is_cancelled
+    result.reason_from_cancelled_parent = linked.reason == "Parent 2 cancelled"
+
+    if expected.linked_cancelled and not result.linked_cancelled then
+      passed = false
+      error_msg = "Expected linked token to be cancelled when any parent cancels"
+    end
+    if expected.reason_from_cancelled_parent and not result.reason_from_cancelled_parent then
+      passed = false
+      error_msg = "Expected linked token reason to come from cancelled parent"
+    end
+
+  elseif method == "is_cancellation_error_test" then
+    -- Create a real cancellation error
+    local token = Cancellation.create_token()
+    token:cancel()
+    local _, cancel_err = pcall(function()
+      token:throw_if_cancelled()
+    end)
+
+    result.detects_cancellation_error = Cancellation.is_cancellation_error(cancel_err)
+    result.ignores_other_errors = not Cancellation.is_cancellation_error("Some other error")
+      and not Cancellation.is_cancellation_error(nil)
+      and not Cancellation.is_cancellation_error(123)
+
+    if expected.detects_cancellation_error and not result.detects_cancellation_error then
+      passed = false
+      error_msg = "Expected to detect cancellation error"
+    end
+    if expected.ignores_other_errors and not result.ignores_other_errors then
+      passed = false
+      error_msg = "Expected to ignore non-cancellation errors"
+    end
+
+  else
+    return nil, false, "Unknown Cancellation method: " .. tostring(method)
+  end
+
+  return result, passed, error_msg
+end
+
+---Run async completion provider test
+---@param test table Test definition
+---@return table actual Actual output
+---@return boolean passed Whether test passed
+---@return string? error Error message if failed
+function UnitRunner._run_async_completion_providers_test(test)
+  local method = test.method
+  local setup = test.setup or {}
+  local expected = test.expected or {}
+
+  local passed = true
+  local error_msg = nil
+  local result = {}
+
+  -- Create mock database if needed
+  local mock_database = nil
+  local mock_server = nil
+
+  if setup.mock_database or setup.mock_server then
+    mock_database = UnitRunner._create_mock_database({ database = "vim_dadbod_test" })
+
+    -- Create mock server
+    mock_server = {
+      name = "MockServer",
+      host = "localhost",
+      _databases = { mock_database },
+      is_connected = function() return true end,
+      get_database = function(self, name)
+        if name == "vim_dadbod_test" then
+          return mock_database
+        end
+        return nil
+      end,
+      get_databases = function(self)
+        return { mock_database }
+      end,
+    }
+  end
+
+  -- Create cancellation token if pre-cancel requested
+  local Cancellation = require("ssns.async.cancellation")
+  local cancel_token = Cancellation.create_token()
+  if setup.pre_cancel then
+    cancel_token:cancel("Pre-cancelled for test")
+  end
+
+  -- Create waiter for async callback
+  local waiter, signal = create_async_waiter(5000)
+
+  if method == "tables_async" then
+    local ok, TablesProvider = pcall(require, "ssns.completion.providers.tables")
+    if not ok then
+      return nil, false, "Failed to load TablesProvider: " .. tostring(TablesProvider)
+    end
+
+    local ctx = {
+      connection = {
+        server = mock_server,
+        database = mock_database,
+      },
+      sql_context = { mode = "from" },
+    }
+
+    TablesProvider.get_completions_async(ctx, {
+      cancel_token = cancel_token,
+      on_complete = function(items, err)
+        signal({ items = items, error = err }, nil)
+      end,
+    })
+
+    local async_result, wait_err = waiter()
+    if wait_err then
+      return nil, false, wait_err
+    end
+
+    result.has_items = async_result.items and #async_result.items > 0
+    if expected.includes_table and async_result.items then
+      result.found_table = false
+      for _, item in ipairs(async_result.items) do
+        if item.label == expected.includes_table or (item.label and item.label:find(expected.includes_table, 1, true)) then
+          result.found_table = true
+          break
+        end
+      end
+    end
+
+    if expected.has_items and not result.has_items then
+      passed = false
+      error_msg = "Expected items to be returned"
+    end
+    if expected.includes_table and not result.found_table then
+      passed = false
+      error_msg = string.format("Expected to find table '%s' in results", expected.includes_table)
+    end
+
+  elseif method == "tables_async_nil_connection" then
+    local ok, TablesProvider = pcall(require, "ssns.completion.providers.tables")
+    if not ok then
+      return nil, false, "Failed to load TablesProvider: " .. tostring(TablesProvider)
+    end
+
+    local ctx = {
+      connection = nil,
+      sql_context = {},
+    }
+
+    TablesProvider.get_completions_async(ctx, {
+      on_complete = function(items, err)
+        signal({ items = items, error = err }, nil)
+      end,
+    })
+
+    local async_result, wait_err = waiter()
+    if wait_err then
+      return nil, false, wait_err
+    end
+
+    result.empty_result = async_result.items == nil or #async_result.items == 0
+
+    if expected.empty_result and not result.empty_result then
+      passed = false
+      error_msg = "Expected empty result for nil connection"
+    end
+
+  elseif method == "tables_async_cancelled" then
+    local ok, TablesProvider = pcall(require, "ssns.completion.providers.tables")
+    if not ok then
+      return nil, false, "Failed to load TablesProvider: " .. tostring(TablesProvider)
+    end
+
+    local ctx = {
+      connection = {
+        server = mock_server,
+        database = mock_database,
+      },
+      sql_context = { mode = "from" },
+    }
+
+    local callback_called_with_items = false
+
+    TablesProvider.get_completions_async(ctx, {
+      cancel_token = cancel_token,
+      on_complete = function(items, err)
+        if items and #items > 0 then
+          callback_called_with_items = true
+        end
+        signal({ items = items, error = err }, nil)
+      end,
+    })
+
+    -- Wait a bit for any callbacks
+    vim.wait(200, function() return false end, 20)
+    result.callback_not_called_with_items = not callback_called_with_items
+
+    if expected.callback_not_called_with_items and callback_called_with_items then
+      passed = false
+      error_msg = "Expected callback NOT to be called with items when pre-cancelled"
+    end
+
+  elseif method == "columns_async_qualified" then
+    local ok, ColumnsProvider = pcall(require, "ssns.completion.providers.columns")
+    if not ok then
+      return nil, false, "Failed to load ColumnsProvider: " .. tostring(ColumnsProvider)
+    end
+
+    local ctx = {
+      connection = {
+        server = mock_server,
+        database = mock_database,
+      },
+      sql_context = {
+        mode = "column_qualified",
+        table_ref = setup.table_ref or "Employees",
+      },
+    }
+
+    ColumnsProvider.get_completions_async(ctx, {
+      cancel_token = cancel_token,
+      on_complete = function(items, err)
+        signal({ items = items, error = err }, nil)
+      end,
+    })
+
+    local async_result, wait_err = waiter()
+    if wait_err then
+      return nil, false, wait_err
+    end
+
+    result.has_items = async_result.items and #async_result.items > 0
+    if expected.includes_column and async_result.items then
+      result.found_column = false
+      for _, item in ipairs(async_result.items) do
+        if item.label == expected.includes_column then
+          result.found_column = true
+          break
+        end
+      end
+    end
+
+    if expected.has_items and not result.has_items then
+      passed = false
+      error_msg = "Expected column items to be returned"
+    end
+    if expected.includes_column and not result.found_column then
+      passed = false
+      error_msg = string.format("Expected to find column '%s' in results", expected.includes_column)
+    end
+
+  elseif method == "columns_async_nonexistent" then
+    local ok, ColumnsProvider = pcall(require, "ssns.completion.providers.columns")
+    if not ok then
+      return nil, false, "Failed to load ColumnsProvider: " .. tostring(ColumnsProvider)
+    end
+
+    local ctx = {
+      connection = {
+        server = mock_server,
+        database = mock_database,
+      },
+      sql_context = {
+        mode = "column_qualified",
+        table_ref = setup.table_ref or "NonExistentTable",
+      },
+    }
+
+    ColumnsProvider.get_completions_async(ctx, {
+      cancel_token = cancel_token,
+      on_complete = function(items, err)
+        signal({ items = items, error = err }, nil)
+      end,
+    })
+
+    local async_result, wait_err = waiter()
+    if wait_err then
+      return nil, false, wait_err
+    end
+
+    result.empty_result = async_result.items == nil or #async_result.items == 0
+
+    if expected.empty_result and not result.empty_result then
+      passed = false
+      error_msg = "Expected empty result for non-existent table"
+    end
+
+  elseif method == "columns_async_cancelled" then
+    local ok, ColumnsProvider = pcall(require, "ssns.completion.providers.columns")
+    if not ok then
+      return nil, false, "Failed to load ColumnsProvider: " .. tostring(ColumnsProvider)
+    end
+
+    local ctx = {
+      connection = {
+        server = mock_server,
+        database = mock_database,
+      },
+      sql_context = {
+        mode = "column_qualified",
+        table_ref = "Employees",
+      },
+    }
+
+    local callback_called_with_items = false
+
+    ColumnsProvider.get_completions_async(ctx, {
+      cancel_token = cancel_token,
+      on_complete = function(items, err)
+        if items and #items > 0 then
+          callback_called_with_items = true
+        end
+        signal({ items = items, error = err }, nil)
+      end,
+    })
+
+    vim.wait(200, function() return false end, 20)
+    result.callback_not_called_with_items = not callback_called_with_items
+
+    if expected.callback_not_called_with_items and callback_called_with_items then
+      passed = false
+      error_msg = "Expected callback NOT to be called with items when pre-cancelled"
+    end
+
+  elseif method == "schemas_async" then
+    local ok, SchemasProvider = pcall(require, "ssns.completion.providers.schemas")
+    if not ok then
+      return nil, false, "Failed to load SchemasProvider: " .. tostring(SchemasProvider)
+    end
+
+    local ctx = {
+      connection = {
+        server = mock_server,
+        database = mock_database,
+      },
+      sql_context = { mode = "schema" },
+    }
+
+    SchemasProvider.get_completions_async(ctx, {
+      cancel_token = cancel_token,
+      on_complete = function(items, err)
+        signal({ items = items, error = err }, nil)
+      end,
+    })
+
+    local async_result, wait_err = waiter()
+    if wait_err then
+      return nil, false, wait_err
+    end
+
+    result.has_items = async_result.items and #async_result.items > 0
+    if expected.includes_schema and async_result.items then
+      result.found_schema = false
+      for _, item in ipairs(async_result.items) do
+        if item.label == expected.includes_schema then
+          result.found_schema = true
+          break
+        end
+      end
+    end
+
+    if expected.has_items and not result.has_items then
+      passed = false
+      error_msg = "Expected schema items to be returned"
+    end
+    if expected.includes_schema and not result.found_schema then
+      passed = false
+      error_msg = string.format("Expected to find schema '%s' in results", expected.includes_schema)
+    end
+
+  elseif method == "databases_async" then
+    local ok, DatabasesProvider = pcall(require, "ssns.completion.providers.databases")
+    if not ok then
+      return nil, false, "Failed to load DatabasesProvider: " .. tostring(DatabasesProvider)
+    end
+
+    local ctx = {
+      connection = {
+        server = mock_server,
+        database = mock_database,
+      },
+      sql_context = { mode = "database" },
+    }
+
+    DatabasesProvider.get_completions_async(ctx, {
+      cancel_token = cancel_token,
+      on_complete = function(items, err)
+        signal({ items = items, error = err }, nil)
+      end,
+    })
+
+    local async_result, wait_err = waiter()
+    if wait_err then
+      return nil, false, wait_err
+    end
+
+    result.has_items = async_result.items and #async_result.items > 0
+    if expected.includes_database and async_result.items then
+      result.found_database = false
+      for _, item in ipairs(async_result.items) do
+        if item.label == expected.includes_database then
+          result.found_database = true
+          break
+        end
+      end
+    end
+
+    if expected.has_items and not result.has_items then
+      passed = false
+      error_msg = "Expected database items to be returned"
+    end
+    if expected.includes_database and not result.found_database then
+      passed = false
+      error_msg = string.format("Expected to find database '%s' in results", expected.includes_database)
+    end
+
+  elseif method == "callback_always_called" then
+    local ok, TablesProvider = pcall(require, "ssns.completion.providers.tables")
+    if not ok then
+      return nil, false, "Failed to load TablesProvider: " .. tostring(TablesProvider)
+    end
+
+    local ctx = {
+      connection = {
+        server = mock_server,
+        database = mock_database,
+      },
+      sql_context = { mode = "from" },
+    }
+
+    local callback_called = false
+
+    TablesProvider.get_completions_async(ctx, {
+      on_complete = function(items, err)
+        callback_called = true
+        signal({ items = items, error = err }, nil)
+      end,
+    })
+
+    local async_result, wait_err = waiter()
+    if wait_err then
+      return nil, false, wait_err
+    end
+
+    result.callback_called = callback_called
+
+    if expected.callback_called and not result.callback_called then
+      passed = false
+      error_msg = "Expected callback to be called"
+    end
+
+  elseif method == "callback_scheduled" then
+    local ok, TablesProvider = pcall(require, "ssns.completion.providers.tables")
+    if not ok then
+      return nil, false, "Failed to load TablesProvider: " .. tostring(TablesProvider)
+    end
+
+    local ctx = {
+      connection = {
+        server = mock_server,
+        database = mock_database,
+      },
+      sql_context = { mode = "from" },
+    }
+
+    local callback_after_return = false
+    local returned = false
+
+    TablesProvider.get_completions_async(ctx, {
+      on_complete = function(items, err)
+        callback_after_return = returned
+        signal({ items = items, error = err, after_return = callback_after_return }, nil)
+      end,
+    })
+
+    returned = true
+
+    local async_result, wait_err = waiter()
+    if wait_err then
+      return nil, false, wait_err
+    end
+
+    -- The callback should have been called AFTER get_completions_async returned
+    result.callback_scheduled = async_result.after_return
+
+    if expected.callback_scheduled and not result.callback_scheduled then
+      passed = false
+      error_msg = "Expected callback to be scheduled (called after return)"
+    end
+
+  else
+    return nil, false, "Unknown completion providers method: " .. tostring(method)
+  end
+
+  return result, passed, error_msg
+end
+
+---Run async chunked rendering test
+---@param test table Test definition
+---@return table actual Actual output
+---@return boolean passed Whether test passed
+---@return string? error Error message if failed
+function UnitRunner._run_async_chunked_rendering_test(test)
+  local method = test.method
+  local input = test.input or {}
+  local expected = test.expected or {}
+
+  local passed = true
+  local error_msg = nil
+  local result = {}
+
+  -- Helper to create test buffer
+  local function create_test_buffer()
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+    return bufnr
+  end
+
+  -- Helper to delete test buffer
+  local function delete_test_buffer(bufnr)
+    if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+      vim.api.nvim_buf_delete(bufnr, { force = true })
+    end
+  end
+
+  -- Helper to generate test lines
+  local function generate_lines(count)
+    local lines = {}
+    for i = 1, count do
+      table.insert(lines, string.format("Test line %d with some content", i))
+    end
+    return lines
+  end
+
+  -- Helper to create mock line_map for highlights
+  local function create_mock_line_map(count)
+    local line_map = {}
+    for i = 1, count do
+      line_map[i] = { object_type = "table", name = "Table" .. i }
+    end
+    return line_map
+  end
+
+  -- ============================================================================
+  -- UiBuffer.set_lines_chunked tests
+  -- ============================================================================
+
+  if method == "set_lines_chunked_small" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local test_bufnr = create_test_buffer()
+
+    -- Temporarily override UiBuffer
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local lines = generate_lines(input.line_count)
+    local complete_called = false
+    local waiter, signal = create_async_waiter(5000)
+
+    UiBuffer.set_lines_chunked(lines, {
+      on_complete = function()
+        complete_called = true
+        signal({ complete = true }, nil)
+      end,
+    })
+
+    -- For small content, should be synchronous
+    result.sync_path = complete_called -- Should be true immediately
+    result.on_complete_called = complete_called
+
+    if not result.sync_path then
+      -- Wait for async completion
+      waiter()
+      result.on_complete_called = complete_called
+    end
+
+    local buf_lines = vim.api.nvim_buf_get_lines(test_bufnr, 0, -1, false)
+    result.lines_written = #buf_lines
+
+    -- Restore and cleanup
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.sync_path and not result.sync_path then
+      passed = false
+      error_msg = "Expected sync path for small content"
+    end
+    if expected.lines_written and result.lines_written ~= expected.lines_written then
+      passed = false
+      error_msg = string.format("Expected %d lines, got %d", expected.lines_written, result.lines_written)
+    end
+
+  elseif method == "set_lines_chunked_exact" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local test_bufnr = create_test_buffer()
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local lines = generate_lines(input.line_count)
+    local complete_called = false
+
+    UiBuffer.set_lines_chunked(lines, {
+      chunk_size = input.chunk_size,
+      on_complete = function()
+        complete_called = true
+      end,
+    })
+
+    result.sync_path = complete_called
+    result.on_complete_called = complete_called
+
+    local buf_lines = vim.api.nvim_buf_get_lines(test_bufnr, 0, -1, false)
+    result.lines_written = #buf_lines
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.sync_path and not result.sync_path then
+      passed = false
+      error_msg = "Expected sync path for exact chunk_size content"
+    end
+
+  elseif method == "set_lines_chunked_large" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local test_bufnr = create_test_buffer()
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local lines = generate_lines(input.line_count)
+    local complete_called = false
+    local progress_calls = 0
+    local waiter, signal = create_async_waiter(5000)
+
+    UiBuffer.set_lines_chunked(lines, {
+      chunk_size = input.chunk_size,
+      on_progress = function(written, total)
+        progress_calls = progress_calls + 1
+      end,
+      on_complete = function()
+        complete_called = true
+        signal({ complete = true }, nil)
+      end,
+    })
+
+    -- For large content, should be async
+    result.async_path = not complete_called
+
+    waiter()
+    result.on_complete_called = complete_called
+    result.progress_call_count = progress_calls
+
+    local buf_lines = vim.api.nvim_buf_get_lines(test_bufnr, 0, -1, false)
+    result.lines_written = #buf_lines
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.async_path and not result.async_path then
+      passed = false
+      error_msg = "Expected async path for large content"
+    end
+    if expected.min_progress_calls and progress_calls < expected.min_progress_calls then
+      passed = false
+      error_msg = string.format("Expected at least %d progress calls, got %d", expected.min_progress_calls, progress_calls)
+    end
+
+  elseif method == "set_lines_chunked_custom_size" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local test_bufnr = create_test_buffer()
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local lines = generate_lines(input.line_count)
+    local complete_called = false
+    local progress_calls = 0
+    local waiter, signal = create_async_waiter(5000)
+
+    UiBuffer.set_lines_chunked(lines, {
+      chunk_size = input.chunk_size,
+      on_progress = function(written, total)
+        progress_calls = progress_calls + 1
+      end,
+      on_complete = function()
+        complete_called = true
+        signal({ complete = true }, nil)
+      end,
+    })
+
+    result.async_path = not complete_called
+
+    waiter()
+    result.on_complete_called = complete_called
+
+    local buf_lines = vim.api.nvim_buf_get_lines(test_bufnr, 0, -1, false)
+    result.lines_written = #buf_lines
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.async_path and not result.async_path then
+      passed = false
+      error_msg = "Expected async path for custom chunk size"
+    end
+
+  elseif method == "set_lines_chunked_progress" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local test_bufnr = create_test_buffer()
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local lines = generate_lines(input.line_count)
+    local progress_values = {}
+    local waiter, signal = create_async_waiter(5000)
+
+    UiBuffer.set_lines_chunked(lines, {
+      chunk_size = input.chunk_size,
+      on_progress = function(written, total)
+        table.insert(progress_values, { written = written, total = total })
+      end,
+      on_complete = function()
+        signal({ complete = true }, nil)
+      end,
+    })
+
+    waiter()
+
+    -- Check progress increases
+    result.progress_increases = true
+    local prev_written = 0
+    for _, p in ipairs(progress_values) do
+      if p.written < prev_written then
+        result.progress_increases = false
+        break
+      end
+      prev_written = p.written
+    end
+
+    -- Check final progress equals total
+    if #progress_values > 0 then
+      local final = progress_values[#progress_values]
+      result.final_progress_equals_total = final.written == final.total
+    else
+      result.final_progress_equals_total = false
+    end
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.progress_increases and not result.progress_increases then
+      passed = false
+      error_msg = "Expected progress to increase monotonically"
+    end
+    if expected.final_progress_equals_total and not result.final_progress_equals_total then
+      passed = false
+      error_msg = "Expected final progress to equal total"
+    end
+
+  elseif method == "set_lines_chunked_cancel" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local test_bufnr = create_test_buffer()
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local lines = generate_lines(input.line_count)
+    local progress_count = 0
+
+    UiBuffer.set_lines_chunked(lines, {
+      chunk_size = input.chunk_size,
+      on_progress = function(written, total)
+        progress_count = progress_count + 1
+        if progress_count >= input.cancel_after_chunks then
+          UiBuffer.cancel_chunked_write()
+        end
+      end,
+    })
+
+    -- Wait for cancellation to take effect
+    vim.wait(200, function() return not UiBuffer.is_chunked_write_active() end, 20)
+
+    result.cancelled = not UiBuffer.is_chunked_write_active()
+
+    local buf_lines = vim.api.nvim_buf_get_lines(test_bufnr, 0, -1, false)
+    result.partial_write = #buf_lines < input.line_count
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.cancelled and not result.cancelled then
+      passed = false
+      error_msg = "Expected chunked write to be cancelled"
+    end
+    if expected.partial_write and not result.partial_write then
+      passed = false
+      error_msg = "Expected partial write after cancel"
+    end
+
+  elseif method == "set_lines_chunked_active_check" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local test_bufnr = create_test_buffer()
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local lines = generate_lines(input.line_count)
+    local was_active_during = false
+    local waiter, signal = create_async_waiter(5000)
+
+    UiBuffer.set_lines_chunked(lines, {
+      chunk_size = input.chunk_size,
+      on_progress = function(written, total)
+        if UiBuffer.is_chunked_write_active() then
+          was_active_during = true
+        end
+      end,
+      on_complete = function()
+        signal({ complete = true }, nil)
+      end,
+    })
+
+    waiter()
+    result.active_during_write = was_active_during
+    result.inactive_after_complete = not UiBuffer.is_chunked_write_active()
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.active_during_write and not result.active_during_write then
+      passed = false
+      error_msg = "Expected is_chunked_write_active to be true during write"
+    end
+    if expected.inactive_after_complete and not result.inactive_after_complete then
+      passed = false
+      error_msg = "Expected is_chunked_write_active to be false after complete"
+    end
+
+  elseif method == "set_lines_chunked_replace" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local test_bufnr = create_test_buffer()
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local first_complete = false
+    local second_complete = false
+    local waiter, signal = create_async_waiter(5000)
+
+    -- Start first write
+    UiBuffer.set_lines_chunked(generate_lines(input.first_line_count), {
+      chunk_size = input.chunk_size,
+      on_complete = function()
+        first_complete = true
+      end,
+    })
+
+    -- Start second write immediately (should cancel first)
+    vim.schedule(function()
+      UiBuffer.set_lines_chunked(generate_lines(input.second_line_count), {
+        chunk_size = input.chunk_size,
+        on_complete = function()
+          second_complete = true
+          signal({ complete = true }, nil)
+        end,
+      })
+    end)
+
+    waiter()
+
+    result.first_cancelled = not first_complete
+    result.second_completed = second_complete
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.first_cancelled and first_complete then
+      passed = false
+      error_msg = "Expected first write to be cancelled"
+    end
+    if expected.second_completed and not second_complete then
+      passed = false
+      error_msg = "Expected second write to complete"
+    end
+
+  elseif method == "set_lines_chunked_empty" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local test_bufnr = create_test_buffer()
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local complete_called = false
+
+    UiBuffer.set_lines_chunked({}, {
+      on_complete = function()
+        complete_called = true
+      end,
+    })
+
+    result.on_complete_called = complete_called
+
+    local buf_lines = vim.api.nvim_buf_get_lines(test_bufnr, 0, -1, false)
+    -- Empty buffer has one empty line
+    result.lines_written = #buf_lines == 1 and buf_lines[1] == "" and 0 or #buf_lines
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.on_complete_called and not result.on_complete_called then
+      passed = false
+      error_msg = "Expected on_complete to be called for empty lines"
+    end
+
+  -- ============================================================================
+  -- UiHighlights.apply_batched tests
+  -- ============================================================================
+
+  elseif method == "apply_batched_small" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local UiHighlights = require("ssns.ui.core.highlights")
+    local test_bufnr = create_test_buffer()
+
+    -- Write some lines first
+    vim.api.nvim_buf_set_lines(test_bufnr, 0, -1, false, generate_lines(input.line_count))
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local line_map = create_mock_line_map(input.line_count)
+    local complete_called = false
+
+    UiHighlights.apply_batched(line_map, {
+      on_complete = function()
+        complete_called = true
+      end,
+    })
+
+    result.sync_path = complete_called
+    result.on_complete_called = complete_called
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.sync_path and not result.sync_path then
+      passed = false
+      error_msg = "Expected sync path for small highlight batch"
+    end
+
+  elseif method == "apply_batched_exact" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local UiHighlights = require("ssns.ui.core.highlights")
+    local test_bufnr = create_test_buffer()
+
+    vim.api.nvim_buf_set_lines(test_bufnr, 0, -1, false, generate_lines(input.line_count))
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local line_map = create_mock_line_map(input.line_count)
+    local complete_called = false
+
+    UiHighlights.apply_batched(line_map, {
+      batch_size = input.batch_size,
+      on_complete = function()
+        complete_called = true
+      end,
+    })
+
+    result.sync_path = complete_called
+    result.on_complete_called = complete_called
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.sync_path and not result.sync_path then
+      passed = false
+      error_msg = "Expected sync path for exact batch_size"
+    end
+
+  elseif method == "apply_batched_large" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local UiHighlights = require("ssns.ui.core.highlights")
+    local test_bufnr = create_test_buffer()
+
+    vim.api.nvim_buf_set_lines(test_bufnr, 0, -1, false, generate_lines(input.line_count))
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local line_map = create_mock_line_map(input.line_count)
+    local complete_called = false
+    local progress_calls = 0
+    local waiter, signal = create_async_waiter(5000)
+
+    UiHighlights.apply_batched(line_map, {
+      batch_size = input.batch_size,
+      on_progress = function(processed, total)
+        progress_calls = progress_calls + 1
+      end,
+      on_complete = function()
+        complete_called = true
+        signal({ complete = true }, nil)
+      end,
+    })
+
+    result.async_path = not complete_called
+
+    waiter()
+    result.on_complete_called = complete_called
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.async_path and not result.async_path then
+      passed = false
+      error_msg = "Expected async path for large batch"
+    end
+    if expected.min_progress_calls and progress_calls < expected.min_progress_calls then
+      passed = false
+      error_msg = string.format("Expected at least %d progress calls, got %d", expected.min_progress_calls, progress_calls)
+    end
+
+  elseif method == "apply_batched_progress" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local UiHighlights = require("ssns.ui.core.highlights")
+    local test_bufnr = create_test_buffer()
+
+    vim.api.nvim_buf_set_lines(test_bufnr, 0, -1, false, generate_lines(input.line_count))
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local line_map = create_mock_line_map(input.line_count)
+    local progress_values = {}
+    local waiter, signal = create_async_waiter(5000)
+
+    UiHighlights.apply_batched(line_map, {
+      batch_size = input.batch_size,
+      on_progress = function(processed, total)
+        table.insert(progress_values, { processed = processed, total = total })
+      end,
+      on_complete = function()
+        signal({ complete = true }, nil)
+      end,
+    })
+
+    waiter()
+
+    result.progress_increases = true
+    local prev_processed = 0
+    for _, p in ipairs(progress_values) do
+      if p.processed < prev_processed then
+        result.progress_increases = false
+        break
+      end
+      prev_processed = p.processed
+    end
+
+    if #progress_values > 0 then
+      local final = progress_values[#progress_values]
+      result.final_progress_equals_total = final.processed == final.total
+    else
+      result.final_progress_equals_total = false
+    end
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.progress_increases and not result.progress_increases then
+      passed = false
+      error_msg = "Expected progress to increase monotonically"
+    end
+    if expected.final_progress_equals_total and not result.final_progress_equals_total then
+      passed = false
+      error_msg = "Expected final progress to equal total"
+    end
+
+  elseif method == "apply_batched_cancel" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local UiHighlights = require("ssns.ui.core.highlights")
+    local test_bufnr = create_test_buffer()
+
+    vim.api.nvim_buf_set_lines(test_bufnr, 0, -1, false, generate_lines(input.line_count))
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local line_map = create_mock_line_map(input.line_count)
+    local progress_count = 0
+
+    UiHighlights.apply_batched(line_map, {
+      batch_size = input.batch_size,
+      on_progress = function(processed, total)
+        progress_count = progress_count + 1
+        if progress_count >= input.cancel_after_batches then
+          UiHighlights.cancel_batched()
+        end
+      end,
+    })
+
+    vim.wait(200, function() return not UiHighlights.is_batched_active() end, 20)
+    result.cancelled = not UiHighlights.is_batched_active()
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.cancelled and not result.cancelled then
+      passed = false
+      error_msg = "Expected batched highlight to be cancelled"
+    end
+
+  elseif method == "apply_batched_active_check" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local UiHighlights = require("ssns.ui.core.highlights")
+    local test_bufnr = create_test_buffer()
+
+    vim.api.nvim_buf_set_lines(test_bufnr, 0, -1, false, generate_lines(input.line_count))
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local line_map = create_mock_line_map(input.line_count)
+    local was_active_during = false
+    local waiter, signal = create_async_waiter(5000)
+
+    UiHighlights.apply_batched(line_map, {
+      batch_size = input.batch_size,
+      on_progress = function(processed, total)
+        if UiHighlights.is_batched_active() then
+          was_active_during = true
+        end
+      end,
+      on_complete = function()
+        signal({ complete = true }, nil)
+      end,
+    })
+
+    waiter()
+    result.active_during_apply = was_active_during
+    result.inactive_after_complete = not UiHighlights.is_batched_active()
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.active_during_apply and not result.active_during_apply then
+      passed = false
+      error_msg = "Expected is_batched_active to be true during apply"
+    end
+    if expected.inactive_after_complete and not result.inactive_after_complete then
+      passed = false
+      error_msg = "Expected is_batched_active to be false after complete"
+    end
+
+  elseif method == "apply_batched_replace" then
+    local UiBuffer = require("ssns.ui.core.buffer")
+    local UiHighlights = require("ssns.ui.core.highlights")
+    local test_bufnr = create_test_buffer()
+
+    vim.api.nvim_buf_set_lines(test_bufnr, 0, -1, false, generate_lines(input.first_line_count))
+
+    local orig_bufnr = UiBuffer.bufnr
+    local orig_exists = UiBuffer.exists
+    UiBuffer.bufnr = test_bufnr
+    UiBuffer.exists = function() return true end
+
+    local first_complete = false
+    local second_complete = false
+    local waiter, signal = create_async_waiter(5000)
+
+    UiHighlights.apply_batched(create_mock_line_map(input.first_line_count), {
+      batch_size = input.batch_size,
+      on_complete = function()
+        first_complete = true
+      end,
+    })
+
+    vim.schedule(function()
+      UiHighlights.apply_batched(create_mock_line_map(input.second_line_count), {
+        batch_size = input.batch_size,
+        on_complete = function()
+          second_complete = true
+          signal({ complete = true }, nil)
+        end,
+      })
+    end)
+
+    waiter()
+
+    result.first_cancelled = not first_complete
+    result.second_completed = second_complete
+
+    UiBuffer.bufnr = orig_bufnr
+    UiBuffer.exists = orig_exists
+    delete_test_buffer(test_bufnr)
+
+    if expected.first_cancelled and first_complete then
+      passed = false
+      error_msg = "Expected first batch to be cancelled"
+    end
+    if expected.second_completed and not second_complete then
+      passed = false
+      error_msg = "Expected second batch to complete"
+    end
+
+  else
+    return nil, false, "Unknown chunked rendering method: " .. tostring(method)
+  end
+
+  return result, passed, error_msg
+end
+
 ---Run async test - dispatcher to specific async test runners
 ---@param test table Test definition
 ---@return table actual Actual output
@@ -1794,6 +3293,12 @@ function UnitRunner._run_async_test(test)
     return UnitRunner._run_async_connections_test(test)
   elseif module == "ssns.debug" then
     return UnitRunner._run_async_debug_test(test)
+  elseif module == "ssns.async.cancellation" then
+    return UnitRunner._run_async_cancellation_test(test)
+  elseif module == "ssns.completion.providers" then
+    return UnitRunner._run_async_completion_providers_test(test)
+  elseif module == "ssns.ui.chunked" then
+    return UnitRunner._run_async_chunked_rendering_test(test)
   else
     return nil, false, "Unknown async test module: " .. tostring(module)
   end
