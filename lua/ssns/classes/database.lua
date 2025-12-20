@@ -512,8 +512,18 @@ function DbClass:load_all_definitions_bulk()
 end
 
 ---Bulk load all metadata (columns for tables/views/TVFs, parameters for procedures/functions)
+---This method does double duty:
+---  1. Returns search text map for object search (backward compatible)
+---  2. ALSO populates actual objects (Table/View/Function columns, Procedure/Function parameters)
+---     so tree UI and search share the same cache
 ---@return table<string, string> metadata Map of "schema.object_type.name" -> "col1 type1 col2 type2 ..."
 function DbClass:load_all_metadata_bulk()
+  -- Check if already loaded
+  if self._bulk_columns_loaded then
+    -- Return cached search text map if we have it
+    return self._bulk_metadata_cache or {}
+  end
+
   local adapter = self:get_adapter()
   local metadata = {}
 
@@ -521,12 +531,17 @@ function DbClass:load_all_metadata_bulk()
   if adapter.get_all_columns_bulk_query then
     local query = adapter:get_all_columns_bulk_query(self.db_name)
     local results = adapter:execute(self:_get_db_connection_config(), query)
+
+    -- Parse into search text map (for backward compatibility)
     if adapter.parse_all_columns_bulk then
       local columns_meta = adapter:parse_all_columns_bulk(results)
       for k, v in pairs(columns_meta) do
         metadata[k] = v
       end
     end
+
+    -- ALSO populate actual objects with ColumnClass instances
+    self:_populate_columns_from_bulk_results(adapter, results)
   end
 
   -- Load parameters for all procedures/functions
@@ -534,6 +549,8 @@ function DbClass:load_all_metadata_bulk()
   if adapter.get_all_parameters_bulk_query then
     local query = adapter:get_all_parameters_bulk_query(self.db_name)
     local results = adapter:execute(self:_get_db_connection_config(), query)
+
+    -- Parse into search text map (for backward compatibility)
     if adapter.parse_all_parameters_bulk then
       local params_meta = adapter:parse_all_parameters_bulk(results)
       for k, v in pairs(params_meta) do
@@ -545,9 +562,301 @@ function DbClass:load_all_metadata_bulk()
         end
       end
     end
+
+    -- ALSO populate actual objects with ParameterClass instances
+    self:_populate_parameters_from_bulk_results(adapter, results)
   end
 
+  -- Cache results
+  self._bulk_columns_loaded = true
+  self._bulk_metadata_cache = metadata
+
   return metadata
+end
+
+---Populate table/view/function columns from bulk query results
+---@param adapter BaseAdapter The database adapter
+---@param results table Raw query results from get_all_columns_bulk_query
+---@private
+function DbClass:_populate_columns_from_bulk_results(adapter, results)
+  if not results or not results.success then
+    return
+  end
+
+  local rows = {}
+  if results.resultSets and #results.resultSets > 0 then
+    rows = results.resultSets[1].rows or {}
+  elseif results.rows then
+    rows = results.rows
+  end
+
+  if #rows == 0 then
+    return
+  end
+
+  -- Group columns by schema.type.name
+  -- Each row has: schema_name, table_name (object name), object_type, column_name, data_type
+  local columns_by_object = {}
+  for _, row in ipairs(rows) do
+    local schema_name = row.schema_name
+    local object_name = row.table_name
+    local object_type = row.object_type or "table"
+    local column_name = row.column_name
+    local data_type = row.data_type
+
+    if schema_name and object_name and column_name then
+      local key = string.format("%s.%s.%s", schema_name, object_type, object_name)
+      if not columns_by_object[key] then
+        columns_by_object[key] = {}
+      end
+      table.insert(columns_by_object[key], {
+        name = column_name,
+        column_name = column_name,
+        data_type = data_type,
+        ordinal_position = #columns_by_object[key] + 1,
+      })
+    end
+  end
+
+  -- Now distribute to actual objects
+  -- For schema-based servers, iterate schemas
+  if self.schemas then
+    for _, schema in ipairs(self.schemas) do
+      -- Tables
+      for _, tbl in ipairs(schema.tables or {}) do
+        if not tbl.columns_loaded then
+          local key = string.format("%s.table.%s", schema.schema_name, tbl.table_name)
+          local col_data_list = columns_by_object[key]
+          if col_data_list then
+            tbl.columns = {}
+            for _, col_data in ipairs(col_data_list) do
+              local col_obj = adapter:create_column(nil, col_data)
+              table.insert(tbl.columns, col_obj)
+            end
+            tbl.columns_loaded = true
+          end
+        end
+      end
+
+      -- Views
+      for _, view in ipairs(schema.views or {}) do
+        if not view.columns_loaded then
+          local key = string.format("%s.view.%s", schema.schema_name, view.view_name)
+          local col_data_list = columns_by_object[key]
+          if col_data_list then
+            view.columns = {}
+            for _, col_data in ipairs(col_data_list) do
+              local col_obj = adapter:create_column(nil, col_data)
+              table.insert(view.columns, col_obj)
+            end
+            view.columns_loaded = true
+          end
+        end
+      end
+
+      -- Functions (TVFs have columns)
+      for _, func in ipairs(schema.functions or {}) do
+        if not func.columns_loaded then
+          local key = string.format("%s.function.%s", schema.schema_name, func.function_name)
+          local col_data_list = columns_by_object[key]
+          if col_data_list then
+            func.columns = {}
+            for _, col_data in ipairs(col_data_list) do
+              local col_obj = adapter:create_column(nil, col_data)
+              table.insert(func.columns, col_obj)
+            end
+            func.columns_loaded = true
+          end
+        end
+      end
+    end
+  else
+    -- Non-schema servers (MySQL, SQLite) - objects are directly on database
+    local default_schema = adapter.features.schemas and self:get_default_schema() or "dbo"
+
+    -- Tables
+    for _, tbl in ipairs(self.tables or {}) do
+      if not tbl.columns_loaded then
+        local key = string.format("%s.table.%s", default_schema, tbl.table_name or tbl.name)
+        local col_data_list = columns_by_object[key]
+        if col_data_list then
+          tbl.columns = {}
+          for _, col_data in ipairs(col_data_list) do
+            local col_obj = adapter:create_column(nil, col_data)
+            table.insert(tbl.columns, col_obj)
+          end
+          tbl.columns_loaded = true
+        end
+      end
+    end
+
+    -- Views
+    for _, view in ipairs(self.views or {}) do
+      if not view.columns_loaded then
+        local key = string.format("%s.view.%s", default_schema, view.view_name or view.name)
+        local col_data_list = columns_by_object[key]
+        if col_data_list then
+          view.columns = {}
+          for _, col_data in ipairs(col_data_list) do
+            local col_obj = adapter:create_column(nil, col_data)
+            table.insert(view.columns, col_obj)
+          end
+          view.columns_loaded = true
+        end
+      end
+    end
+
+    -- Functions (TVFs)
+    for _, func in ipairs(self.functions or {}) do
+      if not func.columns_loaded then
+        local key = string.format("%s.function.%s", default_schema, func.function_name or func.name)
+        local col_data_list = columns_by_object[key]
+        if col_data_list then
+          func.columns = {}
+          for _, col_data in ipairs(col_data_list) do
+            local col_obj = adapter:create_column(nil, col_data)
+            table.insert(func.columns, col_obj)
+          end
+          func.columns_loaded = true
+        end
+      end
+    end
+  end
+end
+
+---Populate procedure/function parameters from bulk query results
+---@param adapter BaseAdapter The database adapter
+---@param results table Raw query results from get_all_parameters_bulk_query
+---@private
+function DbClass:_populate_parameters_from_bulk_results(adapter, results)
+  if not results or not results.success then
+    return
+  end
+
+  local rows = {}
+  if results.resultSets and #results.resultSets > 0 then
+    rows = results.resultSets[1].rows or {}
+  elseif results.rows then
+    rows = results.rows
+  end
+
+  if #rows == 0 then
+    return
+  end
+
+  -- Group parameters by schema.type.name
+  -- Each row has: schema_name, routine_name, object_type, parameter_name, data_type
+  local params_by_object = {}
+  for _, row in ipairs(rows) do
+    local schema_name = row.schema_name
+    local object_name = row.routine_name
+    local object_type = row.object_type or "function"
+    local param_name = row.parameter_name
+    local data_type = row.data_type
+
+    if schema_name and object_name and param_name then
+      local key = string.format("%s.%s.%s", schema_name, object_type, object_name)
+      if not params_by_object[key] then
+        params_by_object[key] = {}
+      end
+      table.insert(params_by_object[key], {
+        name = param_name,
+        parameter_name = param_name,
+        data_type = data_type,
+        ordinal_position = #params_by_object[key] + 1,
+      })
+    end
+  end
+
+  local ParameterClass = require('ssns.classes.parameter')
+
+  -- Now distribute to actual objects
+  -- For schema-based servers, iterate schemas
+  if self.schemas then
+    for _, schema in ipairs(self.schemas) do
+      -- Procedures
+      for _, proc in ipairs(schema.procedures or {}) do
+        if not proc.parameters_loaded then
+          local key = string.format("%s.procedure.%s", schema.schema_name, proc.procedure_name or proc.name)
+          local param_data_list = params_by_object[key]
+          if param_data_list then
+            proc.parameters = {}
+            for _, param_data in ipairs(param_data_list) do
+              local param_obj = ParameterClass.new({
+                name = param_data.name,
+                data_type = param_data.data_type,
+              })
+              table.insert(proc.parameters, param_obj)
+            end
+            proc.parameters_loaded = true
+          end
+        end
+      end
+
+      -- Functions
+      for _, func in ipairs(schema.functions or {}) do
+        if not func.parameters_loaded then
+          local key = string.format("%s.function.%s", schema.schema_name, func.function_name or func.name)
+          local param_data_list = params_by_object[key]
+          if param_data_list then
+            func.parameters = {}
+            for _, param_data in ipairs(param_data_list) do
+              local param_obj = ParameterClass.new({
+                name = param_data.name,
+                data_type = param_data.data_type,
+              })
+              table.insert(func.parameters, param_obj)
+            end
+            func.parameters_loaded = true
+          end
+        end
+      end
+    end
+  else
+    -- Non-schema servers - objects directly on database
+    local default_schema = adapter.features.schemas and self:get_default_schema() or "dbo"
+
+    -- Procedures
+    for _, proc in ipairs(self.procedures or {}) do
+      if not proc.parameters_loaded then
+        local key = string.format("%s.procedure.%s", default_schema, proc.procedure_name or proc.name)
+        local param_data_list = params_by_object[key]
+        if param_data_list then
+          proc.parameters = {}
+          for _, param_data in ipairs(param_data_list) do
+            local param_obj = ParameterClass.new({
+              name = param_data.name,
+              data_type = param_data.data_type,
+            })
+            table.insert(proc.parameters, param_obj)
+          end
+          proc.parameters_loaded = true
+        end
+      end
+    end
+
+    -- Functions
+    for _, func in ipairs(self.functions or {}) do
+      if not func.parameters_loaded then
+        local key = string.format("%s.function.%s", default_schema, func.function_name or func.name)
+        local param_data_list = params_by_object[key]
+        if param_data_list then
+          func.parameters = {}
+          for _, param_data in ipairs(param_data_list) do
+            local param_obj = ParameterClass.new({
+              name = param_data.name,
+              data_type = param_data.data_type,
+            })
+            table.insert(func.parameters, param_obj)
+          end
+          func.parameters_loaded = true
+        end
+      end
+    end
+  end
+
+  -- Mark parameters as bulk loaded
+  self._bulk_parameters_loaded = true
 end
 
 ---Generic method to get objects of a specific type with lazy/eager loading
@@ -1330,13 +1639,17 @@ end
 ---Returns a map of "schema.object" -> "metadata text" (column names, types, etc.)
 ---Queries run sequentially to avoid overloading the server
 ---Results are cached - subsequent calls return cached data without querying
+---This method does double duty:
+---  1. Returns search text map for object search (backward compatible)
+---  2. ALSO populates actual objects (Table/View/Function columns, Procedure/Function parameters)
+---     so tree UI and search share the same cache
 ---@param opts { on_complete: fun(metadata: table<string,string>?, err: string?)?, on_error: fun(err: string)?, timeout_ms: number?, force_reload: boolean? }?
 ---@return string task_id
 function DbClass:load_all_metadata_bulk_async(opts)
   opts = opts or {}
 
   -- Return cached data if already loaded (unless force_reload requested)
-  if self._bulk_metadata_loaded and self._bulk_metadata_cache and not opts.force_reload then
+  if self._bulk_columns_loaded and self._bulk_metadata_cache and not opts.force_reload then
     if opts.on_complete then
       vim.schedule(function()
         opts.on_complete(self._bulk_metadata_cache, nil)
@@ -1367,12 +1680,16 @@ function DbClass:load_all_metadata_bulk_async(opts)
           return
         end
 
+        -- Parse into search text map (for backward compatibility)
         if adapter.parse_all_columns_bulk then
           local columns_meta = adapter:parse_all_columns_bulk(results)
           for k, v in pairs(columns_meta) do
             metadata[k] = v
           end
         end
+
+        -- ALSO populate actual objects with ColumnClass instances
+        db_self:_populate_columns_from_bulk_results(adapter, results)
 
         next_step()
       end,
@@ -1401,6 +1718,7 @@ function DbClass:load_all_metadata_bulk_async(opts)
           return
         end
 
+        -- Parse into search text map (for backward compatibility)
         if adapter.parse_all_parameters_bulk then
           local params_meta = adapter:parse_all_parameters_bulk(results)
           for k, v in pairs(params_meta) do
@@ -1411,6 +1729,9 @@ function DbClass:load_all_metadata_bulk_async(opts)
             end
           end
         end
+
+        -- ALSO populate actual objects with ParameterClass instances
+        db_self:_populate_parameters_from_bulk_results(adapter, results)
 
         next_step()
       end,
@@ -1425,7 +1746,7 @@ function DbClass:load_all_metadata_bulk_async(opts)
   load_columns(function()
     load_parameters(function()
       -- Cache the results for future calls
-      db_self._bulk_metadata_loaded = true
+      db_self._bulk_columns_loaded = true
       db_self._bulk_metadata_cache = metadata
 
       if opts.on_complete then opts.on_complete(metadata, nil) end
