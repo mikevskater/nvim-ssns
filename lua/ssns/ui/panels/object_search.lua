@@ -10,6 +10,7 @@ local UiQuery = require('ssns.ui.core.query')
 local ContentBuilder = require('ssns.ui.core.content_builder')
 local Cancellation = require('ssns.async.cancellation')
 local Spinner = require('ssns.async.spinner')
+local Thread = require('ssns.async.thread')
 
 -- ============================================================================
 -- Type Definitions
@@ -82,8 +83,8 @@ local loading_cancel_token = nil
 ---@type TextSpinner? Text spinner for loading animation
 local loading_text_spinner = nil
 
----@type number? Timer handle for search input debounce
-local search_debounce_timer = nil
+-- NOTE: search_debounce_timer removed - live filtering disabled for threaded search
+-- Search now triggers only on <CR> (commit on Enter model)
 
 ---@type CancellationToken? Active cancellation token for search filtering
 local search_cancel_token = nil
@@ -100,10 +101,10 @@ local search_start_time = 0
 ---@type TextSpinner? Text spinner for search filtering animation
 local search_text_spinner = nil
 
--- Debounce delay in ms for live search filtering (prevents excessive updates on rapid typing)
-local SEARCH_DEBOUNCE_MS = 150
+---@type string? Active thread task ID for search filtering
+local search_thread_task_id = nil
 
--- Chunk size for async search processing (objects per chunk)
+-- Chunk size for async search processing (fallback when threading unavailable)
 local SEARCH_CHUNK_SIZE = 100
 
 -- Forward declaration for render_settings (used in spinner animation)
@@ -1020,11 +1021,22 @@ local function text_matches_pattern(text, pattern, regex, pattern_lower)
   end
 end
 
----Apply search filter asynchronously with chunked processing
----Yields via vim.schedule() between chunks to keep UI responsive
+---Apply search filter asynchronously
+---Uses OS threading when available for non-blocking execution,
+---falls back to chunked processing when threading unavailable
 ---@param pattern string Search pattern
 ---@param callback fun()? Optional callback when search completes
 function UiObjectSearch._apply_search_async(pattern, callback)
+  -- Try threaded search first (always preferred for non-blocking UI)
+  if Thread.is_available() then
+    local started = UiObjectSearch._apply_search_threaded(pattern, callback)
+    if started then
+      return  -- Threaded search running
+    end
+    -- Thread failed to start, fall through to chunked processing
+  end
+
+  -- Fallback: Chunked processing with vim.schedule() yields
   -- Cancel any in-progress search
   if search_cancel_token then
     search_cancel_token:cancel("New search started")
@@ -1267,11 +1279,17 @@ function UiObjectSearch._apply_search_async(pattern, callback)
   process_chunk()
 end
 
----Cancel any in-progress async search
+---Cancel any in-progress async search (chunked or threaded)
 function UiObjectSearch.cancel_search()
+  -- Cancel chunked search token
   if search_cancel_token then
     search_cancel_token:cancel("Search cancelled")
     search_cancel_token = nil
+  end
+  -- Cancel threaded search
+  if search_thread_task_id then
+    Thread.cancel(search_thread_task_id, "Search cancelled")
+    search_thread_task_id = nil
   end
   search_in_progress = false
   search_progress = 0
@@ -1282,6 +1300,191 @@ end
 ---@return boolean
 function UiObjectSearch.is_search_in_progress()
   return search_in_progress
+end
+
+---Apply search filter using OS thread for non-blocking execution
+---@param pattern string Search pattern
+---@param callback fun()? Optional callback when search completes
+---@return boolean started Whether threaded search was started
+function UiObjectSearch._apply_search_threaded(pattern, callback)
+  -- Cancel any existing thread
+  if search_thread_task_id then
+    Thread.cancel(search_thread_task_id, "New search started")
+    search_thread_task_id = nil
+  end
+
+  local total_objects = #ui_state.loaded_objects
+  local max_results = 500
+
+  -- Handle empty pattern case: show all objects (no pattern matching needed)
+  if not pattern or pattern == "" then
+    ui_state.filtered_results = {}
+    local count = 0
+    for _, obj in ipairs(ui_state.loaded_objects) do
+      if count >= max_results then break end
+      if ui_state.show_system or not is_system_object(obj) then
+        if should_show_object_type(obj) then
+          table.insert(ui_state.filtered_results, {
+            searchable = obj,
+            match_type = "none",
+            match_details = {},
+            display_name = build_display_name(obj),
+            sort_priority = 0,
+          })
+          count = count + 1
+        end
+      end
+    end
+    search_in_progress = false
+    search_progress = 0
+    stop_search_spinner()
+    if callback then callback() end
+    return true
+  end
+
+  -- Prepare serializable objects for thread
+  -- Extract only the data needed for searching (no class instances)
+  local serializable_objects = {}
+  for i, obj in ipairs(ui_state.loaded_objects) do
+    -- Pre-filter system objects and object types to reduce thread work
+    if ui_state.show_system or not is_system_object(obj) then
+      if should_show_object_type(obj) then
+        table.insert(serializable_objects, {
+          idx = i,
+          name = obj.name,
+          schema_name = obj.schema_name,
+          database_name = obj.database_name,
+          server_name = obj.server_name,
+          object_type = obj.object_type,
+          display_name = build_display_name(obj),
+          unique_id = obj.unique_id,
+          -- Include definition/metadata if searching those fields
+          definition = ui_state.search_definitions and obj.definition_loaded and obj.definition or nil,
+          metadata_text = ui_state.search_metadata and obj.metadata_loaded and obj.metadata_text or nil,
+        })
+      end
+    end
+  end
+
+  -- Initialize search progress tracking
+  search_in_progress = true
+  search_progress = 0
+  search_start_time = vim.uv.hrtime()
+  start_search_spinner()
+
+  -- Accumulate results from batches
+  local accumulated_results = {}
+
+  -- Start threaded search
+  local task_id, err = Thread.start({
+    worker = "search",
+    input = {
+      objects = serializable_objects,
+      pattern = pattern,
+      options = {
+        case_sensitive = ui_state.case_sensitive,
+        use_regex = ui_state.use_regex,
+        whole_word = ui_state.whole_word,
+        search_names = ui_state.search_names,
+        search_definitions = ui_state.search_definitions,
+        search_metadata = ui_state.search_metadata,
+        batch_size = 50,
+      },
+    },
+    on_batch = function(batch)
+      -- Stream results to UI as they arrive
+      for _, item in ipairs(batch.items or {}) do
+        if #accumulated_results < max_results then
+          -- Map back to SearchResult format using original object reference
+          local original_obj = ui_state.loaded_objects[item.idx]
+          if original_obj then
+            table.insert(accumulated_results, {
+              searchable = original_obj,
+              match_type = item.match_type or "name",
+              match_details = {{ field = item.match_type or "name", matched_text = "" }},
+              display_name = item.display_name or build_display_name(original_obj),
+              sort_priority = item.match_type == "name" and 1 or (item.match_type == "definition" and 2 or 3),
+            })
+          end
+        end
+      end
+
+      -- Update UI with intermediate results
+      ui_state.filtered_results = accumulated_results
+      if batch.progress then
+        search_progress = batch.progress
+      end
+
+      if multi_panel then
+        multi_panel:render_panel("results")
+      end
+    end,
+    on_progress = function(pct, message)
+      search_progress = pct
+      -- Spinner handles re-rendering
+    end,
+    on_complete = function(result, error_msg)
+      search_thread_task_id = nil
+
+      if error_msg then
+        -- Error occurred - keep any results we have
+        search_in_progress = false
+        search_progress = 0
+        stop_search_spinner()
+        if callback then callback() end
+        return
+      end
+
+      if result and result.cancelled then
+        -- Cancelled - don't update results
+        search_in_progress = false
+        search_progress = 0
+        stop_search_spinner()
+        return
+      end
+
+      -- Sort by priority (name matches first)
+      table.sort(accumulated_results, function(a, b)
+        if a.sort_priority ~= b.sort_priority then
+          return a.sort_priority < b.sort_priority
+        end
+        return a.display_name < b.display_name
+      end)
+
+      ui_state.filtered_results = accumulated_results
+
+      -- Reset selection if invalid
+      if ui_state.selected_result_idx > #ui_state.filtered_results then
+        ui_state.selected_result_idx = math.max(1, #ui_state.filtered_results)
+      end
+
+      -- Finalize
+      search_in_progress = false
+      search_progress = 100
+      stop_search_spinner()
+
+      -- Final render
+      if multi_panel then
+        multi_panel:render_panel("results")
+        multi_panel:render_panel("metadata")
+        multi_panel:render_panel("definition")
+      end
+
+      if callback then callback() end
+    end,
+    timeout_ms = 30000,
+  })
+
+  if not task_id then
+    -- Thread failed to start - return false so caller can fallback
+    search_in_progress = false
+    search_progress = 0
+    stop_search_spinner()
+    return false
+  end
+
+  search_thread_task_id = task_id
+  return true
 end
 
 
@@ -1918,20 +2121,30 @@ local function finalize_search_exit()
   end)
 end
 
----Cancel search
+---Cancel search (ESC)
+---Reverts to previous search term WITHOUT triggering a new search.
+---Any running thread continues to completion (results still valid from before edit).
 local function cancel_search()
   ui_state.search_term = ui_state.search_term_before_edit
-  UiObjectSearch._apply_search_async(ui_state.search_term, function()
-    vim.cmd('stopinsert')
-  end)
+  -- NOTE: Do NOT trigger search here - let any running thread continue.
+  -- The current results are still valid (they match the reverted term).
+  vim.cmd('stopinsert')
 end
 
----Commit search
+---Commit search (Enter)
+---Reads from buffer and triggers a new search.
 local function commit_search()
   local search_buf = multi_panel and multi_panel:get_panel_buffer("search")
   if search_buf and vim.api.nvim_buf_is_valid(search_buf) then
     local lines = vim.api.nvim_buf_get_lines(search_buf, 0, 1, false)
-    ui_state.search_term = (lines[1] or ""):gsub("^%s+", "")
+    local new_term = (lines[1] or ""):gsub("^%s+", "")
+
+    -- Only trigger search if term actually changed
+    if new_term ~= ui_state.search_term then
+      ui_state.search_term = new_term
+      -- Trigger the search (will use threaded version when available)
+      UiObjectSearch._apply_search_async(new_term)
+    end
   end
   vim.cmd('stopinsert')
 end
@@ -2130,39 +2343,11 @@ local function setup_search_autocmds()
 
   search_augroup = vim.api.nvim_create_augroup("SSNSObjectSearch", { clear = true })
 
-  -- Live filtering on text change (debounced to prevent excessive updates)
-  vim.api.nvim_create_autocmd({"TextChangedI", "TextChanged"}, {
-    group = search_augroup,
-    buffer = search_buf,
-    callback = function()
-      -- Cancel existing debounce timer
-      if search_debounce_timer then
-        vim.fn.timer_stop(search_debounce_timer)
-        search_debounce_timer = nil
-      end
-
-      -- Cancel any in-progress async search
-      if search_cancel_token then
-        search_cancel_token:cancel("New input received")
-      end
-
-      -- Start new debounce timer
-      search_debounce_timer = vim.fn.timer_start(SEARCH_DEBOUNCE_MS, function()
-        search_debounce_timer = nil
-        vim.schedule(function()
-          -- Verify buffer is still valid before processing
-          if not search_buf or not vim.api.nvim_buf_is_valid(search_buf) then
-            return
-          end
-          local lines = vim.api.nvim_buf_get_lines(search_buf, 0, 1, false)
-          local text = (lines[1] or ""):gsub("^%s+", "")
-          -- Use async search for responsive UI with large datasets
-          -- Async version handles rendering internally
-          UiObjectSearch._apply_search_async(text)
-        end)
-      end)
-    end,
-  })
+  -- NOTE: Live filtering disabled for threaded search
+  -- With vim.uv.new_thread(), threads can't be killed instantly (cooperative cancellation),
+  -- so live filtering would spawn many threads that keep running. Instead, we use a
+  -- "commit on Enter" model where search only triggers on <CR>.
+  -- TextChanged autocmd intentionally removed - search triggers via commit_search()
 
   -- Handle insert mode exit
   vim.api.nvim_create_autocmd("InsertLeave", {
@@ -2647,6 +2832,9 @@ function UiObjectSearch.close()
   -- Cancel any active loading operation
   cancel_object_loading()
 
+  -- Cancel any active search (chunked or threaded)
+  UiObjectSearch.cancel_search()
+
   -- Stop spinner animation
   stop_spinner_animation()
 
@@ -2656,12 +2844,6 @@ function UiObjectSearch.close()
   if search_augroup then
     pcall(vim.api.nvim_del_augroup_by_id, search_augroup)
     search_augroup = nil
-  end
-
-  -- Cancel any pending search debounce timer
-  if search_debounce_timer then
-    vim.fn.timer_stop(search_debounce_timer)
-    search_debounce_timer = nil
   end
 
   if multi_panel then
