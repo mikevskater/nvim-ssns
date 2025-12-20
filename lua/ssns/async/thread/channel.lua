@@ -173,15 +173,18 @@ function ThreadChannel:_handle_data(data)
     -- Decode mpack message
     local ok, message = pcall(vim.mpack.decode, msg_data)
     if ok and message then
-      local handler_ok, handler_err = pcall(self.on_message, message)
-      if not handler_ok then
-        vim.schedule(function()
+      -- IMPORTANT: Schedule handler to run on main Neovim event loop
+      -- libuv callbacks run in "fast event context" where vim.* APIs are forbidden
+      local on_message = self.on_message
+      vim.schedule(function()
+        local handler_ok, handler_err = pcall(on_message, message)
+        if not handler_ok then
           vim.notify(
             string.format("SSNS Thread: Message handler error: %s", tostring(handler_err)),
             vim.log.levels.ERROR
           )
-        end)
-      end
+        end
+      end)
     end
   end
 end
