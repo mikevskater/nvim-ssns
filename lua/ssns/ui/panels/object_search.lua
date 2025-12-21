@@ -2360,9 +2360,9 @@ local function render_results(state)
 
     local spans = {
       { text = prefix, style = is_selected and "highlight" or "normal" },
-      { text = icon .. " ", style = obj_style },
-      { text = result.searchable.database_name, style = "database" },
-      { text = ".", style = "muted" },
+      { text = icon .. " ", style = is_selected and "strong" or obj_style },
+      { text = result.searchable.database_name, style = is_selected and "strong" or "database" },
+      { text = ".", style = is_selected and "strong" or "muted" },
       { text = result.display_name, style = is_selected and "strong" or obj_style },
     }
 
