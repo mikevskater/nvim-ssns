@@ -33,34 +33,46 @@
 
 ---@class QueryHistory
 ---Query execution history manager (RedGate-style nested per buffer)
-local QueryHistory = {}
+---@field buffers table<string, QueryBufferHistory> Buffer ID -> Buffer history
+---@field buffer_lru string[] List of buffer IDs in LRU order (most recent first)
+---@field max_buffers number Maximum buffer histories to keep (from config)
+---@field max_entries_per_buffer number Maximum entries per buffer (from config)
+---@field auto_persist boolean Auto-persist to file (from config)
+---@field persist_file string History file path (from config)
+---@field exclude_patterns string[] Exclude patterns (from config)
+---@field max_auto_saves_per_buffer number Maximum auto-save entries per buffer (from config)
+local QueryHistory = {
+  buffers = {},
+  buffer_lru = {},
+  _configured = false,
+}
 
----@type table<string, QueryBufferHistory> Buffer ID -> Buffer history
-QueryHistory.buffers = {}
+---Load configuration from config.lua
+---Called automatically by init() but can be called manually to reload config
+function QueryHistory.configure()
+  local Config = require('ssns.config')
+  local cfg = Config.get().query_history or {}
 
----@type string[] List of buffer IDs in LRU order (most recent first)
-QueryHistory.buffer_lru = {}
+  QueryHistory.max_buffers = cfg.max_buffers or 100
+  QueryHistory.max_entries_per_buffer = cfg.max_entries_per_buffer or 100
+  QueryHistory.auto_persist = cfg.auto_persist ~= false  -- Default true
+  QueryHistory.persist_file = cfg.persist_file or (vim.fn.stdpath('data') .. '/ssns/query_history.json')
+  QueryHistory.exclude_patterns = cfg.exclude_patterns or {}
+  QueryHistory.max_auto_saves_per_buffer = cfg.max_auto_saves_per_buffer or 100
 
----@type number Maximum buffer histories to keep
-QueryHistory.max_buffers = 100
-
----@type number Maximum entries per buffer
-QueryHistory.max_entries_per_buffer = 100
-
----@type boolean Auto-persist to file
-QueryHistory.auto_persist = true
-
----@type string History file path
-QueryHistory.persist_file = vim.fn.stdpath('data') .. '/ssns/query_history.json'
-
----@type string[] Exclude patterns
-QueryHistory.exclude_patterns = {}
+  QueryHistory._configured = true
+end
 
 ---Initialize query history (load from file if exists)
 ---@return boolean success
 function QueryHistory.init()
+  -- Load configuration from config.lua
+  if not QueryHistory._configured then
+    QueryHistory.configure()
+  end
+
   -- Create data directory if needed
-  local data_dir = vim.fn.stdpath('data') .. '/ssns'
+  local data_dir = vim.fn.fnamemodify(QueryHistory.persist_file, ":h")
   vim.fn.mkdir(data_dir, 'p')
 
   -- Load from file if auto_persist enabled
@@ -215,9 +227,6 @@ function QueryHistory.add_entry(bufnr, buffer_name, entry)
 
   return true
 end
-
----@type number Maximum auto-save entries per buffer
-QueryHistory.max_auto_saves_per_buffer = 50
 
 ---Add auto-save entry to buffer history
 ---Skips if content is identical to last auto-save
@@ -638,8 +647,13 @@ end
 function QueryHistory.init_async(callback)
   local FileIO = require('ssns.async.file_io')
 
-  -- Create data directory if needed
-  local data_dir = vim.fn.stdpath('data') .. '/ssns'
+  -- Load configuration from config.lua
+  if not QueryHistory._configured then
+    QueryHistory.configure()
+  end
+
+  -- Create data directory if needed (use directory from configured persist_file)
+  local data_dir = vim.fn.fnamemodify(QueryHistory.persist_file, ":h")
 
   FileIO.mkdir_async(data_dir, function(mkdir_success, mkdir_err)
     if not mkdir_success then
