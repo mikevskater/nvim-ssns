@@ -14,10 +14,6 @@ local CHARS = {
 -- Highlight namespace for scrollbar
 local NS_NAME = "ssns_scrollbar"
 
--- Debounce interval for scrollbar updates (ms)
--- Only update scrollbar AFTER scrolling stops to avoid lag during scroll
-local DEBOUNCE_MS = 100
-
 ---Setup the scrollbar overlay window
 ---@param float FloatWindow The parent FloatWindow instance
 function Scrollbar.setup(float)
@@ -77,26 +73,13 @@ function Scrollbar.setup(float)
   -- Initial scrollbar render
   Scrollbar.update(float)
 
-  -- Setup autocmd to track scrolling in main window (with debounce)
-  -- Only update AFTER scrolling stops to avoid lag during scroll
-  float._scrollbar_pending_timer = nil
+  -- Setup autocmd to track scrolling in main window
   float._scrollbar_autocmd = vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "WinScrolled" }, {
     buffer = float.bufnr,
     callback = function()
-      -- Cancel any pending update
-      if float._scrollbar_pending_timer then
-        vim.fn.timer_stop(float._scrollbar_pending_timer)
+      if float:is_valid() then
+        Scrollbar.update(float)
       end
-
-      -- Schedule update after scroll stops (debounce pattern)
-      float._scrollbar_pending_timer = vim.fn.timer_start(DEBOUNCE_MS, function()
-        float._scrollbar_pending_timer = nil
-        vim.schedule(function()
-          if float:is_valid() then
-            Scrollbar.update(float)
-          end
-        end)
-      end)
     end,
   })
 end
@@ -226,12 +209,6 @@ end
 ---Close the scrollbar window
 ---@param float FloatWindow The parent FloatWindow instance
 function Scrollbar.close(float)
-  -- Cancel pending throttle timer
-  if float._scrollbar_pending_timer then
-    vim.fn.timer_stop(float._scrollbar_pending_timer)
-    float._scrollbar_pending_timer = nil
-  end
-
   -- Remove autocmd
   if float._scrollbar_autocmd then
     pcall(vim.api.nvim_del_autocmd, float._scrollbar_autocmd)
