@@ -554,11 +554,21 @@ function DbClass:_populate_module_definitions_from_bulk_results(results)
     return
   end
 
+  -- Determine default schema for adapters that don't include schema_name in results
+  -- MySQL uses "dbo", SQLite uses "main"
+  local adapter = self:get_adapter()
+  local default_schema
+  if adapter.adapter_type == "sqlite" then
+    default_schema = "main"
+  elseif adapter.adapter_type == "mysql" then
+    default_schema = "dbo"
+  end
+
   -- Group definitions by schema.type.name
-  -- Each row has: schema_name, object_name, object_type, definition
+  -- SQL Server/Postgres have schema_name, MySQL/SQLite don't
   local defs_by_object = {}
   for _, row in ipairs(rows) do
-    local schema_name = row.schema_name
+    local schema_name = row.schema_name or default_schema
     local object_name = row.object_name
     local object_type = row.object_type
     local definition = row.definition
@@ -613,13 +623,12 @@ function DbClass:_populate_module_definitions_from_bulk_results(results)
     end
   else
     -- Non-schema servers (MySQL, SQLite) - objects directly on database
-    local adapter = self:get_adapter()
-    local default_schema = adapter.features.schemas and self:get_default_schema() or "dbo"
+    local lookup_schema = default_schema or "dbo"
 
     -- Views
     for _, view in ipairs(self.views or {}) do
       if not view.definition_loaded then
-        local key = string.format("%s.view.%s", default_schema, view.view_name or view.name)
+        local key = string.format("%s.view.%s", lookup_schema, view.view_name or view.name)
         local def = defs_by_object[key]
         if def then
           view.definition = def
@@ -631,7 +640,7 @@ function DbClass:_populate_module_definitions_from_bulk_results(results)
     -- Procedures
     for _, proc in ipairs(self.procedures or {}) do
       if not proc.definition_loaded then
-        local key = string.format("%s.procedure.%s", default_schema, proc.procedure_name or proc.name)
+        local key = string.format("%s.procedure.%s", lookup_schema, proc.procedure_name or proc.name)
         local def = defs_by_object[key]
         if def then
           proc.definition = def
@@ -643,7 +652,7 @@ function DbClass:_populate_module_definitions_from_bulk_results(results)
     -- Functions
     for _, func in ipairs(self.functions or {}) do
       if not func.definition_loaded then
-        local key = string.format("%s.function.%s", default_schema, func.function_name or func.name)
+        local key = string.format("%s.function.%s", lookup_schema, func.function_name or func.name)
         local def = defs_by_object[key]
         if def then
           func.definition = def
@@ -673,11 +682,21 @@ function DbClass:_populate_table_definitions_from_bulk_results(results)
     return
   end
 
+  -- Determine default schema for adapters that don't include schema_name in results
+  -- MySQL uses "dbo", SQLite uses "main"
+  local adapter = self:get_adapter()
+  local default_schema
+  if adapter.adapter_type == "sqlite" then
+    default_schema = "main"
+  elseif adapter.adapter_type == "mysql" then
+    default_schema = "dbo"
+  end
+
   -- Group definitions by schema.table.name
-  -- Each row has: schema_name, table_name, definition
+  -- SQL Server/Postgres have schema_name, MySQL/SQLite don't
   local defs_by_table = {}
   for _, row in ipairs(rows) do
-    local schema_name = row.schema_name
+    local schema_name = row.schema_name or default_schema
     local table_name = row.table_name
     local definition = row.definition
 
@@ -706,12 +725,11 @@ function DbClass:_populate_table_definitions_from_bulk_results(results)
     end
   else
     -- Non-schema servers (MySQL, SQLite) - objects directly on database
-    local adapter = self:get_adapter()
-    local default_schema = adapter.features.schemas and self:get_default_schema() or "dbo"
+    local lookup_schema = default_schema or "dbo"
 
     for _, tbl in ipairs(self.tables or {}) do
       if not tbl.definition_loaded then
-        local key = string.format("%s.table.%s", default_schema, tbl.table_name or tbl.name)
+        local key = string.format("%s.table.%s", lookup_schema, tbl.table_name or tbl.name)
         local def = defs_by_table[key]
         if def then
           tbl.definition = def
@@ -805,11 +823,20 @@ function DbClass:_populate_columns_from_bulk_results(adapter, results)
     return
   end
 
+  -- Determine default schema for adapters that don't include schema_name in results
+  -- MySQL uses "dbo", SQLite uses "main"
+  local default_schema
+  if adapter.adapter_type == "sqlite" then
+    default_schema = "main"
+  elseif adapter.adapter_type == "mysql" then
+    default_schema = "dbo"
+  end
+
   -- Group columns by schema.type.name
-  -- Each row has: schema_name, table_name (object name), object_type, column_name, data_type
+  -- SQL Server/Postgres have schema_name, MySQL/SQLite don't
   local columns_by_object = {}
   for _, row in ipairs(rows) do
-    local schema_name = row.schema_name
+    local schema_name = row.schema_name or default_schema
     local object_name = row.table_name
     local object_type = row.object_type or "table"
     local column_name = row.column_name
@@ -883,12 +910,13 @@ function DbClass:_populate_columns_from_bulk_results(adapter, results)
     end
   else
     -- Non-schema servers (MySQL, SQLite) - objects are directly on database
-    local default_schema = adapter.features.schemas and self:get_default_schema() or "dbo"
+    -- Use the same default_schema that was used when grouping
+    local lookup_schema = default_schema or "dbo"
 
     -- Tables
     for _, tbl in ipairs(self.tables or {}) do
       if not tbl.columns_loaded then
-        local key = string.format("%s.table.%s", default_schema, tbl.table_name or tbl.name)
+        local key = string.format("%s.table.%s", lookup_schema, tbl.table_name or tbl.name)
         local col_data_list = columns_by_object[key]
         if col_data_list then
           tbl.columns = {}
@@ -904,7 +932,7 @@ function DbClass:_populate_columns_from_bulk_results(adapter, results)
     -- Views
     for _, view in ipairs(self.views or {}) do
       if not view.columns_loaded then
-        local key = string.format("%s.view.%s", default_schema, view.view_name or view.name)
+        local key = string.format("%s.view.%s", lookup_schema, view.view_name or view.name)
         local col_data_list = columns_by_object[key]
         if col_data_list then
           view.columns = {}
@@ -920,7 +948,7 @@ function DbClass:_populate_columns_from_bulk_results(adapter, results)
     -- Functions (TVFs)
     for _, func in ipairs(self.functions or {}) do
       if not func.columns_loaded then
-        local key = string.format("%s.function.%s", default_schema, func.function_name or func.name)
+        local key = string.format("%s.function.%s", lookup_schema, func.function_name or func.name)
         local col_data_list = columns_by_object[key]
         if col_data_list then
           func.columns = {}
@@ -955,11 +983,20 @@ function DbClass:_populate_parameters_from_bulk_results(adapter, results)
     return
   end
 
+  -- Determine default schema for adapters that don't include schema_name in results
+  -- MySQL uses "dbo", SQLite uses "main"
+  local default_schema
+  if adapter.adapter_type == "sqlite" then
+    default_schema = "main"
+  elseif adapter.adapter_type == "mysql" then
+    default_schema = "dbo"
+  end
+
   -- Group parameters by schema.type.name
-  -- Each row has: schema_name, routine_name, object_type, parameter_name, data_type
+  -- SQL Server/Postgres have schema_name, MySQL/SQLite don't
   local params_by_object = {}
   for _, row in ipairs(rows) do
-    local schema_name = row.schema_name
+    local schema_name = row.schema_name or default_schema
     local object_name = row.routine_name
     local object_type = row.object_type or "function"
     local param_name = row.parameter_name
@@ -1025,12 +1062,13 @@ function DbClass:_populate_parameters_from_bulk_results(adapter, results)
     end
   else
     -- Non-schema servers - objects directly on database
-    local default_schema = adapter.features.schemas and self:get_default_schema() or "dbo"
+    -- Use the same default_schema that was used when grouping
+    local lookup_schema = default_schema or "dbo"
 
     -- Procedures
     for _, proc in ipairs(self.procedures or {}) do
       if not proc.parameters_loaded then
-        local key = string.format("%s.procedure.%s", default_schema, proc.procedure_name or proc.name)
+        local key = string.format("%s.procedure.%s", lookup_schema, proc.procedure_name or proc.name)
         local param_data_list = params_by_object[key]
         if param_data_list then
           proc.parameters = {}
@@ -1049,7 +1087,7 @@ function DbClass:_populate_parameters_from_bulk_results(adapter, results)
     -- Functions
     for _, func in ipairs(self.functions or {}) do
       if not func.parameters_loaded then
-        local key = string.format("%s.function.%s", default_schema, func.function_name or func.name)
+        local key = string.format("%s.function.%s", lookup_schema, func.function_name or func.name)
         local param_data_list = params_by_object[key]
         if param_data_list then
           func.parameters = {}
@@ -1566,12 +1604,8 @@ end
 function DbClass:load_tables_async(opts)
   opts = opts or {}
 
-  if not self.schemas then
-    if opts.on_complete then opts.on_complete(false, "Not a schema-based server") end
-    return "no-op"
-  end
-
   local adapter = self:get_adapter()
+  local db_self = self  -- Capture for callback
 
   -- Get the bulk query (nil schema = all schemas)
   local query = adapter:get_tables_query(self.db_name, nil)
@@ -1589,20 +1623,28 @@ function DbClass:load_tables_async(opts)
       -- Parse results using adapter's standard parser
       local table_data_list = adapter:parse_tables(results)
 
-      -- Group tables by schema
-      local tables_by_schema = {}
-      for _, table_data in ipairs(table_data_list) do
-        local schema_name = table_data.schema
-        if not tables_by_schema[schema_name] then
-          tables_by_schema[schema_name] = {}
+      if db_self.schemas then
+        -- Schema-based servers: distribute to schemas
+        local tables_by_schema = {}
+        for _, table_data in ipairs(table_data_list) do
+          local schema_name = table_data.schema
+          if not tables_by_schema[schema_name] then
+            tables_by_schema[schema_name] = {}
+          end
+          table.insert(tables_by_schema[schema_name], table_data)
         end
-        table.insert(tables_by_schema[schema_name], table_data)
-      end
 
-      -- Distribute to schemas
-      for _, schema in ipairs(self.schemas) do
-        local schema_tables = tables_by_schema[schema.name] or {}
-        schema:set_tables(schema_tables)
+        for _, schema in ipairs(db_self.schemas) do
+          local schema_tables = tables_by_schema[schema.name] or {}
+          schema:set_tables(schema_tables)
+        end
+      else
+        -- Non-schema servers (MySQL, SQLite): load directly on database
+        db_self.tables = {}
+        for _, table_data in ipairs(table_data_list) do
+          local tbl = adapter:create_table(db_self, table_data)
+          table.insert(db_self.tables, tbl)
+        end
       end
 
       if opts.on_complete then
@@ -1619,17 +1661,17 @@ end
 function DbClass:load_views_async(opts)
   opts = opts or {}
 
-  if not self.schemas then
-    if opts.on_complete then opts.on_complete(false, "Not a schema-based server") end
-    return "no-op"
-  end
-
   local adapter = self:get_adapter()
+  local db_self = self  -- Capture for callback
 
   if not adapter.features.views then
-    -- Set empty arrays for all schemas
-    for _, schema in ipairs(self.schemas) do
-      schema:set_views({})
+    -- Set empty arrays
+    if self.schemas then
+      for _, schema in ipairs(self.schemas) do
+        schema:set_views({})
+      end
+    else
+      self.views = {}
     end
     if opts.on_complete then opts.on_complete(true, nil) end
     return "no-op"
@@ -1648,20 +1690,28 @@ function DbClass:load_views_async(opts)
 
       local view_data_list = adapter:parse_views(results)
 
-      -- Group views by schema
-      local views_by_schema = {}
-      for _, view_data in ipairs(view_data_list) do
-        local schema_name = view_data.schema
-        if not views_by_schema[schema_name] then
-          views_by_schema[schema_name] = {}
+      if db_self.schemas then
+        -- Schema-based servers: distribute to schemas
+        local views_by_schema = {}
+        for _, view_data in ipairs(view_data_list) do
+          local schema_name = view_data.schema
+          if not views_by_schema[schema_name] then
+            views_by_schema[schema_name] = {}
+          end
+          table.insert(views_by_schema[schema_name], view_data)
         end
-        table.insert(views_by_schema[schema_name], view_data)
-      end
 
-      -- Distribute to schemas
-      for _, schema in ipairs(self.schemas) do
-        local schema_views = views_by_schema[schema.name] or {}
-        schema:set_views(schema_views)
+        for _, schema in ipairs(db_self.schemas) do
+          local schema_views = views_by_schema[schema.name] or {}
+          schema:set_views(schema_views)
+        end
+      else
+        -- Non-schema servers (MySQL, SQLite): load directly on database
+        db_self.views = {}
+        for _, view_data in ipairs(view_data_list) do
+          local view = adapter:create_view(db_self, view_data)
+          table.insert(db_self.views, view)
+        end
       end
 
       if opts.on_complete then
@@ -1678,16 +1728,17 @@ end
 function DbClass:load_procedures_async(opts)
   opts = opts or {}
 
-  if not self.schemas then
-    if opts.on_complete then opts.on_complete(false, "Not a schema-based server") end
-    return "no-op"
-  end
-
   local adapter = self:get_adapter()
+  local db_self = self  -- Capture for callback
 
   if not adapter.features.procedures then
-    for _, schema in ipairs(self.schemas) do
-      schema:set_procedures({})
+    -- Set empty arrays
+    if self.schemas then
+      for _, schema in ipairs(self.schemas) do
+        schema:set_procedures({})
+      end
+    else
+      self.procedures = {}
     end
     if opts.on_complete then opts.on_complete(true, nil) end
     return "no-op"
@@ -1706,20 +1757,28 @@ function DbClass:load_procedures_async(opts)
 
       local proc_data_list = adapter:parse_procedures(results)
 
-      -- Group by schema
-      local procs_by_schema = {}
-      for _, proc_data in ipairs(proc_data_list) do
-        local schema_name = proc_data.schema
-        if not procs_by_schema[schema_name] then
-          procs_by_schema[schema_name] = {}
+      if db_self.schemas then
+        -- Schema-based servers: distribute to schemas
+        local procs_by_schema = {}
+        for _, proc_data in ipairs(proc_data_list) do
+          local schema_name = proc_data.schema
+          if not procs_by_schema[schema_name] then
+            procs_by_schema[schema_name] = {}
+          end
+          table.insert(procs_by_schema[schema_name], proc_data)
         end
-        table.insert(procs_by_schema[schema_name], proc_data)
-      end
 
-      -- Distribute to schemas
-      for _, schema in ipairs(self.schemas) do
-        local schema_procs = procs_by_schema[schema.name] or {}
-        schema:set_procedures(schema_procs)
+        for _, schema in ipairs(db_self.schemas) do
+          local schema_procs = procs_by_schema[schema.name] or {}
+          schema:set_procedures(schema_procs)
+        end
+      else
+        -- Non-schema servers (MySQL, SQLite): load directly on database
+        db_self.procedures = {}
+        for _, proc_data in ipairs(proc_data_list) do
+          local proc = adapter:create_procedure(db_self, proc_data)
+          table.insert(db_self.procedures, proc)
+        end
       end
 
       if opts.on_complete then
@@ -1736,16 +1795,17 @@ end
 function DbClass:load_functions_async(opts)
   opts = opts or {}
 
-  if not self.schemas then
-    if opts.on_complete then opts.on_complete(false, "Not a schema-based server") end
-    return "no-op"
-  end
-
   local adapter = self:get_adapter()
+  local db_self = self  -- Capture for callback
 
   if not adapter.features.functions then
-    for _, schema in ipairs(self.schemas) do
-      schema:set_functions({})
+    -- Set empty arrays
+    if self.schemas then
+      for _, schema in ipairs(self.schemas) do
+        schema:set_functions({})
+      end
+    else
+      self.functions = {}
     end
     if opts.on_complete then opts.on_complete(true, nil) end
     return "no-op"
@@ -1764,20 +1824,28 @@ function DbClass:load_functions_async(opts)
 
       local func_data_list = adapter:parse_functions(results)
 
-      -- Group by schema
-      local funcs_by_schema = {}
-      for _, func_data in ipairs(func_data_list) do
-        local schema_name = func_data.schema
-        if not funcs_by_schema[schema_name] then
-          funcs_by_schema[schema_name] = {}
+      if db_self.schemas then
+        -- Schema-based servers: distribute to schemas
+        local funcs_by_schema = {}
+        for _, func_data in ipairs(func_data_list) do
+          local schema_name = func_data.schema
+          if not funcs_by_schema[schema_name] then
+            funcs_by_schema[schema_name] = {}
+          end
+          table.insert(funcs_by_schema[schema_name], func_data)
         end
-        table.insert(funcs_by_schema[schema_name], func_data)
-      end
 
-      -- Distribute to schemas
-      for _, schema in ipairs(self.schemas) do
-        local schema_funcs = funcs_by_schema[schema.name] or {}
-        schema:set_functions(schema_funcs)
+        for _, schema in ipairs(db_self.schemas) do
+          local schema_funcs = funcs_by_schema[schema.name] or {}
+          schema:set_functions(schema_funcs)
+        end
+      else
+        -- Non-schema servers (MySQL, SQLite): load directly on database
+        db_self.functions = {}
+        for _, func_data in ipairs(func_data_list) do
+          local func = adapter:create_function(db_self, func_data)
+          table.insert(db_self.functions, func)
+        end
       end
 
       if opts.on_complete then

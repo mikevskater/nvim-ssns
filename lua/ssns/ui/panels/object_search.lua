@@ -741,26 +741,59 @@ local function load_synonym_referenced_databases_async(callback)
 
     -- Load the database's full structure (schemas, tables, views, procedures, functions)
     -- This enables synonym resolution to find target objects
-    db:load_async({
-      on_complete = function()
-        -- Add this database to selected_databases for metadata loading
-        ui_state.selected_databases[db.db_name] = db
+    -- We need the full async chain, not just load_async()
+    local function load_ref_db_chain()
+      local chain_ops = {
+        function(next) db:load_async({ on_complete = function() next() end, on_error = function() next() end }) end,
+        function(next) db:load_tables_async({ on_complete = function() next() end, on_error = function() next() end }) end,
+        function(next) db:load_views_async({ on_complete = function() next() end, on_error = function() next() end }) end,
+        function(next) db:load_procedures_async({ on_complete = function() next() end, on_error = function() next() end }) end,
+        function(next) db:load_functions_async({ on_complete = function() next() end, on_error = function() next() end }) end,
+      }
 
-        -- Flatten objects from this database and add to loaded_objects
-        local db_objects = flatten_database_objects(db, server)
-        for _, obj in ipairs(db_objects) do
-          table.insert(ui_state.loaded_objects, obj)
+      local op_idx = 1
+      local function run_next_op()
+        if cancel_token and cancel_token.is_cancelled then
+          -- Add this database to selected_databases for metadata loading
+          ui_state.selected_databases[db.db_name] = db
+
+          -- Flatten objects from this database and add to loaded_objects
+          local db_objects = flatten_database_objects(db, server)
+          for _, obj in ipairs(db_objects) do
+            table.insert(ui_state.loaded_objects, obj)
+          end
+
+          db_idx = db_idx + 1
+          vim.schedule(load_next_ref_db)
+          return
         end
 
-        db_idx = db_idx + 1
-        vim.schedule(load_next_ref_db)
-      end,
-      on_error = function(err)
-        -- Continue even on error
-        db_idx = db_idx + 1
-        vim.schedule(load_next_ref_db)
-      end,
-    })
+        if op_idx > #chain_ops then
+          -- All operations complete for this database
+          -- Add this database to selected_databases for metadata loading
+          ui_state.selected_databases[db.db_name] = db
+
+          -- Flatten objects from this database and add to loaded_objects
+          local db_objects = flatten_database_objects(db, server)
+          for _, obj in ipairs(db_objects) do
+            table.insert(ui_state.loaded_objects, obj)
+          end
+
+          db_idx = db_idx + 1
+          vim.schedule(load_next_ref_db)
+          return
+        end
+
+        chain_ops[op_idx](function()
+          op_idx = op_idx + 1
+          vim.schedule(run_next_op)
+        end)
+      end
+
+      run_next_op()
+    end
+
+    load_ref_db_chain()
   end
 
   load_next_ref_db()
@@ -807,50 +840,67 @@ local function preload_metadata_async(callback)
   local cancel_token = loading_cancel_token
 
   ---Apply loaded metadata/definitions to searchable objects
+  ---Since bulk loaders now populate actual objects, we derive from objects directly
+  ---IMPORTANT: Only use pre-loaded data (check *_loaded flags), never trigger sync loads
   local function apply_to_objects()
-    -- Helper to try multiple key formats (for different adapters)
-    local function find_in_map(map, db_name, schema_name, obj_type, obj_name)
-      -- Try with actual schema name first
-      local key = string.format("%s:%s.%s.%s", db_name, schema_name or "", obj_type, obj_name):lower()
-      if map[key] then return map[key] end
-
-      -- For non-schema databases, adapters use placeholder schemas
-      -- Try SQLite placeholder: "main"
-      if not schema_name or schema_name == "" then
-        key = string.format("%s:main.%s.%s", db_name, obj_type, obj_name):lower()
-        if map[key] then return map[key] end
-
-        -- Try MySQL placeholder: "dbo"
-        key = string.format("%s:dbo.%s.%s", db_name, obj_type, obj_name):lower()
-        if map[key] then return map[key] end
-      end
-
-      return nil
-    end
-
     for _, searchable in ipairs(objects) do
-      local db_name = searchable.database_name or ""
-      local schema_name = searchable.schema_name
-      local obj_type = searchable.object_type or ""
-      local obj_name = searchable.name or ""
+      local obj = searchable.object
 
-      -- Apply metadata
-      local metadata = find_in_map(all_metadata, db_name, schema_name, obj_type, obj_name)
-      if metadata then
-        searchable.metadata_text = metadata
+      -- Derive metadata from actual object (ONLY if pre-loaded by bulk loader)
+      -- Do NOT call get_columns()/get_parameters() as they trigger sync loads
+      if obj and not searchable.metadata_loaded then
+        local parts = {}
+
+        -- For tables and views: use pre-loaded columns (direct access, no getter)
+        if (searchable.object_type == "table" or searchable.object_type == "view") then
+          if obj.columns_loaded and obj.columns then
+            for _, col in ipairs(obj.columns) do
+              table.insert(parts, col.name or col.column_name)
+              if col.data_type then
+                table.insert(parts, col.data_type)
+              end
+            end
+          end
+        end
+
+        -- For procedures and functions: use pre-loaded parameters (direct access)
+        if (searchable.object_type == "procedure" or searchable.object_type == "function") then
+          if obj.parameters_loaded and obj.parameters then
+            for _, param in ipairs(obj.parameters) do
+              table.insert(parts, param.name or param.parameter_name)
+              if param.data_type then
+                table.insert(parts, param.data_type)
+              end
+            end
+          end
+        end
+
+        -- For functions (TVFs): also use pre-loaded columns (direct access)
+        if searchable.object_type == "function" then
+          if obj.columns_loaded and obj.columns then
+            for _, col in ipairs(obj.columns) do
+              table.insert(parts, col.name or col.column_name)
+              if col.data_type then
+                table.insert(parts, col.data_type)
+              end
+            end
+          end
+        end
+
+        searchable.metadata_text = table.concat(parts, " ")
         searchable.metadata_loaded = true
-      else
-        searchable.metadata_loaded = true  -- Mark as loaded even if empty
       end
 
-      -- Apply definition
-      local definition = find_in_map(all_definitions, db_name, schema_name, obj_type, obj_name)
-      if definition then
-        searchable.definition = definition
-        searchable.definition_loaded = true
-        ui_state.definitions_cache[searchable.unique_id] = searchable.definition
-      else
-        searchable.definition_loaded = true  -- Mark as loaded even if empty
+      -- Derive definition from actual object (ONLY if pre-loaded by bulk loader)
+      -- Do NOT call get_definition() as it triggers sync load
+      if obj and not searchable.definition_loaded then
+        if obj.definition_loaded and obj.definition then
+          searchable.definition = obj.definition
+          searchable.definition_loaded = true
+          ui_state.definitions_cache[searchable.unique_id] = obj.definition
+        end
+        -- Note: Do NOT set searchable.definition_loaded = true if no definition found
+        -- This allows load_definition() to try again later
       end
     end
 
@@ -1264,9 +1314,36 @@ local function load_definition(searchable)
     return searchable.definition
   end
 
-  -- Load from object
   local obj = searchable.object
-  if obj and obj.get_definition then
+  if not obj then
+    searchable.definition_loaded = true
+    return nil
+  end
+
+  -- First try to get pre-loaded definition directly (no sync load)
+  if obj.definition_loaded and obj.definition then
+    searchable.definition = obj.definition
+    searchable.definition_loaded = true
+    ui_state.definitions_cache[searchable.unique_id] = obj.definition
+    return obj.definition
+  end
+
+  -- For synonyms, try to get the base object's definition
+  if searchable.object_type == "synonym" and obj.resolve then
+    local ok, base_obj = pcall(function()
+      return obj:resolve()
+    end)
+    if ok and base_obj and base_obj.definition_loaded and base_obj.definition then
+      searchable.definition = base_obj.definition
+      searchable.definition_loaded = true
+      ui_state.definitions_cache[searchable.unique_id] = base_obj.definition
+      return base_obj.definition
+    end
+  end
+
+  -- Fallback: call get_definition() which may trigger a sync load
+  -- Only do this for objects that weren't processed by bulk loaders
+  if obj.get_definition then
     local ok, def = pcall(function()
       return obj:get_definition()
     end)
@@ -2442,8 +2519,12 @@ local function render_definition(state)
 
   -- Header comments
   table.insert(lines, string.format("-- %s: %s", searchable.object_type:upper(), searchable.name))
-  table.insert(lines, string.format("-- Database: %s.%s",
-    searchable.database_name, searchable.schema_name or ""))
+  -- Show database and schema (only include schema if it exists and is meaningful)
+  local db_display = searchable.database_name
+  if searchable.schema_name and searchable.schema_name ~= "" then
+    db_display = string.format("%s.%s", searchable.database_name, searchable.schema_name)
+  end
+  table.insert(lines, string.format("-- Database: %s", db_display))
   table.insert(lines, string.format("-- Server: %s", searchable.server_name))
   table.insert(lines, "")
 
