@@ -492,7 +492,7 @@ end
 
 ---Add a dropdown field
 ---@param key string Unique identifier for retrieving the value
----@param opts table Options: { label = string?, options = DropdownOption[], value = string?, placeholder = string?, width = number?, max_height = number?, label_style = string? }
+---@param opts table Options: { label = string?, options = DropdownOption[], value = string?, placeholder = string?, width = number?, max_height = number?, label_style = string?, label_width = number? }
 ---@return ContentBuilder self For chaining
 function ContentBuilder:dropdown(key, opts)
   opts = opts or {}
@@ -504,6 +504,7 @@ function ContentBuilder:dropdown(key, opts)
   local max_height = opts.max_height or 6
   local label_style = opts.label_style or "label"
   local separator = opts.separator or ": "
+  local label_width = opts.label_width  -- Optional: pad label to this width
 
   -- Find the label for the current value
   local display_text = placeholder
@@ -519,7 +520,15 @@ function ContentBuilder:dropdown(key, opts)
   -- Build the line text
   local prefix = ""
   if label ~= "" then
-    prefix = label .. separator
+    -- Pad label to label_width if specified
+    local padded_label = label
+    if label_width then
+      local label_display_len = vim.fn.strdisplaywidth(label)
+      if label_display_len < label_width then
+        padded_label = label .. string.rep(" ", label_width - label_display_len)
+      end
+    end
+    prefix = padded_label .. separator
   end
 
   -- Calculate effective width (fixed to specified width)
@@ -689,7 +698,7 @@ end
 
 ---Add a multi-select dropdown field
 ---@param key string Unique identifier for retrieving the values
----@param opts table Options: { label = string?, options = DropdownOption[], values = string[]?, placeholder = string?, width = number?, max_height = number?, display_mode = string?, select_all_option = boolean? }
+---@param opts table Options: { label = string?, options = DropdownOption[], values = string[]?, placeholder = string?, width = number?, max_height = number?, display_mode = string?, select_all_option = boolean?, label_width = number? }
 ---@return ContentBuilder self For chaining
 function ContentBuilder:multi_dropdown(key, opts)
   opts = opts or {}
@@ -703,6 +712,7 @@ function ContentBuilder:multi_dropdown(key, opts)
   local separator = opts.separator or ": "
   local display_mode = opts.display_mode or "count"  -- "count" or "list"
   local select_all_option = opts.select_all_option ~= false  -- Default true
+  local label_width = opts.label_width  -- Optional: pad label to this width
 
   -- Build display text based on selection count
   local display_text
@@ -732,7 +742,15 @@ function ContentBuilder:multi_dropdown(key, opts)
   -- Build the line text
   local prefix = ""
   if label ~= "" then
-    prefix = label .. separator
+    -- Pad label to label_width if specified
+    local padded_label = label
+    if label_width then
+      local label_display_len = vim.fn.strdisplaywidth(label)
+      if label_display_len < label_width then
+        padded_label = label .. string.rep(" ", label_width - label_display_len)
+      end
+    end
+    prefix = padded_label .. separator
   end
 
   -- Arrow indicator for multi-dropdown uses different symbol
