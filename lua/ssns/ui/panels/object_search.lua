@@ -132,7 +132,7 @@ local ui_state = {
   -- Search target filters (what to search in)
   search_names = true,
   search_definitions = true,
-  search_metadata = false,
+  search_metadata = true,
   -- Object type filters (what types to show)
   show_tables = true,
   show_views = true,
@@ -314,7 +314,7 @@ local function reset_state(clear_saved)
     -- Search target filters
     search_names = true,
     search_definitions = true,
-    search_metadata = false,
+    search_metadata = true,
     -- Object type filters
     show_tables = true,
     show_views = true,
@@ -2084,7 +2084,7 @@ local function render_filters(state)
     values = get_search_targets_values(),
     display_mode = "list",
     placeholder = "(none)",
-    width = 30,
+    width = 70,
   })
 
   -- Row 2: Object types dropdown (what types to show)
@@ -2102,7 +2102,7 @@ local function render_filters(state)
     display_mode = "list",
     select_all_option = true,
     placeholder = "(none)",
-    width = 30,
+    width = 70,
   })
 
   -- Row 3: Status/counts
@@ -2245,7 +2245,7 @@ render_settings = function(state)
     options = get_server_options(),
     value = ui_state.selected_server and ui_state.selected_server.name or "",
     placeholder = "(select server)",
-    width = 28,
+    width = 70,
   })
 
   -- Row 2: Database multi-dropdown (show loading state when server is connecting/loading)
@@ -2276,7 +2276,7 @@ render_settings = function(state)
     display_mode = "count",
     select_all_option = not db_disabled,
     placeholder = db_placeholder,
-    width = 28,
+    width = 70,
     disabled = db_disabled,
   })
 
@@ -2292,7 +2292,7 @@ render_settings = function(state)
     values = get_search_options_values(),
     display_mode = "list",
     placeholder = "(none)",
-    width = 28,
+    width = 70,
   })
 
   return cb
@@ -2998,6 +2998,127 @@ local function yank_object_name()
   vim.notify("Yanked: " .. full_name, vim.log.levels.INFO)
 end
 
+---Execute SELECT or EXEC for selected object in new buffer
+---Tables/Views/Functions get SELECT, Procedures get EXEC
+local function select_or_exec_in_buffer()
+  if ui_state.selected_result_idx < 1 or ui_state.selected_result_idx > #ui_state.filtered_results then
+    return
+  end
+
+  local result = ui_state.filtered_results[ui_state.selected_result_idx]
+  local searchable = result.searchable
+
+  -- Find the actual object from cache
+  local server = Cache.find_server(searchable.server_name)
+  local database = server and Cache.find_database(searchable.server_name, searchable.database_name)
+  local schema = database and Cache.find_schema(searchable.server_name, searchable.database_name, searchable.schema_name)
+
+  if not schema then
+    vim.notify("Could not find schema for object", vim.log.levels.WARN)
+    return
+  end
+
+  local obj = nil
+  local obj_type = searchable.object_type
+
+  -- Find the object based on type
+  if obj_type == "table" then
+    obj = schema:find_table(searchable.name)
+  elseif obj_type == "view" then
+    obj = schema:find_view(searchable.name)
+  elseif obj_type == "synonym" then
+    obj = schema:find_synonym(searchable.name)
+  elseif obj_type == "procedure" then
+    -- Find procedure in schema's procedures list
+    local procedures = schema:get_procedures({ skip_load = true })
+    for _, proc in ipairs(procedures) do
+      if proc.name == searchable.name then
+        obj = proc
+        break
+      end
+    end
+  elseif obj_type == "function" then
+    -- Find function in schema's functions list
+    local functions = schema:get_functions({ skip_load = true })
+    for _, func in ipairs(functions) do
+      if func.name == searchable.name then
+        obj = func
+        break
+      end
+    end
+  end
+
+  if not obj then
+    vim.notify("Could not find object: " .. searchable.name, vim.log.levels.WARN)
+    return
+  end
+
+  -- Close search window
+  UiObjectSearch.close()
+
+  -- Generate and execute the appropriate statement
+  if obj_type == "procedure" then
+    -- EXEC for procedures (with parameter handling)
+    if obj.generate_exec then
+      -- Helper function to show param UI and create exec statement
+      local function show_exec_ui(parameters)
+        -- Filter to only input parameters (IN or INOUT)
+        local input_params = {}
+        for _, param in ipairs(parameters or {}) do
+          if param.direction == "IN" or param.direction == "INOUT" then
+            table.insert(input_params, param)
+          end
+        end
+
+        if #input_params > 0 then
+          -- Show parameter input UI
+          local UiParamInput = require('ssns.ui.dialogs.param_input')
+          local proc_name = (obj.schema_name and obj.schema_name .. "." or "") .. obj.procedure_name
+
+          UiParamInput.show_input(
+            proc_name,
+            server.name,
+            database and database.db_name or nil,
+            input_params,
+            function(values)
+              -- Build EXEC statement with user-provided values
+              local sql = UiQuery.build_exec_statement(obj.schema_name, obj.procedure_name, input_params, values)
+              UiQuery.create_query_buffer(server, database, sql, obj.name)
+            end
+          )
+        else
+          -- No parameters, create buffer with simple EXEC
+          local sql = obj:generate_exec()
+          UiQuery.create_query_buffer(server, database, sql, obj.name)
+        end
+      end
+
+      -- Load parameters if needed
+      if obj.parameters then
+        show_exec_ui(obj.parameters)
+      elseif obj.load_parameters then
+        obj:load_parameters()
+        show_exec_ui(obj.parameters)
+      else
+        local sql = obj:generate_exec()
+        UiQuery.create_query_buffer(server, database, sql, obj.name)
+      end
+    else
+      vim.notify("EXEC not available for this procedure", vim.log.levels.WARN)
+    end
+  else
+    -- SELECT for tables, views, functions, synonyms
+    if obj.generate_select then
+      local sql = obj:generate_select(100)
+      UiQuery.create_query_buffer(server, database, sql, obj.name)
+      vim.notify(string.format("Generated SELECT for: %s.%s",
+        searchable.schema_name or "", searchable.name), vim.log.levels.INFO)
+    else
+      vim.notify("SELECT not available for this object type", vim.log.levels.WARN)
+    end
+  end
+end
+
 -- ============================================================================
 -- Server/Database Selection
 -- ============================================================================
@@ -3061,7 +3182,7 @@ local function _show_server_picker_with_connections(saved_connections)
   local picker_state = UiFloatInteractive.create({
     title = "Select Server",
     footer = " <CR>=Select | <Esc>=Cancel | j/k=Navigate ",
-    width = 50,
+    width = 70,
     height = math.min(#servers + 4, 20),
     item_count = #servers,
     header_lines = 3,
@@ -3183,7 +3304,7 @@ show_database_picker = function()
     local picker_state = UiFloatInteractive.create({
       title = "Select Databases",
       footer = " <Space>=Toggle | <CR>=Confirm | a=All | <Esc>=Cancel ",
-      width = 50,
+      width = 70,
       height = math.min(#databases + 6, 25),
       item_count = #databases + 1,  -- +1 for SELECT ALL
       header_lines = 3,
@@ -3567,53 +3688,54 @@ function UiObjectSearch.show(options)
           { key = "j/k", desc = "Move up/down in results" },
           { key = "Tab", desc = "Cycle focus: results → right panels" },
           { key = "S-Tab", desc = "Cycle right panels: definition ↔ metadata" },
-          { key = "/", desc = "Activate search input" },
+          { key = "A-/", desc = "Activate search input" },
         },
       },
       {
         header = "Panels",
         keys = {
-          { key = "s", desc = "Focus settings panel" },
-          { key = "*", desc = "Focus filters panel" },
-          { key = "d", desc = "Focus database dropdown" },
+          { key = "A-s", desc = "Focus settings panel" },
+          { key = "A-*", desc = "Focus filters panel" },
+          { key = "A-d", desc = "Focus database dropdown" },
         },
       },
       {
         header = "Search Options",
         keys = {
-          { key = "c", desc = "Toggle case sensitive" },
-          { key = "x", desc = "Toggle regex mode" },
-          { key = "w", desc = "Toggle whole word" },
-          { key = "S", desc = "Toggle show system objects" },
+          { key = "A-c", desc = "Toggle case sensitive" },
+          { key = "A-x", desc = "Toggle regex mode" },
+          { key = "A-w", desc = "Toggle whole word" },
+          { key = "A-S", desc = "Toggle show system objects" },
         },
       },
       {
         header = "Search In",
         keys = {
-          { key = "1", desc = "Toggle search names" },
-          { key = "2", desc = "Toggle search definitions" },
-          { key = "3", desc = "Toggle search metadata" },
+          { key = "A-1", desc = "Toggle search names" },
+          { key = "A-2", desc = "Toggle search definitions" },
+          { key = "A-3", desc = "Toggle search metadata" },
         },
       },
       {
-        header = "Object Types (Shift+Number)",
+        header = "Object Types",
         keys = {
-          { key = "!", desc = "Toggle tables" },
-          { key = "@", desc = "Toggle views" },
-          { key = "#", desc = "Toggle procedures" },
-          { key = "$", desc = "Toggle functions" },
-          { key = "%", desc = "Toggle synonyms" },
-          { key = "^", desc = "Toggle schemas" },
+          { key = "A-!", desc = "Toggle tables" },
+          { key = "A-@", desc = "Toggle views" },
+          { key = "A-#", desc = "Toggle procedures" },
+          { key = "A-$", desc = "Toggle functions" },
+          { key = "A-%", desc = "Toggle synonyms" },
+          { key = "A-^", desc = "Toggle schemas" },
         },
       },
       {
         header = "Actions",
         keys = {
-          { key = "Enter/o", desc = "Open definition in new buffer" },
-          { key = "y", desc = "Yank object name" },
-          { key = "r", desc = "Refresh objects from database" },
-          { key = "R", desc = "Clear saved state (full reset)" },
-          { key = "q/Esc", desc = "Close" },
+          { key = "Enter/A-o", desc = "Open definition in new buffer" },
+          { key = "A-e", desc = "SELECT/EXEC in new buffer" },
+          { key = "A-y", desc = "Yank object name" },
+          { key = "A-r", desc = "Refresh objects from database" },
+          { key = "A-R", desc = "Clear saved state (full reset)" },
+          { key = "A-q/Esc", desc = "Close" },
         },
       },
     },
@@ -3741,7 +3863,7 @@ function UiObjectSearch.show(options)
     values = get_search_targets_values(),
     display_mode = "list",
     placeholder = "(none)",
-    width = 30,
+    width = 70,
   })
   filters_cb:multi_dropdown("object_types", {
     label = "Types",
@@ -3757,7 +3879,7 @@ function UiObjectSearch.show(options)
     display_mode = "list",
     select_all_option = true,
     placeholder = "(none)",
-    width = 30,
+    width = 70,
   })
   multi_panel:setup_inputs("filters", filters_cb, {
     on_multi_dropdown_change = function(key, values)
@@ -3898,6 +4020,7 @@ function UiObjectSearch.show(options)
   local results_keymaps = get_common_keymaps()
   results_keymaps[common.confirm or "<CR>"] = open_in_buffer
   results_keymaps["<A-o>"] = open_in_buffer
+  results_keymaps["<A-e>"] = select_or_exec_in_buffer
   results_keymaps["<A-y>"] = yank_object_name
   multi_panel:set_panel_keymaps("results", results_keymaps)
 
