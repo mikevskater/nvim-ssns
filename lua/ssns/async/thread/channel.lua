@@ -87,17 +87,16 @@ end
 function ThreadChannel:connect(timeout_ms, callback)
   timeout_ms = timeout_ms or 5000
 
-  local client = vim.uv.new_pipe(false)
-  self.client = client
-
   local start_time = vim.uv.hrtime()
   local retry_timer = vim.uv.new_timer()
+  local connected = false
+  local current_client = nil
 
   local function try_connect()
-    if self.is_closed then
+    if self.is_closed or connected then
       retry_timer:stop()
       retry_timer:close()
-      if callback then callback(false, "Channel closed") end
+      if not connected and callback then callback(false, "Channel closed") end
       return
     end
 
@@ -106,23 +105,36 @@ function ThreadChannel:connect(timeout_ms, callback)
     if elapsed > timeout_ms then
       retry_timer:stop()
       retry_timer:close()
+      -- Clean up any pending client
+      if current_client and not current_client:is_closing() then
+        current_client:close()
+      end
       if callback then callback(false, "Connection timeout") end
       return
     end
 
-    client:connect(self.socket_path, function(err)
+    -- Create a NEW pipe handle for each attempt (Windows requires this)
+    current_client = vim.uv.new_pipe(false)
+
+    current_client:connect(self.socket_path, function(err)
       if err then
-        -- Retry after a short delay (server might not be ready)
+        -- Close failed pipe and let timer retry with a new handle
+        if current_client and not current_client:is_closing() then
+          current_client:close()
+        end
+        current_client = nil
         return
       end
 
       -- Connected successfully
+      connected = true
       retry_timer:stop()
       retry_timer:close()
+      self.client = current_client
       self.is_connected = true
 
       -- Start reading responses
-      client:read_start(function(read_err, data)
+      self.client:read_start(function(read_err, data)
         if read_err then
           self:_handle_error(read_err)
           return
@@ -141,6 +153,7 @@ function ThreadChannel:connect(timeout_ms, callback)
   end
 
   -- Try connecting with retries (server needs time to start)
+  -- Each attempt uses a fresh pipe handle (Windows invalidates handles on failed connect)
   retry_timer:start(0, 50, vim.schedule_wrap(try_connect))
 end
 
