@@ -517,6 +517,27 @@ function InputManager:_focus_field(key)
   self:_highlight_current_field(key)
 end
 
+---Focus a specific field by key (public API)
+---@param key string Field key to focus
+function InputManager:focus_field(key)
+  -- Find the field index
+  for i, k in ipairs(self._field_order) do
+    if k == key then
+      self.current_field_idx = i
+      break
+    end
+  end
+  self:_focus_field(key)
+end
+
+---Focus the first field in the panel
+function InputManager:focus_first_field()
+  if #self._field_order > 0 then
+    self.current_field_idx = 1
+    self:_focus_field(self._field_order[1])
+  end
+end
+
 ---Activate a field (enter input mode or open dropdown)
 ---@param key string Field key
 function InputManager:_activate_field(key)

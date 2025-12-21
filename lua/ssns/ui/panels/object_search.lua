@@ -96,6 +96,9 @@ local search_in_progress = false
 ---@type number Search progress (0-100)
 local search_progress = 0
 
+---@type number Total objects being searched (after pre-filtering)
+local search_total_objects = 0
+
 ---@type number Start time of current search (for elapsed time)
 local search_start_time = 0
 
@@ -1069,6 +1072,8 @@ local function load_objects_for_databases(callback)
   ui_state.loading_progress = 0
   ui_state.loading_message = "Loading objects..."
   ui_state.loading_detail = nil
+  -- Reset selection to top when loading new databases
+  ui_state.selected_result_idx = 1
   ui_state.loaded_objects = {}
 
   -- Start spinner animation
@@ -1479,7 +1484,15 @@ function UiObjectSearch._apply_search_async(pattern, callback)
     -- Thread failed to start, fall through to chunked processing
   end
 
-  -- Fallback: Chunked processing with vim.schedule() yields
+  -- Fallback to chunked processing
+  UiObjectSearch._apply_search_chunked(pattern, callback)
+end
+
+---Apply search using chunked processing with vim.schedule() yields
+---This is the fallback when threading is unavailable or fails
+---@param pattern string Search pattern
+---@param callback fun()? Optional callback when search completes
+function UiObjectSearch._apply_search_chunked(pattern, callback)
   -- Cancel any in-progress search
   if search_cancel_token then
     search_cancel_token:cancel("New search started")
@@ -1489,8 +1502,17 @@ function UiObjectSearch._apply_search_async(pattern, callback)
   search_cancel_token = Cancellation.create_token()
   local cancel_token = search_cancel_token
 
-  local total_objects = #ui_state.loaded_objects
   local max_results = 500
+
+  -- Pre-count objects that will be searched (after system/type filtering)
+  local total_objects = 0
+  for _, obj in ipairs(ui_state.loaded_objects) do
+    if ui_state.show_system or not is_system_object(obj) then
+      if should_show_object_type(obj) then
+        total_objects = total_objects + 1
+      end
+    end
+  end
 
   -- Handle empty pattern case: show all objects (no pattern matching)
   if not pattern or pattern == "" then
@@ -1517,6 +1539,13 @@ function UiObjectSearch._apply_search_async(pattern, callback)
     search_in_progress = false
     search_progress = 0
     stop_search_spinner()
+    -- Render panels with updated results
+    if multi_panel then
+      multi_panel:render_panel("results", { cursor_row = 1, cursor_col = 0 })
+      multi_panel:render_panel("settings")
+      multi_panel:render_panel("metadata")
+      multi_panel:render_panel("definition")
+    end
     if callback then callback() end
     return
   end
@@ -1524,6 +1553,7 @@ function UiObjectSearch._apply_search_async(pattern, callback)
   -- Initialize search progress tracking
   search_in_progress = true
   search_progress = 0
+  search_total_objects = total_objects
   search_start_time = vim.uv.hrtime()
 
   -- For small datasets, skip spinner (completes too fast to be useful)
@@ -1673,6 +1703,7 @@ function UiObjectSearch._apply_search_async(pattern, callback)
       -- Re-render results panel to show progress
       if multi_panel then
         multi_panel:render_panel("results")
+        multi_panel:render_panel("filters")  -- Update match count
       end
 
       -- Schedule next chunk (only for large datasets)
@@ -1696,10 +1727,8 @@ function UiObjectSearch._apply_search_async(pattern, callback)
 
       ui_state.filtered_results = filtered
 
-      -- Reset selection if invalid
-      if ui_state.selected_result_idx > #ui_state.filtered_results then
-        ui_state.selected_result_idx = math.max(1, #ui_state.filtered_results)
-      end
+      -- Reset selection to top on new search results
+      ui_state.selected_result_idx = 1
 
       -- Reset search progress state
       search_in_progress = false
@@ -1709,7 +1738,9 @@ function UiObjectSearch._apply_search_async(pattern, callback)
 
       -- Final render
       if multi_panel then
-        multi_panel:render_panel("results")
+        -- Render results with cursor at top
+        multi_panel:render_panel("results", { cursor_row = 1, cursor_col = 0 })
+        multi_panel:render_panel("filters")  -- Update match count
         multi_panel:render_panel("metadata")
         multi_panel:render_panel("definition")
       end
@@ -1755,7 +1786,6 @@ function UiObjectSearch._apply_search_threaded(pattern, callback)
     Thread.cancel(search_thread_task_id, "New search started")
     search_thread_task_id = nil
   end
-
   local total_objects = #ui_state.loaded_objects
   local max_results = 500
 
@@ -1781,6 +1811,13 @@ function UiObjectSearch._apply_search_threaded(pattern, callback)
     search_in_progress = false
     search_progress = 0
     stop_search_spinner()
+    -- Render panels with updated results
+    if multi_panel then
+      multi_panel:render_panel("results", { cursor_row = 1, cursor_col = 0 })
+      multi_panel:render_panel("settings")
+      multi_panel:render_panel("metadata")
+      multi_panel:render_panel("definition")
+    end
     if callback then callback() end
     return true
   end
@@ -1820,6 +1857,7 @@ function UiObjectSearch._apply_search_threaded(pattern, callback)
   -- Initialize search progress tracking
   search_in_progress = true
   search_progress = 0
+  search_total_objects = #serializable_objects
   search_start_time = vim.uv.hrtime()
   start_search_spinner()
 
@@ -1868,6 +1906,7 @@ function UiObjectSearch._apply_search_threaded(pattern, callback)
 
       if multi_panel then
         multi_panel:render_panel("results")
+        multi_panel:render_panel("filters")  -- Update match count
       end
     end,
     on_progress = function(pct, message)
@@ -1878,15 +1917,16 @@ function UiObjectSearch._apply_search_threaded(pattern, callback)
       search_thread_task_id = nil
 
       if error_msg then
-        -- Error occurred - log it and keep any results we have
+        -- Error occurred - fall back to non-threaded search
         vim.notify(
-          string.format("[SSNS] Search thread error: %s", tostring(error_msg)),
-          vim.log.levels.WARN
+          string.format("[SSNS] Search thread error, falling back: %s", tostring(error_msg)),
+          vim.log.levels.DEBUG
         )
         search_in_progress = false
         search_progress = 0
         stop_search_spinner()
-        if callback then callback() end
+        -- Fall back to chunked (non-threaded) search
+        UiObjectSearch._apply_search_chunked(pattern, callback)
         return
       end
 
@@ -1908,10 +1948,8 @@ function UiObjectSearch._apply_search_threaded(pattern, callback)
 
       ui_state.filtered_results = accumulated_results
 
-      -- Reset selection if invalid
-      if ui_state.selected_result_idx > #ui_state.filtered_results then
-        ui_state.selected_result_idx = math.max(1, #ui_state.filtered_results)
-      end
+      -- Reset selection to top on new search results
+      ui_state.selected_result_idx = 1
 
       -- Finalize
       search_in_progress = false
@@ -1920,7 +1958,9 @@ function UiObjectSearch._apply_search_threaded(pattern, callback)
 
       -- Final render
       if multi_panel then
-        multi_panel:render_panel("results")
+        -- Render results with cursor at top
+        multi_panel:render_panel("results", { cursor_row = 1, cursor_col = 0 })
+        multi_panel:render_panel("filters")  -- Update match count
         multi_panel:render_panel("metadata")
         multi_panel:render_panel("definition")
       end
@@ -1931,7 +1971,10 @@ function UiObjectSearch._apply_search_threaded(pattern, callback)
   })
 
   if not task_id then
-    -- Thread failed to start - return false so caller can fallback
+    -- Thread failed to start - log and return false so caller can fallback
+    if err then
+      vim.notify(string.format("[SSNS] Thread start failed: %s", err), vim.log.levels.WARN)
+    end
     search_in_progress = false
     search_progress = 0
     stop_search_spinner()
@@ -2330,7 +2373,7 @@ local function render_results(state)
   if search_in_progress and search_text_spinner then
     local spinner_char = search_text_spinner:get_frame()
     local elapsed = get_search_elapsed_time()
-    local total = #ui_state.loaded_objects
+    local total = search_total_objects
     local searched = math.floor(total * search_progress / 100)
 
     cb:spans({
@@ -2695,6 +2738,7 @@ local function toggle_search_names()
   sync_filter_dropdowns()
   if multi_panel then
     multi_panel:render_panel("results")
+    multi_panel:render_panel("settings")
   end
   vim.notify("Search names: " .. (ui_state.search_names and "ON" or "OFF"), vim.log.levels.INFO)
 end
@@ -2705,6 +2749,7 @@ local function toggle_search_defs()
   sync_filter_dropdowns()
   if multi_panel then
     multi_panel:render_panel("results")
+    multi_panel:render_panel("settings")
   end
   vim.notify("Search definitions: " .. (ui_state.search_definitions and "ON" or "OFF"), vim.log.levels.INFO)
 end
@@ -2715,6 +2760,7 @@ local function toggle_search_meta()
   sync_filter_dropdowns()
   if multi_panel then
     multi_panel:render_panel("results")
+    multi_panel:render_panel("settings")
   end
   vim.notify("Search metadata: " .. (ui_state.search_metadata and "ON" or "OFF"), vim.log.levels.INFO)
 end
@@ -2737,6 +2783,7 @@ local function toggle_tables()
   sync_filter_dropdowns()
   if multi_panel then
     multi_panel:render_panel("results")
+    multi_panel:render_panel("filters")
   end
   vim.notify("Show tables: " .. (ui_state.show_tables and "ON" or "OFF"), vim.log.levels.INFO)
 end
@@ -2747,6 +2794,7 @@ local function toggle_views()
   sync_filter_dropdowns()
   if multi_panel then
     multi_panel:render_panel("results")
+    multi_panel:render_panel("filters")
   end
   vim.notify("Show views: " .. (ui_state.show_views and "ON" or "OFF"), vim.log.levels.INFO)
 end
@@ -2757,6 +2805,7 @@ local function toggle_procedures()
   sync_filter_dropdowns()
   if multi_panel then
     multi_panel:render_panel("results")
+    multi_panel:render_panel("filters")
   end
   vim.notify("Show procedures: " .. (ui_state.show_procedures and "ON" or "OFF"), vim.log.levels.INFO)
 end
@@ -2767,6 +2816,7 @@ local function toggle_functions()
   sync_filter_dropdowns()
   if multi_panel then
     multi_panel:render_panel("results")
+    multi_panel:render_panel("filters")
   end
   vim.notify("Show functions: " .. (ui_state.show_functions and "ON" or "OFF"), vim.log.levels.INFO)
 end
@@ -2777,6 +2827,7 @@ local function toggle_synonyms()
   sync_filter_dropdowns()
   if multi_panel then
     multi_panel:render_panel("results")
+    multi_panel:render_panel("filters")
   end
   vim.notify("Show synonyms: " .. (ui_state.show_synonyms and "ON" or "OFF"), vim.log.levels.INFO)
 end
@@ -2787,6 +2838,7 @@ local function toggle_schemas()
   sync_filter_dropdowns()
   if multi_panel then
     multi_panel:render_panel("results")
+    multi_panel:render_panel("filters")
   end
   vim.notify("Show schemas: " .. (ui_state.show_schemas and "ON" or "OFF"), vim.log.levels.INFO)
 end
@@ -2823,16 +2875,16 @@ local function setup_search_autocmds()
   KeymapManager.set(search_buf, 'i', '<Tab>', commit_search, { nowait = true })
   KeymapManager.set(search_buf, 'i', '<CR>', commit_search, { nowait = true })
 
-  -- Search settings toggles
+  -- Search settings toggles (consistent with normal mode keymaps)
   KeymapManager.set(search_buf, 'i', '<A-c>', toggle_case_sensitive, { nowait = true })
-  KeymapManager.set(search_buf, 'i', '<A-r>', toggle_regex, { nowait = true })
+  KeymapManager.set(search_buf, 'i', '<A-x>', toggle_regex, { nowait = true })
   KeymapManager.set(search_buf, 'i', '<A-w>', toggle_whole_word, { nowait = true })
 
   -- Search context toggles
   KeymapManager.set(search_buf, 'i', '<A-1>', toggle_search_names, { nowait = true })
   KeymapManager.set(search_buf, 'i', '<A-2>', toggle_search_defs, { nowait = true })
   KeymapManager.set(search_buf, 'i', '<A-3>', toggle_search_meta, { nowait = true })
-  KeymapManager.set(search_buf, 'i', '<A-s>', toggle_system, { nowait = true })
+  KeymapManager.set(search_buf, 'i', '<A-S>', toggle_system, { nowait = true })
 
   -- Object type toggles (Alt+Shift+number)
   KeymapManager.set(search_buf, 'i', '<A-!>', toggle_tables, { nowait = true })
@@ -2884,39 +2936,6 @@ end
 -- ============================================================================
 -- Navigation Functions
 -- ============================================================================
-
----Navigate in results panel
----@param direction number 1 for down, -1 for up
-local function navigate_results(direction)
-  if #ui_state.filtered_results == 0 then return end
-
-  local old_idx = ui_state.selected_result_idx
-  ui_state.selected_result_idx = ui_state.selected_result_idx + direction
-
-  if ui_state.selected_result_idx < 1 then
-    ui_state.selected_result_idx = #ui_state.filtered_results
-  elseif ui_state.selected_result_idx > #ui_state.filtered_results then
-    ui_state.selected_result_idx = 1
-  end
-
-  if multi_panel then
-    -- Re-render results panel to update arrow indicator
-    multi_panel:render_panel("results")
-
-    -- Move cursor to the selected result
-    local results_buf = multi_panel:get_panel_buffer("results")
-    if results_buf and vim.api.nvim_buf_is_valid(results_buf) then
-      local line_count = vim.api.nvim_buf_line_count(results_buf)
-      local target_line = math.min(ui_state.selected_result_idx, line_count)
-      target_line = math.max(1, target_line)
-      multi_panel:set_cursor("results", target_line, 0)
-    end
-
-    -- Also re-render metadata and definition panels (they show selected item details)
-    multi_panel:render_panel("metadata")
-    multi_panel:render_panel("definition")
-  end
-end
 
 ---Open selected object's definition in new buffer
 local function open_in_buffer()
@@ -3245,7 +3264,7 @@ show_database_picker = function()
           end
           UiFloatInteractive.render(state)
         end,
-        ["a"] = function(state)
+        ["<A-a>"] = function(state)
           state.data.all_selected = not state.data.all_selected
           if state.data.all_selected then
             state.data.selection = {}
@@ -3470,16 +3489,12 @@ function UiObjectSearch.show(options)
                         multi_panel:update_panel_title("metadata", "Metadata")
                         multi_panel:update_panel_title("definition", "Definition")
                       end
-                      -- Position cursor on currently selected result
+                      -- Position cursor on currently selected result (deferred to handle chunked rendering)
                       vim.schedule(function()
                         if multi_panel and multi_panel:is_valid() then
-                          local results_buf = multi_panel:get_panel_buffer("results")
-                          if results_buf and vim.api.nvim_buf_is_valid(results_buf) then
-                            local line_count = vim.api.nvim_buf_line_count(results_buf)
-                            local target_line = math.min(ui_state.selected_result_idx, line_count)
-                            target_line = math.max(1, target_line)
-                            multi_panel:set_cursor("results", target_line, 0)
-                          end
+                          local target_line = math.max(1, ui_state.selected_result_idx)
+                          -- Re-render with cursor position to ensure it's set after any pending chunks
+                          multi_panel:render_panel("results", { cursor_row = target_line, cursor_col = 0 })
                         end
                       end)
                     end
@@ -3753,6 +3768,7 @@ function UiObjectSearch.show(options)
         ui_state.search_metadata = vim.tbl_contains(values, "meta")
         apply_current_search()
         multi_panel:render_panel("results")
+        multi_panel:render_panel("filters")
       elseif key == "object_types" then
         -- Update object type state from dropdown
         ui_state.show_tables = vim.tbl_contains(values, "table")
@@ -3763,6 +3779,7 @@ function UiObjectSearch.show(options)
         ui_state.show_schemas = vim.tbl_contains(values, "schema")
         apply_current_search()
         multi_panel:render_panel("results")
+        multi_panel:render_panel("filters")
       end
     end,
   })
@@ -3785,13 +3802,13 @@ function UiObjectSearch.show(options)
   end)
 
   local function focus_server_dropdown()
-    multi_panel:focus_panel("settings")
-    -- TODO: Focus the server dropdown specifically via InputManager
+    -- Focus the server dropdown in the settings panel
+    multi_panel:focus_field("settings", "server")
   end
 
   local function focus_database_dropdown()
-    multi_panel:focus_panel("settings")
-    -- TODO: Focus the database dropdown specifically via InputManager
+    -- Focus the database multi-dropdown in the settings panel
+    multi_panel:focus_field("settings", "databases")
   end
 
   local function focus_filters_panel()
@@ -3799,7 +3816,8 @@ function UiObjectSearch.show(options)
   end
 
   local function focus_settings_panel()
-    multi_panel:focus_panel("settings")
+    -- Focus the first field (server dropdown) in the settings panel
+    multi_panel:focus_first_field("settings")
   end
 
   -- Custom Tab navigation: results <-> last right panel (definition/metadata)
@@ -3831,9 +3849,10 @@ function UiObjectSearch.show(options)
   end
 
   -- Common keymaps shared by all panels
+  -- All letter keys use Alt+ modifier to preserve default Neovim controls
   local function get_common_keymaps()
     return {
-      [common.close or "q"] = function() UiObjectSearch.close() end,
+      [common.close or "<A-q>"] = function() UiObjectSearch.close() end,
       [common.cancel or "<Esc>"] = function() UiObjectSearch.close() end,
       ["<C-c>"] = function()
         -- Cancel object loading if in progress
@@ -3845,26 +3864,26 @@ function UiObjectSearch.show(options)
       end,
       ["<Tab>"] = navigate_tab,
       ["<S-Tab>"] = navigate_shift_tab,
-      ["/"] = activate_search,
-      ["s"] = focus_settings_panel,
-      ["d"] = focus_database_dropdown,
-      ["*"] = focus_filters_panel,
-      ["c"] = toggle_case_sensitive,
-      ["x"] = toggle_regex,
-      ["w"] = toggle_whole_word,
-      ["S"] = toggle_system,
-      ["1"] = toggle_search_names,
-      ["2"] = toggle_search_defs,
-      ["3"] = toggle_search_meta,
-      ["r"] = refresh_objects,
-      ["R"] = function() UiObjectSearch.reset(false) end,  -- Clear state without reopen
-      -- Object type toggles (Shift+number keys)
-      ["!"] = toggle_tables,
-      ["@"] = toggle_views,
-      ["#"] = toggle_procedures,
-      ["$"] = toggle_functions,
-      ["%"] = toggle_synonyms,
-      ["^"] = toggle_schemas,
+      ["<A-/>"] = activate_search,
+      ["<A-s>"] = focus_settings_panel,
+      ["<A-d>"] = focus_database_dropdown,
+      ["<A-*>"] = focus_filters_panel,
+      ["<A-c>"] = toggle_case_sensitive,
+      ["<A-x>"] = toggle_regex,
+      ["<A-w>"] = toggle_whole_word,
+      ["<A-S>"] = toggle_system,
+      ["<A-1>"] = toggle_search_names,
+      ["<A-2>"] = toggle_search_defs,
+      ["<A-3>"] = toggle_search_meta,
+      ["<A-r>"] = refresh_objects,
+      ["<A-R>"] = function() UiObjectSearch.reset(false) end,  -- Clear state without reopen
+      -- Object type toggles
+      ["<A-!>"] = toggle_tables,
+      ["<A-@>"] = toggle_views,
+      ["<A-#>"] = toggle_procedures,
+      ["<A-$>"] = toggle_functions,
+      ["<A-%>"] = toggle_synonyms,
+      ["<A-^>"] = toggle_schemas,
     }
   end
 
@@ -3875,14 +3894,11 @@ function UiObjectSearch.show(options)
   multi_panel:set_panel_keymaps("filters", get_common_keymaps())
 
   -- Setup keymaps for results panel (extends common with results-specific keymaps)
+  -- Navigation (j/k, arrows) uses default Neovim movement - CursorMoved autocmd syncs selection
   local results_keymaps = get_common_keymaps()
-  results_keymaps[common.nav_down or "j"] = function() navigate_results(1) end
-  results_keymaps[common.nav_up or "k"] = function() navigate_results(-1) end
-  results_keymaps["<Down>"] = function() navigate_results(1) end
-  results_keymaps["<Up>"] = function() navigate_results(-1) end
   results_keymaps[common.confirm or "<CR>"] = open_in_buffer
-  results_keymaps["o"] = open_in_buffer
-  results_keymaps["y"] = yank_object_name
+  results_keymaps["<A-o>"] = open_in_buffer
+  results_keymaps["<A-y>"] = yank_object_name
   multi_panel:set_panel_keymaps("results", results_keymaps)
 
   -- Setup CursorMoved autocmd for results panel to sync selection with cursor

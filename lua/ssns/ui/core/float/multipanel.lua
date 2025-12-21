@@ -311,7 +311,8 @@ end
 
 ---Render a specific panel
 ---@param panel_name string Panel to render
-function MultiPanelWindow:render_panel(panel_name)
+---@param opts? { cursor_row?: number, cursor_col?: number } Optional cursor position to set after rendering completes
+function MultiPanelWindow:render_panel(panel_name, opts)
   if self._closed then return end
 
   local panel = self.panels[panel_name]
@@ -325,13 +326,8 @@ function MultiPanelWindow:render_panel(panel_name)
   lines = lines or {}
   highlights = highlights or {}
 
-  -- Get chunked render threshold from config
-  local Config = require('ssns.config')
-  local ui_config = Config.get_ui()
-  local threshold = ui_config.chunked_render_threshold or 200
-
-  -- Helper to apply highlights (used in both sync and async paths)
-  local function apply_highlights()
+  -- Helper to apply all highlights
+  local function apply_all_highlights()
     vim.api.nvim_buf_clear_namespace(panel.float.bufnr, panel.namespace, 0, -1)
     for _, hl in ipairs(highlights) do
       -- Support both array format {line, col_start, col_end, hl_group}
@@ -358,16 +354,13 @@ function MultiPanelWindow:render_panel(panel_name)
     end
   end
 
-  -- Use chunked rendering for large panels
-  if #lines > threshold then
-    panel.float:update_lines_chunked(lines, {
-      chunk_size = 100,
-      on_complete = apply_highlights,
-    })
-  else
-    -- Sync rendering for small panels
-    panel.float:update_lines(lines)
-    apply_highlights()
+  -- Always use synchronous single-pass rendering (simpler and more reliable)
+  panel.float:update_lines(lines)
+  apply_all_highlights()
+
+  -- Set cursor position if specified
+  if opts and opts.cursor_row then
+    panel.float:set_cursor(opts.cursor_row, opts.cursor_col or 0)
   end
 end
 
@@ -718,6 +711,27 @@ function MultiPanelWindow:enter_input(panel_name, input_key)
     -- Focus the panel first
     self:focus_panel(panel_name)
     panel.input_manager:enter_input_mode(input_key)
+  end
+end
+
+---Focus a specific field in a panel (without activating it)
+---@param panel_name string Panel name
+---@param field_key string Field key to focus
+function MultiPanelWindow:focus_field(panel_name, field_key)
+  local panel = self.panels[panel_name]
+  if panel and panel.input_manager then
+    self:focus_panel(panel_name)
+    panel.input_manager:focus_field(field_key)
+  end
+end
+
+---Focus the first field in a panel
+---@param panel_name string Panel name
+function MultiPanelWindow:focus_first_field(panel_name)
+  local panel = self.panels[panel_name]
+  if panel and panel.input_manager then
+    self:focus_panel(panel_name)
+    panel.input_manager:focus_first_field()
   end
 end
 

@@ -540,6 +540,7 @@ end
 ---@class FloatChunkedUpdateOpts
 ---@field chunk_size number? Lines per chunk (default 100)
 ---@field on_progress fun(written: number, total: number)? Progress callback
+---@field on_chunk fun(start_line: number, end_line: number)? Called after each chunk is written (0-indexed lines)
 ---@field on_complete fun()? Completion callback
 
 ---Active chunked update state
@@ -559,6 +560,7 @@ function FloatWindow:update_lines_chunked(lines, opts)
   opts = opts or {}
   local chunk_size = opts.chunk_size or 100
   local on_progress = opts.on_progress
+  local on_chunk = opts.on_chunk
   local on_complete = opts.on_complete
   local total_lines = #lines
 
@@ -568,6 +570,7 @@ function FloatWindow:update_lines_chunked(lines, opts)
   -- For small line counts, use sync update
   if total_lines <= chunk_size then
     self:update_lines(lines)
+    if on_chunk then on_chunk(0, total_lines - 1) end
     if on_progress then on_progress(total_lines, total_lines) end
     if on_complete then on_complete() end
     return
@@ -611,14 +614,19 @@ function FloatWindow:update_lines_chunked(lines, opts)
     end
 
     -- Write chunk to buffer
+    local chunk_start_line = current_idx - 1  -- 0-indexed start line
     if is_first_chunk then
       -- First chunk: replace entire buffer content (avoids flash from clearing first)
       vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, chunk)
       is_first_chunk = false
     else
       -- Subsequent chunks: append at the correct position
-      local append_start = current_idx - 1  -- 0-indexed
-      vim.api.nvim_buf_set_lines(bufnr, append_start, append_start, false, chunk)
+      vim.api.nvim_buf_set_lines(bufnr, chunk_start_line, chunk_start_line, false, chunk)
+    end
+
+    -- Apply highlights for this chunk immediately (prevents flash)
+    if on_chunk then
+      on_chunk(chunk_start_line, end_idx - 1)  -- 0-indexed line range
     end
 
     -- Report progress
@@ -720,7 +728,10 @@ end
 ---@param col number Column (0-indexed)
 function FloatWindow:set_cursor(row, col)
   if self:is_valid() then
-    vim.api.nvim_win_set_cursor(self.winid, { row, col })
+    -- Clamp row to valid buffer range (handles chunked rendering case)
+    local line_count = vim.api.nvim_buf_line_count(self.bufnr)
+    local clamped_row = math.max(1, math.min(row, line_count))
+    vim.api.nvim_win_set_cursor(self.winid, { clamped_row, col })
   end
 end
 
