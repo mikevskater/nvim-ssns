@@ -367,13 +367,14 @@ end
 ---@field on_complete fun(items: table[], error: string?)? Completion callback
 ---@field timeout_ms number? Timeout in milliseconds (default: 5000)
 
----Get JOIN completions asynchronously
----Loads database async and pre-resolves tables before collecting items
+---Get JOIN completions asynchronously with threaded FK graph building
+---Loads database async, builds FK graph in worker thread, then merges results
 ---@param ctx table Context { bufnr, connection, sql_context }
 ---@param opts JoinsProviderAsyncOpts? Options with on_complete callback
 function JoinsProvider.get_completions_async(ctx, opts)
   opts = opts or {}
   local on_complete = opts.on_complete or function() end
+  local cancel_token = opts.cancel_token
 
   local connection = ctx.connection
   if not connection or not connection.database then
@@ -384,8 +385,102 @@ function JoinsProvider.get_completions_async(ctx, opts)
   end
 
   local database = connection.database
+  local Resolver = require('ssns.completion.metadata.resolver')
+  local TablesProvider = require('ssns.completion.providers.tables')
 
-  -- Load database async if needed
+  -- Helper: Complete the async flow with FK graph results
+  local function complete_with_fk_results(chain_results)
+    -- Check cancellation
+    if cancel_token and cancel_token.is_cancelled then
+      return
+    end
+
+    local sql_context = ctx.sql_context or {}
+
+    -- Get existing tables in query
+    local existing_tables = Resolver.resolve_all_tables_in_query(connection, sql_context)
+    if not existing_tables or #existing_tables == 0 then
+      -- No tables - use TablesProvider for general table list
+      local fallback = TablesProvider._get_completions_impl(ctx)
+      on_complete(fallback or {}, nil)
+      return
+    end
+
+    -- Build alias maps
+    local alias_map = sql_context.aliases or {}
+    local existing_aliases = {}
+    for alias, table_name in pairs(alias_map) do
+      existing_aliases[table_name:lower()] = alias
+    end
+    for _, table_obj in ipairs(existing_tables) do
+      local table_name = table_obj.name or table_obj.table_name
+      if table_name and not existing_aliases[table_name:lower()] then
+        existing_aliases[table_name:lower()] = table_name
+      end
+    end
+
+    -- Build FK suggestions from chain results
+    local fk_suggestions = {}
+    local suggested_tables = {}
+    if chain_results then
+      fk_suggestions, suggested_tables = JoinsProvider._build_fk_chain_suggestions(
+        chain_results,
+        existing_aliases,
+        sql_context,
+        connection
+      )
+    end
+
+    -- Get fallback tables
+    local fallback_tables = TablesProvider._get_completions_impl(ctx)
+
+    -- Filter out tables already suggested via FK
+    local filtered_fallback = {}
+    for _, item in ipairs(fallback_tables) do
+      local table_name = (item.data and item.data.name) or item.label
+      if table_name and not suggested_tables[table_name:lower()] then
+        table.insert(filtered_fallback, item)
+      end
+    end
+
+    -- Merge FK suggestions + fallback tables
+    local items = {}
+    for _, item in ipairs(fk_suggestions) do
+      table.insert(items, item)
+    end
+    for _, item in ipairs(filtered_fallback) do
+      table.insert(items, item)
+    end
+
+    on_complete(items, nil)
+  end
+
+  -- Helper: Build FK graph async after database is loaded
+  local function build_fk_graph_async()
+    local sql_context = ctx.sql_context or {}
+    local existing_tables = Resolver.resolve_all_tables_in_query(connection, sql_context)
+
+    if not existing_tables or #existing_tables == 0 then
+      complete_with_fk_results(nil)
+      return
+    end
+
+    -- Build FK chains using threaded worker
+    FKGraph.build_chains_async(existing_tables, connection, {
+      max_depth = 2,
+      timeout_ms = opts.timeout_ms or 5000,
+      on_complete = function(chain_results, err)
+        if err then
+          -- On error, continue with fallback tables only
+          complete_with_fk_results(nil)
+          return
+        end
+        complete_with_fk_results(chain_results)
+      end,
+    })
+  end
+
+  -- Load database async if needed, then build FK graph
   if not database.is_loaded then
     database:load_async({
       timeout_ms = opts.timeout_ms or 5000,
@@ -394,33 +489,14 @@ function JoinsProvider.get_completions_async(ctx, opts)
           on_complete({}, err)
           return
         end
-        -- Run sync impl after load
-        vim.schedule(function()
-          local ok, result = pcall(function()
-            return JoinsProvider._get_completions_impl(ctx)
-          end)
-          if ok then
-            on_complete(result or {}, nil)
-          else
-            on_complete({}, tostring(result))
-          end
-        end)
+        build_fk_graph_async()
       end,
     })
     return
   end
 
-  -- Database loaded, run sync impl
-  vim.schedule(function()
-    local success, result = pcall(function()
-      return JoinsProvider._get_completions_impl(ctx)
-    end)
-    if success then
-      on_complete(result or {}, nil)
-    else
-      on_complete({}, tostring(result))
-    end
-  end)
+  -- Database already loaded, build FK graph
+  build_fk_graph_async()
 end
 
 return JoinsProvider

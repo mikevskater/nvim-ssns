@@ -7,6 +7,53 @@ local BaseProvider = require('ssns.completion.providers.base_provider')
 local TypeCompatibility = require('ssns.completion.type_compatibility')
 local Thread = require('ssns.async.thread')
 
+---Format sorted columns as completion items
+---@param sorted_columns table[] Columns from dedupe_sort
+---@param connection table Connection context
+---@param context table SQL context
+---@return table[] items Completion items
+local function format_columns_as_items(sorted_columns, connection, context)
+  local Utils = require('ssns.completion.utils')
+  local items = {}
+
+  for _, col in ipairs(sorted_columns) do
+    local item = Utils.format_column({
+      name = col.name,
+      column_name = col.name,
+      data_type = col.data_type,
+      is_nullable = col.is_nullable,
+      is_primary_key = col.is_primary_key,
+      ordinal_position = col.ordinal_position,
+    }, {
+      show_type = true,
+      show_nullable = true,
+    })
+
+    -- Add table name to detail
+    if col.table_name then
+      local original_detail = item.detail or ""
+      item.detail = string.format("%s (%s)", original_detail, col.table_name)
+    end
+
+    -- Use sortText
+    item.sortText = col.sortText
+
+    -- Store metadata
+    item.data.weight = col.computed_weight or col.weight or 0
+    item.data.table_ref = col.table_path
+
+    table.insert(items, item)
+  end
+
+  -- Add scalar functions
+  local function_items = M._get_scalar_functions(connection, context)
+  for _, func_item in ipairs(function_items) do
+    table.insert(items, func_item)
+  end
+
+  return items
+end
+
 ---Get scalar functions for unqualified column contexts (SELECT, WHERE, etc.)
 ---Scalar functions can be used in expressions alongside columns
 ---@param connection table Connection context
@@ -85,7 +132,6 @@ function M.get_all_columns_from_query_async(connection, context, opts)
   local cancel_token = opts.cancel_token
 
   local Resolver = require('ssns.completion.metadata.resolver')
-  local Utils = require('ssns.completion.utils')
   local Debug = require('ssns.debug')
 
   -- Get all tables from query using pre-built context
@@ -145,7 +191,7 @@ function M.get_all_columns_from_query_async(connection, context, opts)
         end
       end
 
-      Debug.log(string.format("[COLUMNS] Starting threaded dedupe/sort for %d columns", #worker_columns))
+      Debug.log(string.format("[COLUMNS] Processing %d columns for dedupe/sort", #worker_columns))
 
       -- Offload deduplication and sorting to worker thread
       local task_id, err = Thread.start({
@@ -168,42 +214,7 @@ function M.get_all_columns_from_query_async(connection, context, opts)
 
           -- Format results as blink.cmp items on main thread
           local sorted_columns = result and result.columns or {}
-          local items = {}
-
-          for _, col in ipairs(sorted_columns) do
-            local item = Utils.format_column({
-              name = col.name,
-              column_name = col.name,
-              data_type = col.data_type,
-              is_nullable = col.is_nullable,
-              is_primary_key = col.is_primary_key,
-              ordinal_position = col.ordinal_position,
-            }, {
-              show_type = true,
-              show_nullable = true,
-            })
-
-            -- Add table name to detail
-            if col.table_name then
-              local original_detail = item.detail or ""
-              item.detail = string.format("%s (%s)", original_detail, col.table_name)
-            end
-
-            -- Use sortText from worker
-            item.sortText = col.sortText
-
-            -- Store metadata
-            item.data.weight = col.computed_weight or col.weight or 0
-            item.data.table_ref = col.table_path
-
-            table.insert(items, item)
-          end
-
-          -- Add scalar functions (sync - in memory)
-          local function_items = M._get_scalar_functions(connection, context)
-          for _, func_item in ipairs(function_items) do
-            table.insert(items, func_item)
-          end
+          local items = format_columns_as_items(sorted_columns, connection, context)
 
           Debug.log(string.format("[COLUMNS] Thread complete, returning %d items", #items))
           on_complete(items, nil)

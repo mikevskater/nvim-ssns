@@ -197,6 +197,181 @@ function FKGraph.build_chains(source_tables, connection, max_depth)
   return results
 end
 
+---Build FK chain graph from source tables using BFS (async with threading)
+---Pre-fetches all constraints and resolves FK targets on main thread,
+---then offloads BFS traversal to worker thread
+---@param source_tables table[] Array of TableClass objects already in query
+---@param connection table Connection context with database info
+---@param opts table? Options: {max_depth: number, on_complete: fun(results: table)}
+function FKGraph.build_chains_async(source_tables, connection, opts)
+  opts = opts or {}
+  local max_depth = opts.max_depth or 2
+  local on_complete = opts.on_complete or function() end
+
+  local Resolver = require('ssns.completion.metadata.resolver')
+  local Thread = require('ssns.async.thread')
+
+  -- Phase 1: Build serializable graph by pre-fetching all data on main thread
+  -- This includes constraints and resolved FK targets
+
+  local graph = {}  -- key -> { table_name, schema_name, constraints: [] }
+  local table_objects = {}  -- key -> TableClass (for result mapping)
+  local pending_resolutions = 0
+  local resolution_complete = false
+
+  -- Helper: Add table to graph if not exists
+  local function ensure_table_in_graph(table_obj)
+    local key = make_table_key(table_obj)
+    if not graph[key] then
+      graph[key] = {
+        table_name = table_obj.name or table_obj.table_name,
+        schema_name = table_obj.schema or table_obj.schema_name,
+        constraints = {},
+      }
+      table_objects[key] = table_obj
+    end
+    return key
+  end
+
+  -- Helper: Process a table's constraints and resolve FK targets
+  local function process_table(table_obj, depth)
+    if depth >= max_depth then return end
+
+    local key = ensure_table_in_graph(table_obj)
+    local constraints = get_fk_constraints(table_obj)
+
+    for _, constraint in ipairs(constraints) do
+      if not constraint.referenced_table then goto continue_constraint end
+
+      -- Build target key for lookup
+      local target_name = constraint.referenced_table
+      if constraint.referenced_schema then
+        target_name = constraint.referenced_schema .. "." .. target_name
+      end
+
+      -- Add constraint to graph
+      table.insert(graph[key].constraints, {
+        name = constraint.name or constraint.constraint_name,
+        column_name = constraint.columns and constraint.columns[1],
+        columns = constraint.columns,
+        referenced_table = constraint.referenced_table,
+        referenced_schema = constraint.referenced_schema,
+        referenced_column = constraint.referenced_columns and constraint.referenced_columns[1],
+        referenced_columns = constraint.referenced_columns,
+      })
+
+      -- Resolve FK target (may be async in some cases)
+      pending_resolutions = pending_resolutions + 1
+      local target = resolve_fk_target(constraint, connection, Resolver)
+
+      if target then
+        local target_key = ensure_table_in_graph(target)
+        -- Recursively process target for deeper hops
+        if depth + 1 < max_depth then
+          process_table(target, depth + 1)
+        end
+      end
+
+      pending_resolutions = pending_resolutions - 1
+
+      ::continue_constraint::
+    end
+  end
+
+  -- Phase 1: Build the graph (sync - uses main thread APIs)
+  local source_keys = {}
+  for _, table_obj in ipairs(source_tables) do
+    local key = ensure_table_in_graph(table_obj)
+    table.insert(source_keys, key)
+    process_table(table_obj, 0)
+  end
+
+  -- Phase 2: Send graph to worker thread for BFS traversal
+  Debug.log(string.format("[FK_GRAPH] Starting threaded BFS with %d nodes", vim.tbl_count(graph)))
+
+  local task_id, err = Thread.start({
+    worker = "fk_graph",
+    input = {
+      graph = graph,
+      source_keys = source_keys,
+      max_depth = max_depth,
+      batch_size = 10,
+    },
+    on_batch = function(batch)
+      -- Could stream results here if needed
+      Debug.log(string.format("[FK_GRAPH] Batch: %d chains, progress: %d%%",
+        #(batch.items or {}), batch.progress or 0))
+    end,
+    on_progress = function(pct, message)
+      Debug.log(string.format("[FK_GRAPH] Progress: %d%% - %s", pct, message or ""))
+    end,
+    on_complete = function(result, thread_err)
+      if thread_err then
+        Debug.log(string.format("[FK_GRAPH] Thread error: %s", thread_err))
+        on_complete({}, thread_err)
+        return
+      end
+
+      -- Phase 3: Map worker results back to FKChainResult format with TableClass objects
+      local chains = result and result.chains or {}
+      local results_by_hop = {}
+      for i = 1, max_depth do
+        results_by_hop[i] = {}
+      end
+
+      for _, chain in ipairs(chains) do
+        local target_key = chain.target_schema .. "." .. chain.target_table
+        local target_obj = table_objects[target_key:lower()]
+
+        if target_obj then
+          local hop_count = chain.depth or 1
+          if hop_count >= 1 and hop_count <= max_depth then
+            -- Rebuild path with TableClass objects
+            local path = {}
+            for _, path_key in ipairs(chain.path or {}) do
+              local path_obj = table_objects[path_key:lower()]
+              if path_obj then
+                table.insert(path, {
+                  key = path_key,
+                  table_obj = path_obj,
+                })
+              end
+            end
+
+            -- Find source table object
+            local source_key = chain.source_schema .. "." .. chain.source_table
+            local source_obj = table_objects[source_key:lower()]
+
+            table.insert(results_by_hop[hop_count], {
+              table_obj = target_obj,
+              hop_count = hop_count,
+              path = path,
+              via_table = chain.source_table,
+              constraint = {
+                name = chain.constraint_name,
+                columns = { chain.source_column },
+                referenced_table = chain.target_table,
+                referenced_schema = chain.target_schema,
+                referenced_columns = { chain.target_column },
+              },
+              source_table = source_obj,
+            })
+          end
+        end
+      end
+
+      Debug.log(string.format("[FK_GRAPH] Thread complete, returning results"))
+      on_complete(results_by_hop, nil)
+    end,
+    timeout_ms = opts.timeout_ms or 30000,
+  })
+
+  if not task_id then
+    Debug.log(string.format("[FK_GRAPH] Failed to start thread: %s", err or "unknown"))
+    on_complete({}, err or "Failed to start FK graph thread")
+  end
+end
+
 ---Build display label for FK chain suggestion
 ---@param result FKChainResult Chain result
 ---@return string label Display label like "Countries (via Customers)"
