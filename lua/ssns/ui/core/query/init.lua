@@ -4,6 +4,7 @@ local UiQuery = {}
 
 local QueryHistory = require('ssns.query_history')
 local KeymapManager = require('ssns.keymap_manager')
+local Spinner = require('ssns.async.spinner')
 
 -- Load submodules
 local QueryExport = require('ssns.ui.core.query.export')
@@ -12,7 +13,7 @@ local QueryResults = require('ssns.ui.core.query.results')
 local QueryExecute = require('ssns.ui.core.query.execute')
 
 ---Track query buffers
----@type table<number, {server: ServerClass, database: DbClass?, last_database: string?}>
+---@type table<number, {server: ServerClass|string, database: DbClass|string?, last_database: string?, connecting: boolean?, connecting_spinner: TextSpinner?, server_name: string?, database_name: string?}>
 UiQuery.query_buffers = {}
 
 ---Track buffer counter for unique names
@@ -418,8 +419,20 @@ function UiQuery.setup_buffer_auto_save(bufnr)
         buffer_name = vim.fn.fnamemodify(buffer_name, ':t')
       end
 
-      -- Get current database context
+      -- Get server name (handle both ServerClass objects and strings)
+      local server_name = type(buffer_info.server) == "string"
+        and buffer_info.server
+        or (buffer_info.server and buffer_info.server.name)
+
+      if not server_name then
+        -- Clear timer reference and skip if no server name
+        UiQuery.auto_save_timers[bufnr] = nil
+        return
+      end
+
+      -- Get current database context (handle both DbClass objects and strings)
       local current_database = buffer_info.last_database
+        or (type(buffer_info.database) == "string" and buffer_info.database)
         or (buffer_info.database and buffer_info.database.db_name)
         or "master"
 
@@ -428,7 +441,7 @@ function UiQuery.setup_buffer_auto_save(bufnr)
         bufnr,
         buffer_name,
         content,
-        buffer_info.server.name,
+        server_name,
         current_database
       )
 
@@ -512,6 +525,121 @@ end
 function UiQuery.get_database(bufnr)
   local info = UiQuery.query_buffers[bufnr]
   return info and info.database
+end
+
+---Check if buffer is currently connecting to server
+---@param bufnr number The buffer number
+---@return boolean
+function UiQuery.is_connecting(bufnr)
+  local info = UiQuery.query_buffers[bufnr]
+  return info and info.connecting == true
+end
+
+---Get connecting status info for buffer (for lualine)
+---@param bufnr number The buffer number
+---@return {connecting: boolean, server_name: string?, database_name: string?, spinner_frame: string?}?
+function UiQuery.get_connecting_info(bufnr)
+  local info = UiQuery.query_buffers[bufnr]
+  if not info then return nil end
+
+  if not info.connecting then
+    return { connecting = false }
+  end
+
+  -- Get spinner frame from TextSpinner
+  local spinner_frame = "⠋"
+  if info.connecting_spinner then
+    spinner_frame = info.connecting_spinner:get_frame()
+  end
+
+  return {
+    connecting = true,
+    server_name = info.server_name,
+    database_name = info.database_name,
+    spinner_frame = spinner_frame,
+  }
+end
+
+---Start connecting state for buffer (with spinner animation)
+---@param bufnr number The buffer number
+---@param server_name string Server name being connected to
+---@param database_name string? Database name
+function UiQuery.start_connecting(bufnr, server_name, database_name)
+  local info = UiQuery.query_buffers[bufnr]
+  if not info then return end
+
+  info.connecting = true
+  info.server_name = server_name
+  info.database_name = database_name
+
+  -- Create TextSpinner with callback to refresh lualine
+  info.connecting_spinner = Spinner.create_text_spinner({
+    on_tick = function()
+      -- Check if buffer still exists and is still connecting
+      local buf_info = UiQuery.query_buffers[bufnr]
+      if not buf_info or not buf_info.connecting then
+        if buf_info and buf_info.connecting_spinner then
+          buf_info.connecting_spinner:stop()
+          buf_info.connecting_spinner = nil
+        end
+        return
+      end
+
+      -- Refresh lualine
+      vim.cmd('redrawstatus')
+    end,
+  })
+
+  -- Start the spinner animation (80ms interval for smooth animation)
+  info.connecting_spinner:start(80)
+end
+
+---Stop connecting state for buffer
+---@param bufnr number The buffer number
+---@param server ServerClass? Connected server (nil if failed)
+---@param database DbClass? Connected database (nil if failed)
+function UiQuery.stop_connecting(bufnr, server, database)
+  local info = UiQuery.query_buffers[bufnr]
+  if not info then return end
+
+  -- Stop TextSpinner
+  if info.connecting_spinner then
+    info.connecting_spinner:stop()
+    info.connecting_spinner = nil
+  end
+
+  -- Clear connecting state
+  info.connecting = false
+
+  -- Update server/database if connection succeeded
+  if server then
+    info.server = server
+    if database then
+      info.database = database
+      info.last_database = database.db_name
+    elseif info.database_name then
+      -- Try to find database on the connected server
+      local db = server:find_database(info.database_name)
+      if db then
+        info.database = db
+        info.last_database = db.db_name
+      end
+    end
+
+    -- Update buffer variable for completion
+    local srv_name = type(server) == "string" and server or server.name
+    local db_name = info.last_database or info.database_name
+    if srv_name and db_name then
+      pcall(vim.api.nvim_buf_set_var, bufnr, 'ssns_db_key', string.format("%s:%s", srv_name, db_name))
+    end
+  end
+
+  -- Clear temp names
+  info.server_name = nil
+  info.database_name = nil
+
+  -- Final lualine refresh
+  vim.cmd('redrawstatus')
 end
 
 ---Create a new query buffer using context from an existing query buffer

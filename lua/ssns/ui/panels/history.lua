@@ -895,47 +895,136 @@ local function load_query()
 
   if not entry then return end
 
-  -- Look up actual ServerClass and DbClass objects from cache
-  local server = Cache.find_server(buffer_history.server_name)
-  local database = nil
-
-  if server and buffer_history.database then
-    database = Cache.find_database(buffer_history.server_name, buffer_history.database)
-  end
-
-  -- Capture buffer_id before closing (to continue history)
+  -- Capture values before closing
+  local server_name = buffer_history.server_name
+  local database_name = buffer_history.database
   local history_buffer_id = buffer_history.buffer_id
+  local buffer_name = buffer_history.buffer_name
+  local timestamp = entry.timestamp
+  local query_content = entry.query
 
-  -- Close history window
+  -- Close history window first
   UiHistory.close()
 
-  -- Create new query buffer with original history buffer_id to continue the same history
-  UiQuery.create_query_buffer(
-    server or buffer_history.server_name,
-    database or buffer_history.database,
-    nil,  -- sql (we'll set it below)
+  -- Check if server is already connected and loaded
+  local server = Cache.find_server(server_name)
+  local database = nil
+  local needs_async_connect = false
+
+  if server then
+    -- Server exists in cache - check if loaded
+    if server.is_loaded then
+      -- Server is loaded, try to find database
+      if database_name then
+        database = server:find_database(database_name)
+      end
+    else
+      -- Server exists but not loaded - need async connect
+      needs_async_connect = true
+    end
+  else
+    -- Server not in cache - need to connect via saved connections
+    needs_async_connect = true
+  end
+
+  -- Create query buffer immediately (without sql to avoid USE prepending)
+  -- Pass strings for server/database - we'll update with real objects after async connect
+  local query_buf = UiQuery.create_query_buffer(
+    server or server_name,
+    database or database_name,
+    nil,  -- Don't pass sql here - history already has exact content
     nil,  -- object_name
     history_buffer_id  -- Continue this history
   )
 
-  -- Populate with query
-  vim.schedule(function()
-    local query_buf = vim.api.nvim_get_current_buf()
-    vim.api.nvim_buf_set_option(query_buf, "modifiable", true)
-    vim.api.nvim_buf_set_lines(query_buf, 0, -1, false, vim.split(entry.query, "\n"))
+  -- Set buffer content directly (history entries are stored exactly as written)
+  vim.api.nvim_buf_set_lines(query_buf, 0, -1, false, vim.split(query_content, "\n"))
 
-    local connection_status = ""
-    if not server then
-      connection_status = " (server not connected)"
-    elseif not database then
-      connection_status = " (database not found)"
-    end
+  if needs_async_connect then
+    -- Start connecting spinner in lualine
+    UiQuery.start_connecting(query_buf, server_name, database_name)
 
+    -- Load connections async to find the server config
+    local Connections = require('ssns.connections')
+    Connections.load_async(function(connections, err)
+      if err or not connections then
+        UiQuery.stop_connecting(query_buf, nil, nil)
+        vim.notify(
+          string.format("Loaded query from %s (%s) - failed to load connections", buffer_name, timestamp),
+          vim.log.levels.WARN
+        )
+        return
+      end
+
+      -- Find the connection config for this server
+      local conn_config = nil
+      for _, conn in ipairs(connections) do
+        if conn.name == server_name then
+          conn_config = conn
+          break
+        end
+      end
+
+      if not conn_config then
+        UiQuery.stop_connecting(query_buf, nil, nil)
+        vim.notify(
+          string.format("Loaded query from %s (%s) - server '%s' not found in connections", buffer_name, timestamp, server_name),
+          vim.log.levels.WARN
+        )
+        return
+      end
+
+      -- Find or create server from connection config
+      local found_server, create_err = Cache.find_or_create_server(server_name, conn_config)
+      if not found_server then
+        UiQuery.stop_connecting(query_buf, nil, nil)
+        vim.notify(
+          string.format("Loaded query from %s (%s) - failed to create server: %s", buffer_name, timestamp, create_err or "unknown"),
+          vim.log.levels.WARN
+        )
+        return
+      end
+
+      -- Connect and load async
+      found_server:connect_and_load_async({
+        on_complete = function(success, connect_err)
+          if not success then
+            UiQuery.stop_connecting(query_buf, nil, nil)
+            vim.notify(
+              string.format("Loaded query from %s (%s) - connection failed: %s", buffer_name, timestamp, connect_err or "unknown"),
+              vim.log.levels.WARN
+            )
+            return
+          end
+
+          -- Find database now that server is loaded
+          local found_database = nil
+          if database_name then
+            found_database = found_server:find_database(database_name)
+          end
+
+          -- Stop spinner and update buffer with real server/database objects
+          UiQuery.stop_connecting(query_buf, found_server, found_database)
+
+          local status_msg = ""
+          if not found_database and database_name then
+            status_msg = string.format(" (database '%s' not found)", database_name)
+          end
+
+          vim.notify(
+            string.format("Loaded query from %s (%s) - connected to %s%s", buffer_name, timestamp, server_name, status_msg),
+            vim.log.levels.INFO
+          )
+        end,
+      })
+    end)
+  else
+    -- Server already connected and loaded
     vim.notify(
-      string.format("Loaded query from %s (%s)%s", buffer_history.buffer_name, entry.timestamp, connection_status),
+      string.format("Loaded query from %s (%s)", buffer_name, timestamp),
       vim.log.levels.INFO
     )
-  end)
+  end
 end
 
 ---Delete current entry or buffer

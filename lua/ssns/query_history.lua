@@ -215,9 +215,11 @@ function QueryHistory.add_entry(bufnr, buffer_name, entry)
   -- Insert at front (newest first)
   table.insert(buffer_history.entries, 1, entry)
 
-  -- Trim if exceeds max entries per buffer
-  while #buffer_history.entries > QueryHistory.max_entries_per_buffer do
-    table.remove(buffer_history.entries)
+  -- Trim if exceeds max entries per buffer (-1 = unlimited)
+  if QueryHistory.max_entries_per_buffer >= 0 then
+    while #buffer_history.entries > QueryHistory.max_entries_per_buffer do
+      table.remove(buffer_history.entries)
+    end
   end
 
   -- Auto-save if enabled (async to avoid blocking)
@@ -272,21 +274,25 @@ function QueryHistory.add_auto_save_entry(bufnr, buffer_name, content, server_na
   -- Insert at front (newest first)
   table.insert(buffer_history.entries, 1, entry)
 
-  -- Count and trim auto-save entries if exceeds max
-  local auto_save_count = 0
-  for i = #buffer_history.entries, 1, -1 do
-    local e = buffer_history.entries[i]
-    if e.source == "auto_save" then
-      auto_save_count = auto_save_count + 1
-      if auto_save_count > QueryHistory.max_auto_saves_per_buffer then
-        table.remove(buffer_history.entries, i)
+  -- Count and trim auto-save entries if exceeds max (-1 = unlimited)
+  if QueryHistory.max_auto_saves_per_buffer >= 0 then
+    local auto_save_count = 0
+    for i = #buffer_history.entries, 1, -1 do
+      local e = buffer_history.entries[i]
+      if e.source == "auto_save" then
+        auto_save_count = auto_save_count + 1
+        if auto_save_count > QueryHistory.max_auto_saves_per_buffer then
+          table.remove(buffer_history.entries, i)
+        end
       end
     end
   end
 
-  -- Also trim total entries if exceeds max
-  while #buffer_history.entries > QueryHistory.max_entries_per_buffer do
-    table.remove(buffer_history.entries)
+  -- Also trim total entries if exceeds max (-1 = unlimited)
+  if QueryHistory.max_entries_per_buffer >= 0 then
+    while #buffer_history.entries > QueryHistory.max_entries_per_buffer do
+      table.remove(buffer_history.entries)
+    end
   end
 
   -- Auto-save to file if enabled (async to avoid blocking)

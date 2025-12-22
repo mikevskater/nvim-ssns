@@ -278,14 +278,22 @@ local function attach_connection_to_buffer(bufnr, connection, callback)
     connection.connected = true
 
     if not server:is_connected() then
-      vim.notify(string.format("SSNS: Connecting to %s...", connection.server_name), vim.log.levels.INFO)
-      server:connect_async(function(success, connect_err)
-        if not success then
-          vim.notify(string.format("SSNS: Failed to connect: %s", connect_err or "Unknown error"), vim.log.levels.ERROR)
-          return
-        end
-        ensure_loaded_and_find_database(server)
-      end)
+      -- Start connecting spinner in lualine
+      UiQuery.start_connecting(bufnr, connection.server_name, connection.db_name)
+
+      server:connect_and_load_async({
+        on_complete = function(success, connect_err)
+          if not success then
+            UiQuery.stop_connecting(bufnr, nil, nil)
+            vim.notify(string.format("SSNS: Failed to connect: %s", connect_err or "Unknown error"), vim.log.levels.ERROR)
+            return
+          end
+
+          -- Stop spinner and find database
+          UiQuery.stop_connecting(bufnr, server, nil)
+          find_database_and_finish(server)
+        end,
+      })
     else
       ensure_loaded_and_find_database(server)
     end
@@ -878,14 +886,20 @@ function UiConnectionPicker.show_database_picker(bufnr)
 
   -- Make sure server is connected
   if not server:is_connected() then
-    vim.notify(string.format("SSNS: Connecting to %s...", server.name), vim.log.levels.INFO)
-    server:connect_async(function(success, err)
-      if not success then
-        vim.notify(string.format("SSNS: Failed to connect: %s", err or "Unknown error"), vim.log.levels.ERROR)
-        return
-      end
-      load_and_show()
-    end)
+    -- Start connecting spinner in lualine
+    UiQuery.start_connecting(bufnr, server.name, current_db and current_db.db_name or nil)
+
+    server:connect_and_load_async({
+      on_complete = function(success, err)
+        UiQuery.stop_connecting(bufnr, success and server or nil, current_db)
+
+        if not success then
+          vim.notify(string.format("SSNS: Failed to connect: %s", err or "Unknown error"), vim.log.levels.ERROR)
+          return
+        end
+        show_picker()
+      end,
+    })
     return
   end
 
