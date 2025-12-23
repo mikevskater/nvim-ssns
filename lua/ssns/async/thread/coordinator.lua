@@ -355,13 +355,17 @@ function Coordinator.cancel(task_id, reason)
   -- The worker should check for cancellation cooperatively
   -- We mark it cancelled and let cleanup happen
 
-  if handle.on_complete then
-    vim.schedule(function()
-      handle.on_complete({ cancelled = true, reason = reason }, nil)
-    end)
-  end
+  -- Capture callback before cleanup clears it
+  local on_complete = handle.on_complete
 
   Coordinator.cleanup(task_id)
+
+  -- Call captured callback after cleanup (cleanup clears handle.on_complete)
+  if on_complete then
+    vim.schedule(function()
+      on_complete({ cancelled = true, reason = reason }, nil)
+    end)
+  end
   return true
 end
 
