@@ -270,15 +270,9 @@ function M.load_synonym_referenced_databases_async(callback)
       local op_idx = 1
       local function run_next_op()
         if cancel_token and cancel_token.is_cancelled then
-          -- Add this database to selected_databases for metadata loading
-          ui_state.selected_databases[db.db_name] = db
-
-          -- Flatten objects from this database and add to loaded_objects
-          local db_objects = M.flatten_database_objects(db, server)
-          for _, obj in ipairs(db_objects) do
-            table.insert(ui_state.loaded_objects, obj)
-          end
-
+          -- Referenced database loading cancelled - move to next
+          -- Note: We don't add to selected_databases or loaded_objects
+          -- These databases are only loaded into cache for synonym resolution
           db_idx = db_idx + 1
           vim.schedule(load_next_ref_db)
           return
@@ -286,15 +280,9 @@ function M.load_synonym_referenced_databases_async(callback)
 
         if op_idx > #chain_ops then
           -- All operations complete for this database
-          -- Add this database to selected_databases for metadata loading
-          ui_state.selected_databases[db.db_name] = db
-
-          -- Flatten objects from this database and add to loaded_objects
-          local db_objects = M.flatten_database_objects(db, server)
-          for _, obj in ipairs(db_objects) do
-            table.insert(ui_state.loaded_objects, obj)
-          end
-
+          -- Note: We don't add to selected_databases or loaded_objects
+          -- These databases are only loaded into cache for synonym resolution,
+          -- not shown in search results
           db_idx = db_idx + 1
           vim.schedule(load_next_ref_db)
           return
