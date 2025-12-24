@@ -67,5 +67,21 @@ return {
     ui_title = { fg = "#CBA6F7", bold = true },           -- Mauve bold title
     ui_selected = { fg = "#CDD6F4", bg = "#313244" },    -- Text on surface0 selection
     ui_hint = { fg = "#6C7086" },                         -- Overlay0 hints
+
+    -- Result buffer highlights
+    result_header = { fg = "#89B4FA", bold = true },      -- Blue
+    result_border = { fg = "#313244" },                   -- Surface0
+    result_null = { fg = "#6C7086", italic = true },      -- Overlay0 italic
+    result_message = { fg = "#A6E3A1", italic = true },   -- Green italic
+    result_date = { fg = "#F9E2AF" },                     -- Yellow
+    result_bool = { fg = "#94E2D5" },                     -- Teal
+    result_binary = { fg = "#6C7086" },                   -- Overlay0
+    result_guid = { fg = "#FAB387" },                     -- Peach
+
+    -- Scrollbar
+    scrollbar = { bg = "NONE" },
+    scrollbar_thumb = { fg = "#89B4FA" },                 -- Blue
+    scrollbar_track = { fg = "#313244" },                 -- Surface0
+    scrollbar_arrow = { fg = "#6C7086" },                 -- Overlay0
   },
 }

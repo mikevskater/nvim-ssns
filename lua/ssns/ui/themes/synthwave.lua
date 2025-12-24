@@ -68,5 +68,21 @@ return {
     ui_title = { fg = "#F97E72", bold = true },           -- Salmon bold title
     ui_selected = { fg = "#FFFFFF", bg = "#2A2139" },    -- White on dark selection
     ui_hint = { fg = "#848bbd" },                         -- Gray hints
+
+    -- Result buffer highlights
+    result_header = { fg = "#36F9F6", bold = true },      -- Cyan
+    result_border = { fg = "#2A2139" },                   -- Dark bg
+    result_null = { fg = "#848BBD", italic = true },      -- Gray italic
+    result_message = { fg = "#72F1B8", italic = true },   -- Green italic
+    result_date = { fg = "#FEDE5D" },                     -- Yellow
+    result_bool = { fg = "#36F9F6" },                     -- Cyan
+    result_binary = { fg = "#848BBD" },                   -- Gray
+    result_guid = { fg = "#F97E72" },                     -- Salmon
+
+    -- Scrollbar
+    scrollbar = { bg = "NONE" },
+    scrollbar_thumb = { fg = "#FE4450" },                 -- Neon red
+    scrollbar_track = { fg = "#2A2139" },                 -- Dark bg
+    scrollbar_arrow = { fg = "#848BBD" },                 -- Gray
   },
 }

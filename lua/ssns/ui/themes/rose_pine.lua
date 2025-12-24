@@ -68,5 +68,21 @@ return {
     ui_title = { fg = "#C4A7E7", bold = true },           -- Iris bold title
     ui_selected = { fg = "#E0DEF4", bg = "#26233A" },    -- Text on surface selection
     ui_hint = { fg = "#6E6A86" },                         -- Muted hints
+
+    -- Result buffer highlights
+    result_header = { fg = "#9CCFD8", bold = true },      -- Foam
+    result_border = { fg = "#26233A" },                   -- Surface
+    result_null = { fg = "#6E6A86", italic = true },      -- Muted italic
+    result_message = { fg = "#31748F", italic = true },   -- Pine italic
+    result_date = { fg = "#F6C177" },                     -- Gold
+    result_bool = { fg = "#9CCFD8" },                     -- Foam
+    result_binary = { fg = "#6E6A86" },                   -- Muted
+    result_guid = { fg = "#EA9A97" },                     -- Rose
+
+    -- Scrollbar
+    scrollbar = { bg = "NONE" },
+    scrollbar_thumb = { fg = "#9CCFD8" },                 -- Foam
+    scrollbar_track = { fg = "#26233A" },                 -- Surface
+    scrollbar_arrow = { fg = "#6E6A86" },                 -- Muted
   },
 }

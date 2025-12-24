@@ -66,7 +66,23 @@ return {
     -- UI-specific colors for floating windows
     ui_border = { fg = "#88C0D0" },                       -- Frost blue border
     ui_title = { fg = "#B48EAD", bold = true },           -- Aurora purple bold title
-    ui_selected = { fg = "#ECEFF4", bg = "#434C5E" },    -- Snow on polar selection
+    ui_selected = { fg = "#ECEFF4", bg = "#434C5E" },     -- Snow on polar selection
     ui_hint = { fg = "#4C566A" },                         -- Polar night hints
+
+    -- Result buffer highlights
+    result_header = { fg = "#88C0D0", bold = true },      -- Frost cyan
+    result_border = { fg = "#3B4252" },                   -- Polar night
+    result_null = { fg = "#4C566A", italic = true },      -- Polar night gray italic
+    result_message = { fg = "#A3BE8C", italic = true },   -- Aurora green italic
+    result_date = { fg = "#EBCB8B" },                     -- Aurora yellow
+    result_bool = { fg = "#81A1C1" },                     -- Frost blue
+    result_binary = { fg = "#4C566A" },                   -- Polar night gray
+    result_guid = { fg = "#D08770" },                     -- Aurora orange
+
+    -- Scrollbar
+    scrollbar = { bg = "NONE" },
+    scrollbar_thumb = { fg = "#88C0D0" },                 -- Frost cyan
+    scrollbar_track = { fg = "#3B4252" },                 -- Polar night
+    scrollbar_arrow = { fg = "#4C566A" },                 -- Polar night gray
   },
 }

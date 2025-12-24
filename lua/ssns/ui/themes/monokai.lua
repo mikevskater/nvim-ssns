@@ -66,7 +66,23 @@ return {
     -- UI-specific colors for floating windows
     ui_border = { fg = "#66D9EF" },                       -- Cyan border
     ui_title = { fg = "#F92672", bold = true },           -- Pink bold title
-    ui_selected = { fg = "#F8F8F2", bg = "#49483E" },    -- Foreground on highlight selection
+    ui_selected = { fg = "#F8F8F2", bg = "#49483E" },     -- Foreground on highlight selection
     ui_hint = { fg = "#75715E" },                         -- Comment gray hints
+
+    -- Result buffer highlights
+    result_header = { fg = "#66D9EF", bold = true },      -- Cyan
+    result_border = { fg = "#49483E" },                   -- Dark gray
+    result_null = { fg = "#75715E", italic = true },      -- Comment gray italic
+    result_message = { fg = "#A6E22E", italic = true },   -- Green italic
+    result_date = { fg = "#E6DB74" },                     -- Yellow
+    result_bool = { fg = "#AE81FF" },                     -- Purple
+    result_binary = { fg = "#75715E" },                   -- Comment gray
+    result_guid = { fg = "#FD971F" },                     -- Orange
+
+    -- Scrollbar
+    scrollbar = { bg = "NONE" },
+    scrollbar_thumb = { fg = "#66D9EF" },                 -- Cyan
+    scrollbar_track = { fg = "#49483E" },                 -- Dark gray
+    scrollbar_arrow = { fg = "#75715E" },                 -- Comment gray
   },
 }

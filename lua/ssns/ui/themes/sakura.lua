@@ -68,5 +68,21 @@ return {
     ui_title = { fg = "#FF1493", bold = true },           -- Deep pink bold
     ui_selected = { fg = "#FFFFFF", bg = "#FF69B4" },     -- White on hot pink
     ui_hint = { fg = "#FFB6D9" },                         -- Baby pink
+
+    -- Result buffer highlights
+    result_header = { fg = "#FF69B4", bold = true },      -- Hot pink
+    result_border = { fg = "#8B4665" },                   -- Dark pink
+    result_null = { fg = "#C9647C", italic = true },      -- Dusty rose italic
+    result_message = { fg = "#FF85C0", italic = true },   -- Rose pink italic
+    result_date = { fg = "#FFD700" },                     -- Gold
+    result_bool = { fg = "#FFB3D9" },                     -- Cotton candy pink
+    result_binary = { fg = "#8B4665" },                   -- Dark pink
+    result_guid = { fg = "#FF6EC7" },                     -- Fuchsia pink
+
+    -- Scrollbar
+    scrollbar = { bg = "NONE" },
+    scrollbar_thumb = { fg = "#FF69B4" },                 -- Hot pink
+    scrollbar_track = { fg = "#8B4665" },                 -- Dark pink
+    scrollbar_arrow = { fg = "#DB7093" },                 -- Pale violet red
   },
 }
