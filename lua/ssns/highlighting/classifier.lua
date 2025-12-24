@@ -479,7 +479,9 @@ function Classifier._classify_multipart(parts, chunk, connection, config, keywor
   end
 
   -- Build context for resolution (aliases, CTEs, temp tables from chunk)
-  local sql_context = Classifier._build_context(chunk)
+  -- Pass token position for CTE body detection
+  local first_part = parts[1]
+  local sql_context = Classifier._build_context(chunk, first_part.line, first_part.col)
 
   -- Get clause position for context-aware disambiguation
   -- This helps when objects aren't loaded yet (FROM -> schema.table, SELECT -> alias.column)
@@ -541,10 +543,38 @@ function Classifier._classify_multipart(parts, chunk, connection, config, keywor
   return results
 end
 
+---Check if a position is inside a CTE body
+---@param cte CTEInfo CTE to check
+---@param line number 1-indexed line
+---@param col number 1-indexed column
+---@return boolean inside True if position is inside CTE body
+local function is_inside_cte(cte, line, col)
+  if not cte.start_pos or not cte.end_pos then
+    return false
+  end
+
+  local start_line, start_col = cte.start_pos.line, cte.start_pos.col
+  local end_line, end_col = cte.end_pos.line, cte.end_pos.col
+
+  -- Before start
+  if line < start_line or (line == start_line and col < start_col) then
+    return false
+  end
+
+  -- After end
+  if line > end_line or (line == end_line and col > end_col) then
+    return false
+  end
+
+  return true
+end
+
 ---Build context from statement chunk
 ---@param chunk StatementChunk? Statement chunk
+---@param line number? Token line for CTE context detection
+---@param col number? Token column for CTE context detection
 ---@return table context Context with aliases, ctes, temp_tables, tables
-function Classifier._build_context(chunk)
+function Classifier._build_context(chunk, line, col)
   local context = {
     aliases = {},
     ctes = {},
@@ -556,14 +586,58 @@ function Classifier._build_context(chunk)
     return context
   end
 
-  -- Extract aliases
-  if chunk.aliases then
-    for alias_name, table_ref in pairs(chunk.aliases) do
-      context.aliases[alias_name:lower()] = table_ref
+  -- Check if position is inside a CTE body - if so, use CTE's context
+  local inside_cte = nil
+  if line and col and chunk.ctes then
+    for _, cte in ipairs(chunk.ctes) do
+      if is_inside_cte(cte, line, col) then
+        inside_cte = cte
+        break
+      end
     end
   end
 
-  -- Extract CTEs
+  -- If inside a CTE, use that CTE's tables and aliases as primary context
+  if inside_cte then
+    -- Add CTE's internal aliases
+    if inside_cte.aliases then
+      for alias_name, table_ref in pairs(inside_cte.aliases) do
+        context.aliases[alias_name:lower()] = table_ref
+      end
+    end
+
+    -- Add CTE's internal tables
+    if inside_cte.tables then
+      for _, tbl in ipairs(inside_cte.tables) do
+        table.insert(context.tables, tbl)
+        -- Also add alias if present (redundant with above but ensures consistency)
+        if tbl.alias then
+          context.aliases[tbl.alias:lower()] = tbl.name or tbl.table
+        end
+      end
+    end
+
+    -- Add nested subquery aliases from CTE
+    if inside_cte.subqueries then
+      for _, subquery in ipairs(inside_cte.subqueries) do
+        if subquery.alias then
+          context.aliases[subquery.alias:lower()] = "(subquery)"
+        end
+      end
+    end
+  end
+
+  -- Extract chunk-level aliases (from main statement)
+  if chunk.aliases then
+    for alias_name, table_ref in pairs(chunk.aliases) do
+      -- Don't override CTE-internal aliases
+      if not context.aliases[alias_name:lower()] then
+        context.aliases[alias_name:lower()] = table_ref
+      end
+    end
+  end
+
+  -- Extract CTEs (always available for CTE name recognition)
   if chunk.ctes then
     for _, cte in ipairs(chunk.ctes) do
       if cte.name then
@@ -572,8 +646,8 @@ function Classifier._build_context(chunk)
     end
   end
 
-  -- Extract tables
-  if chunk.tables then
+  -- Extract tables from main statement (only if not inside a CTE)
+  if not inside_cte and chunk.tables then
     for _, tbl in ipairs(chunk.tables) do
       table.insert(context.tables, tbl)
       -- Also add alias if present
@@ -583,8 +657,8 @@ function Classifier._build_context(chunk)
     end
   end
 
-  -- Extract subquery aliases
-  if chunk.subqueries then
+  -- Extract subquery aliases from main statement (only if not inside a CTE)
+  if not inside_cte and chunk.subqueries then
     for _, subquery in ipairs(chunk.subqueries) do
       if subquery.alias then
         -- Subquery aliases map to a placeholder indicating it's a derived table

@@ -49,6 +49,9 @@
 ---@field tables TableReference[] Tables referenced
 ---@field subqueries SubqueryInfo[] Any nested subqueries
 ---@field parameters ParameterInfo[] Parameters used in this CTE
+---@field aliases table<string, TableReference>? Alias -> table mapping within CTE
+---@field start_pos {line: number, col: number}? Start position of CTE body (after AS keyword)
+---@field end_pos {line: number, col: number}? End position of CTE body (closing paren)
 
 ---@class StatementChunk
 ---@field statement_type string "SELECT"|"SELECT_INTO"|"INSERT"|"UPDATE"|"DELETE"|"WITH"|"EXEC"|"OTHER"

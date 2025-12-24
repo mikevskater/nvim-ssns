@@ -66,6 +66,7 @@ function CteClauseParser.parse(state, scope)
     if not state:is_type("paren_open") then
       break
     end
+    local open_paren_token = state:current()
     state:advance()
 
     -- Parse CTE query
@@ -76,6 +77,9 @@ function CteClauseParser.parse(state, scope)
       tables = {},
       subqueries = {},
       parameters = {},
+      aliases = {},
+      start_pos = open_paren_token and { line = open_paren_token.line, col = open_paren_token.col + 1 } or nil,
+      end_pos = nil,  -- Will be set after parsing
     }
 
     -- Register CTE name BEFORE parsing body so recursive self-references are filtered
@@ -137,7 +141,16 @@ function CteClauseParser.parse(state, scope)
 
     -- Expect )
     if state:is_type("paren_close") then
+      local close_paren_token = state:current()
+      cte.end_pos = { line = close_paren_token.line, col = close_paren_token.col }
       state:advance()
+    end
+
+    -- Build aliases mapping from tables
+    for _, tbl in ipairs(cte.tables) do
+      if tbl.alias then
+        cte.aliases[tbl.alias:lower()] = tbl
+      end
     end
 
     -- Update CTE in scope with full column/table info
