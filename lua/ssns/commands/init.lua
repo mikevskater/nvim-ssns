@@ -14,6 +14,7 @@ function M.register()
   local export = require('ssns.commands.export')
   local testing = require('ssns.commands.testing')
   local features = require('ssns.commands.features')
+  local cast = require('ssns.commands.cast')
 
   -- Register each module's commands
   tree.register()
@@ -23,6 +24,7 @@ function M.register()
   export.register()
   testing.register()
   features.register()
+  cast.register()
 end
 
 return M

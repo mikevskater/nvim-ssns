@@ -152,6 +152,7 @@
 ---@field attach_connection string Attach buffer to connection (default: "<A-s>")
 ---@field change_connection string Change connection (hierarchical picker) (default: "<A-S>")
 ---@field change_database string Change database only (default: "<A-d>")
+---@field cast_prefix string Prefix for cast keymaps in visual mode (default: "<Leader>c")
 
 ---@class ResultsKeymaps Results buffer specific keymaps
 ---@field close string Close results window (default: "q")
@@ -680,6 +681,7 @@ local default_config = {
       attach_connection = "<A-s>", -- Attach buffer to connection (server picker)
       change_connection = "<A-S>", -- Change connection (hierarchical server then database)
       change_database = "<A-d>", -- Change database only
+      cast_prefix = "<Leader>c", -- Prefix for cast keymaps (e.g., <Leader>ci for INT)
     },
 
     -- Results buffer keymaps

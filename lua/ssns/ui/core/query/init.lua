@@ -358,6 +358,10 @@ function UiQuery.setup_query_keymaps(bufnr)
 
   KeymapManager.set_multiple(bufnr, keymaps, true)
   KeymapManager.mark_group_active(bufnr, "query")
+
+  -- Setup cast keymaps for visual mode type conversions
+  local CastCommands = require('ssns.commands.cast')
+  CastCommands.setup_keymaps(bufnr)
 end
 
 -- ============================================================================
