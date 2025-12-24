@@ -7,6 +7,7 @@ local ContentBuilder = require('ssns.ui.core.content_builder')
 local ThemeManager = require('ssns.ui.theme_manager')
 local KeymapManager = require('ssns.keymap_manager')
 local PreviewSql = require('ssns.ui.panels.theme_preview_sql')
+local ThemeActions = require('ssns.ui.panels.theme_picker_actions')
 
 ---@type MultiPanelWindow? Current multi-panel window
 local multi_panel = nil
@@ -264,6 +265,9 @@ function ThemePicker.show()
         header = "Actions",
         keys = {
           { key = "Enter", desc = "Apply selected theme" },
+          { key = "c", desc = "Copy theme" },
+          { key = "d", desc = "Delete user theme" },
+          { key = "r", desc = "Rename user theme" },
           { key = "q/Esc", desc = "Cancel and restore" },
         },
       },
@@ -286,6 +290,13 @@ function ThemePicker.show()
   -- Render all panels
   multi_panel:render_all()
 
+  -- Action callbacks that re-render after completion
+  local function on_action_complete()
+    if multi_panel then
+      on_selection_change()
+    end
+  end
+
   -- Setup keymaps for themes panel
   multi_panel:set_panel_keymaps("themes", {
     [common.close or "q"] = function() ThemePicker.close() end,
@@ -297,6 +308,10 @@ function ThemePicker.show()
     [common.confirm or "<CR>"] = apply_theme,
     [common.next_field or "<Tab>"] = function() multi_panel:focus_next_panel() end,
     [common.prev_field or "<S-Tab>"] = function() multi_panel:focus_prev_panel() end,
+    -- Theme management actions
+    ["c"] = function() ThemeActions.copy_theme(ui_state, multi_panel, on_action_complete) end,
+    ["d"] = function() ThemeActions.delete_theme(ui_state, multi_panel, on_action_complete) end,
+    ["r"] = function() ThemeActions.rename_theme(ui_state, multi_panel, on_action_complete) end,
   })
 
   -- Setup keymaps for preview panel
