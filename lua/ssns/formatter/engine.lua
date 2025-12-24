@@ -156,10 +156,11 @@ function Engine.format_async(sql, config, opts)
 
   local tokenize_start = hrtime()
 
-  Tokenizer.tokenize_chunked(sql, {
-    chunk_size = chunk_size,
-    on_progress = function(processed, total)
-      report_progress("tokenizing", processed, total)
+  Tokenizer.tokenize_async(sql, {
+    on_progress = function(pct, _message)
+      -- Convert percentage to processed/total for consistency with report_progress
+      local processed = math.floor(input_size * pct / 100)
+      report_progress("tokenizing", processed, input_size)
     end,
     on_complete = function(tokens)
       if async_state.cancelled then return end
