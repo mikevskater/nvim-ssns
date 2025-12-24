@@ -546,6 +546,16 @@ end
 -- User Theme Management API (similar to Formatter Presets)
 -- ============================================================================
 
+-- Lua reserved keywords that cannot be used as bare identifiers
+local LUA_KEYWORDS = {
+  ["and"] = true, ["break"] = true, ["do"] = true, ["else"] = true,
+  ["elseif"] = true, ["end"] = true, ["false"] = true, ["for"] = true,
+  ["function"] = true, ["goto"] = true, ["if"] = true, ["in"] = true,
+  ["local"] = true, ["nil"] = true, ["not"] = true, ["or"] = true,
+  ["repeat"] = true, ["return"] = true, ["then"] = true, ["true"] = true,
+  ["until"] = true, ["while"] = true,
+}
+
 ---Serialize a table to Lua code for saving themes
 ---@param tbl table The table to serialize
 ---@param indent number Current indentation level
@@ -575,7 +585,8 @@ local function serialize_table(tbl, indent)
   for _, k in ipairs(keys) do
     local v = tbl[k]
     local key_str
-    if type(k) == "string" and k:match("^[a-zA-Z_][a-zA-Z0-9_]*$") then
+    -- Check if key is a valid identifier AND not a reserved keyword
+    if type(k) == "string" and k:match("^[a-zA-Z_][a-zA-Z0-9_]*$") and not LUA_KEYWORDS[k] then
       key_str = k
     else
       key_str = string.format("[%q]", k)

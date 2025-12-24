@@ -1,21 +1,43 @@
 ---@class ThemePickerActions
----Action handlers for the theme picker
+---Action handlers for the theme picker and theme editor
 local M = {}
 
 local ThemeManager = require('ssns.ui.theme_manager')
+
+-- ============================================================================
+-- Helpers
+-- ============================================================================
+
+---Get selected theme index from state (handles both picker and editor state)
+---@param state table
+---@return number
+local function get_selected_idx(state)
+  return state.selected_theme_idx or state.selected_idx or 1
+end
+
+---Set selected theme index in state (handles both picker and editor state)
+---@param state table
+---@param idx number
+local function set_selected_idx(state, idx)
+  if state.selected_theme_idx ~= nil then
+    state.selected_theme_idx = idx
+  else
+    state.selected_idx = idx
+  end
+end
 
 -- ============================================================================
 -- Copy Theme
 -- ============================================================================
 
 ---Copy a theme to user directory
----@param state table UI state with available_themes and selected_idx
+---@param state table UI state with available_themes and selected_idx/selected_theme_idx
 ---@param multi_panel MultiPanelWindow? The multi-panel window
 ---@param on_complete function? Callback after completion
 function M.copy_theme(state, multi_panel, on_complete)
   if not state then return end
 
-  local theme = state.available_themes[state.selected_idx]
+  local theme = state.available_themes[get_selected_idx(state)]
   if not theme or theme.is_default then
     vim.notify("Cannot copy default theme option", vim.log.levels.WARN)
     return
@@ -75,7 +97,7 @@ function M.copy_theme(state, multi_panel, on_complete)
         local file_name = new_name:gsub("[^%w_%-]", "_")
         for i, t in ipairs(state.available_themes) do
           if t.name == file_name or t.display_name == new_name then
-            state.selected_idx = i
+            set_selected_idx(state, i)
             break
           end
         end
@@ -118,13 +140,13 @@ end
 -- ============================================================================
 
 ---Delete a user theme
----@param state table UI state with available_themes and selected_idx
+---@param state table UI state with available_themes and selected_idx/selected_theme_idx
 ---@param multi_panel MultiPanelWindow? The multi-panel window
 ---@param on_complete function? Callback after completion
 function M.delete_theme(state, multi_panel, on_complete)
   if not state then return end
 
-  local theme = state.available_themes[state.selected_idx]
+  local theme = state.available_themes[get_selected_idx(state)]
   if not theme or theme.is_default then
     vim.notify("Cannot delete default theme option", vim.log.levels.WARN)
     return
@@ -156,7 +178,7 @@ function M.delete_theme(state, multi_panel, on_complete)
       state.available_themes = themes
 
       -- Adjust selection if needed
-      state.selected_idx = math.min(state.selected_idx, #state.available_themes)
+      set_selected_idx(state, math.min(get_selected_idx(state), #state.available_themes))
 
       if multi_panel then
         multi_panel:render_panel("themes")
@@ -181,7 +203,7 @@ end
 -- ============================================================================
 
 ---Rename a user theme
----@param state table UI state with available_themes and selected_idx
+---@param state table UI state with available_themes and selected_idx/selected_theme_idx
 ---@param multi_panel MultiPanelWindow? The multi-panel window
 ---@param on_complete function? Callback after completion
 function M.rename_theme(state, multi_panel, on_complete)
@@ -189,7 +211,7 @@ function M.rename_theme(state, multi_panel, on_complete)
 
   local UiFloat = require('ssns.ui.core.float')
 
-  local theme = state.available_themes[state.selected_idx]
+  local theme = state.available_themes[get_selected_idx(state)]
   if not theme or theme.is_default then
     vim.notify("Cannot rename default theme option", vim.log.levels.WARN)
     return
@@ -249,7 +271,7 @@ function M.rename_theme(state, multi_panel, on_complete)
         local new_file_name = new_name:gsub("[^%w_%-]", "_")
         for i, t in ipairs(state.available_themes) do
           if t.name == new_file_name or t.display_name == new_name then
-            state.selected_idx = i
+            set_selected_idx(state, i)
             break
           end
         end
@@ -385,7 +407,7 @@ end
 function M.ensure_user_copy(state, multi_panel)
   if not state then return false end
 
-  local theme = state.available_themes[state.selected_idx]
+  local theme = state.available_themes[get_selected_idx(state)]
   if not theme or theme.is_default then
     vim.notify("Cannot edit default theme option", vim.log.levels.WARN)
     return false
@@ -424,7 +446,7 @@ function M.ensure_user_copy(state, multi_panel)
     -- Find the new copy
     for i, t in ipairs(state.available_themes) do
       if t.name == file_name then
-        state.selected_idx = i
+        set_selected_idx(state, i)
         break
       end
     end

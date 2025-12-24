@@ -70,6 +70,15 @@ function M.register()
     desc = "Clear SSNS theme (use defaults)",
   })
 
+  -- :SSNSThemeEditor - Open advanced theme editor with color editing
+  vim.api.nvim_create_user_command("SSNSThemeEditor", function()
+    local ThemeEditor = require('ssns.ui.panels.theme_editor')
+    ThemeEditor.show()
+  end, {
+    nargs = 0,
+    desc = "Open SSNS theme editor",
+  })
+
   -- SQL Formatter Commands (delegates to formatter module)
   local FormatterCommands = require('ssns.formatter.commands')
   FormatterCommands.register_commands()
