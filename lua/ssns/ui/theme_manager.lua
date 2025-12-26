@@ -378,29 +378,40 @@ function ThemeManager.apply_colors(colors)
   vim.api.nvim_set_hl(0, "SsnsUnresolved", colors.unresolved or { fg = "#808080" })
   vim.api.nvim_set_hl(0, "SsnsComment", colors.comment or { fg = "#6A9955", italic = true })
 
-  -- UI-specific highlights for floating windows
-  vim.api.nvim_set_hl(0, "SsnsFloatBorder", colors.ui_border or { link = "FloatBorder" })
-  vim.api.nvim_set_hl(0, "SsnsFloatTitle", colors.ui_title or { link = "FloatTitle" })
-  vim.api.nvim_set_hl(0, "SsnsFloatSelected", colors.ui_selected or { link = "PmenuSel" })
-  vim.api.nvim_set_hl(0, "SsnsFloatHint", colors.ui_hint or { link = "Comment" })
+  -- nvim-float UI highlights (generic floating window styling)
+  vim.api.nvim_set_hl(0, "NvimFloatBorder", colors.ui_border or { link = "FloatBorder" })
+  vim.api.nvim_set_hl(0, "NvimFloatTitle", colors.ui_title or { link = "FloatTitle" })
+  vim.api.nvim_set_hl(0, "NvimFloatSelected", colors.ui_selected or { link = "PmenuSel" })
+  vim.api.nvim_set_hl(0, "NvimFloatHint", colors.ui_hint or { link = "Comment" })
+
+  -- nvim-float input field highlights
+  vim.api.nvim_set_hl(0, "NvimFloatInput", colors.ui_input or { bg = "#2D2D2D", fg = "#CCCCCC" })
+  vim.api.nvim_set_hl(0, "NvimFloatInputActive", colors.ui_input_active or { bg = "#3C3C3C", fg = "#FFFFFF", bold = true })
+  vim.api.nvim_set_hl(0, "NvimFloatInputPlaceholder", colors.ui_input_placeholder or { bg = "#2D2D2D", fg = "#666666", italic = true })
+
+  -- nvim-float scrollbar highlights
+  vim.api.nvim_set_hl(0, "NvimFloatScrollbar", colors.scrollbar or { bg = "NONE" })
+  vim.api.nvim_set_hl(0, "NvimFloatScrollbarThumb", colors.scrollbar_thumb or { link = "NvimFloatTitle" })
+  vim.api.nvim_set_hl(0, "NvimFloatScrollbarTrack", colors.scrollbar_track or { link = "NvimFloatBorder" })
+  vim.api.nvim_set_hl(0, "NvimFloatScrollbarArrow", colors.scrollbar_arrow or { link = "NvimFloatHint" })
+
+  -- nvim-float content style highlights (ContentBuilder uses these)
+  vim.api.nvim_set_hl(0, "NvimFloatComment", colors.comment or { fg = "#6A9955", italic = true })
+  vim.api.nvim_set_hl(0, "NvimFloatString", colors.string or { fg = "#CE9178" })
+  vim.api.nvim_set_hl(0, "NvimFloatNumber", colors.number or { fg = "#B5CEA8" })
+  vim.api.nvim_set_hl(0, "NvimFloatKeyword", colors.keyword or { fg = "#569CD6", bold = true })
+  vim.api.nvim_set_hl(0, "NvimFloatOperator", colors.operator or { fg = "#D4D4D4" })
+  vim.api.nvim_set_hl(0, "NvimFloatMuted", colors.ui_hint or { fg = "#6A6A6A" })
+  vim.api.nvim_set_hl(0, "NvimFloatSection", colors.ui_title or { link = "NvimFloatTitle" })
+  vim.api.nvim_set_hl(0, "NvimFloatHeader", colors.ui_title or { link = "NvimFloatTitle" })
+  vim.api.nvim_set_hl(0, "NvimFloatSubheader", colors.ui_title or { link = "NvimFloatTitle" })
+  vim.api.nvim_set_hl(0, "NvimFloatHighlight", colors.search_match or { link = "Search" })
+  vim.api.nvim_set_hl(0, "NvimFloatLabel", colors.ui_hint or { link = "Label" })
+  vim.api.nvim_set_hl(0, "NvimFloatEmphasis", { fg = "#4EC9B0" })
+  vim.api.nvim_set_hl(0, "NvimFloatStrong", { fg = "#569CD6", bold = true })
 
   -- Search match highlight (overlay with background for use on syntax-highlighted content)
   vim.api.nvim_set_hl(0, "SsnsSearchMatch", colors.search_match or { bg = "#515C6A", bold = true })
-
-  -- Input field highlights
-  vim.api.nvim_set_hl(0, "SsnsFloatInput", colors.ui_input or { bg = "#2D2D2D", fg = "#CCCCCC" })
-  vim.api.nvim_set_hl(0, "SsnsFloatInputActive", colors.ui_input_active or { bg = "#3C3C3C", fg = "#FFFFFF", bold = true })
-  vim.api.nvim_set_hl(0, "SsnsFloatInputPlaceholder", colors.ui_input_placeholder or { bg = "#2D2D2D", fg = "#666666", italic = true })
-
-  -- Scrollbar highlights (themed - derive from SSNS UI title/border colors)
-  -- Scrollbar background: transparent to blend with window
-  vim.api.nvim_set_hl(0, "SsnsScrollbar", colors.scrollbar or { bg = "NONE" })
-  -- Thumb: uses SSNS title color for visibility (the draggable part)
-  vim.api.nvim_set_hl(0, "SsnsScrollbarThumb", colors.scrollbar_thumb or { link = "SsnsFloatTitle" })
-  -- Track: dimmer, uses SSNS border color (the background track)
-  vim.api.nvim_set_hl(0, "SsnsScrollbarTrack", colors.scrollbar_track or { link = "SsnsFloatBorder" })
-  -- Arrows: uses SSNS hint color for consistency
-  vim.api.nvim_set_hl(0, "SsnsScrollbarArrow", colors.scrollbar_arrow or { link = "SsnsFloatHint" })
 
   -- Result buffer highlights (foreground only - no background colors)
   vim.api.nvim_set_hl(0, "SsnsResultHeader", colors.result_header or { fg = "#9CDCFE", bold = true })
@@ -415,20 +426,6 @@ function ThemeManager.apply_colors(colors)
   vim.api.nvim_set_hl(0, "SsnsResultBool", colors.result_bool or { fg = "#569CD6" })
   vim.api.nvim_set_hl(0, "SsnsResultBinary", colors.result_binary or { fg = "#808080" })
   vim.api.nvim_set_hl(0, "SsnsResultGuid", colors.result_guid or { fg = "#CE9178" })
-
-  -- UI-specific highlights (optional, for theme picker preview)
-  if colors.ui_border then
-    vim.api.nvim_set_hl(0, "SsnsUiBorder", colors.ui_border)
-  end
-  if colors.ui_title then
-    vim.api.nvim_set_hl(0, "SsnsUiTitle", colors.ui_title)
-  end
-  if colors.ui_selected then
-    vim.api.nvim_set_hl(0, "SsnsUiSelected", colors.ui_selected)
-  end
-  if colors.ui_hint then
-    vim.api.nvim_set_hl(0, "SsnsUiHint", colors.ui_hint)
-  end
 
   -- Trigger re-highlight of any open SSNS buffers
   ThemeManager.refresh_open_buffers()

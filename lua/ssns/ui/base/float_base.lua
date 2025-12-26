@@ -81,12 +81,12 @@ function UiFloatBase.create_window(bufnr, config)
   end
   
   -- Build winhighlight string (to be applied after window creation)
-  local winhl = {'Normal:Normal', 'CursorLine:SsnsFloatSelected'}
+  local winhl = {'Normal:Normal', 'CursorLine:NvimFloatSelected'}
   if not config.no_border_hl then
-    table.insert(winhl, 'FloatBorder:SsnsFloatBorder')
+    table.insert(winhl, 'FloatBorder:NvimFloatBorder')
   end
   if not config.no_title_hl then
-    table.insert(winhl, 'FloatTitle:SsnsFloatTitle')
+    table.insert(winhl, 'FloatTitle:NvimFloatTitle')
   end
   local winhighlight = table.concat(winhl, ',')
   

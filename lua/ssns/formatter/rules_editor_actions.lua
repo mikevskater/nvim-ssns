@@ -205,7 +205,7 @@ end
 function M.save_preset(state, multi_panel)
   if not state or not multi_panel then return end
 
-  local UiFloat = require('ssns.ui.core.float')
+  local UiFloat = require('nvim-float.float')
 
   local current_preset = state.available_presets[state.selected_preset_idx]
   local default_name = current_preset and current_preset.is_user and current_preset.name or Presets.generate_unique_name("Custom")
@@ -223,7 +223,7 @@ function M.save_preset(state, multi_panel)
   if save_win then
     local cb = save_win:get_content_builder()
     cb:line("")
-    cb:line("  Save current settings as preset:", "SsnsUiTitle")
+    cb:line("  Save current settings as preset:", "NvimFloatTitle")
     cb:line("")
     cb:labeled_input("name", "  Name", {
       value = default_name,
@@ -231,7 +231,7 @@ function M.save_preset(state, multi_panel)
       width = 35,
     })
     cb:line("")
-    cb:line("  <Enter>=Save | <Esc>=Cancel", "SsnsUiHint")
+    cb:line("  <Enter>=Save | <Esc>=Cancel", "NvimFloatHint")
     save_win:render()
 
     local function do_save()
@@ -333,7 +333,7 @@ end
 function M.rename_preset(state, multi_panel)
   if not state or not multi_panel then return end
 
-  local UiFloat = require('ssns.ui.core.float')
+  local UiFloat = require('nvim-float.float')
 
   local preset = state.available_presets[state.selected_preset_idx]
   if not preset or not preset.is_user then
@@ -354,7 +354,7 @@ function M.rename_preset(state, multi_panel)
   if rename_win then
     local cb = rename_win:get_content_builder()
     cb:line("")
-    cb:line(string.format("  Rename preset '%s':", preset.name), "SsnsUiTitle")
+    cb:line(string.format("  Rename preset '%s':", preset.name), "NvimFloatTitle")
     cb:line("")
     cb:labeled_input("name", "  New name", {
       value = preset.name,
@@ -362,7 +362,7 @@ function M.rename_preset(state, multi_panel)
       width = 32,
     })
     cb:line("")
-    cb:line("  <Enter>=Rename | <Esc>=Cancel", "SsnsUiHint")
+    cb:line("  <Enter>=Rename | <Esc>=Cancel", "NvimFloatHint")
     rename_win:render()
 
     local function do_rename()

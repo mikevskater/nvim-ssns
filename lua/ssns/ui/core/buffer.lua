@@ -117,7 +117,7 @@ local function create_float_window(bufnr, ui_config)
     wrap = false,
     spell = false,
     list = false,
-    winhighlight = 'Normal:Normal,FloatBorder:SsnsFloatBorder,FloatTitle:SsnsFloatTitle,CursorLine:SsnsFloatSelected',
+    winhighlight = 'Normal:Normal,FloatBorder:NvimFloatBorder,FloatTitle:NvimFloatTitle,CursorLine:NvimFloatSelected',
   }
 
   for opt, val in pairs(win_opts) do
@@ -704,8 +704,8 @@ end
 
 ---Show help in floating window
 function UiBuffer.show_help()
-  local UiFloat = require('ssns.ui.core.float')
-  local ContentBuilder = require('ssns.ui.core.content_builder')
+  local UiFloat = require('nvim-float.float')
+  local ContentBuilder = require('nvim-float.content_builder')
 
   local cb = ContentBuilder.new()
   

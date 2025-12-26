@@ -3,10 +3,10 @@
 local ColorPicker = {}
 
 local ColorUtils = require('ssns.ui.components.color_utils')
-local UiFloat = require('ssns.ui.core.float')
-local MultiPanel = require('ssns.ui.core.float.multipanel')
-local ContentBuilder = require('ssns.ui.core.content_builder')
-local InputManager = require('ssns.ui.core.input_manager')
+local UiFloat = require('nvim-float.float')
+local MultiPanel = require('nvim-float.float.multipanel')
+local ContentBuilder = require('nvim-float.content_builder')
+local InputManager = require('nvim-float.input_manager')
 local KeymapManager = require('ssns.keymap_manager')
 local Config = require('ssns.config')
 

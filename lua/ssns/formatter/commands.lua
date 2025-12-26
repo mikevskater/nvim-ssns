@@ -215,8 +215,8 @@ end
 ---Show formatter performance statistics
 function FormatterCommands.show_stats()
   local Stats = require('ssns.formatter.stats')
-  local UiFloat = require('ssns.ui.core.float')
-  local ContentBuilder = require('ssns.ui.core.content_builder')
+  local UiFloat = require('nvim-float.float')
+  local ContentBuilder = require('nvim-float.content_builder')
   
   local output = Stats.format_summary()
   local raw_lines = vim.split(output, "\n")

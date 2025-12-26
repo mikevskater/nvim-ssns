@@ -14,8 +14,8 @@ local Render = require('ssns.ui.panels.object_search.render')
 local Input = require('ssns.ui.panels.object_search.input')
 local Navigation = require('ssns.ui.panels.object_search.navigation')
 
-local UiFloat = require('ssns.ui.core.float')
-local ContentBuilder = require('ssns.ui.core.content_builder')
+local UiFloat = require('nvim-float.float')
+local ContentBuilder = require('nvim-float.content_builder')
 local KeymapManager = require('ssns.keymap_manager')
 local Cache = require('ssns.cache')
 

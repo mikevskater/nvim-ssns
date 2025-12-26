@@ -24,6 +24,51 @@ function Ssns.setup(user_config)
   -- Setup configuration
   Config.setup(user_config)
 
+  -- Setup nvim-float integration (required dependency)
+  local nvim_float_ok, nvim_float = pcall(require, "nvim-float")
+  if not nvim_float_ok then
+    vim.notify("SSNS: nvim-float is required. Please install it as a dependency.", vim.log.levels.ERROR)
+    return
+  end
+
+  -- Register SSNS-specific styles for ContentBuilder
+  -- These extend nvim-float with SQL/database-specific styles
+  nvim_float.register_styles({
+    -- SQL Keywords (theme_preview_sql.lua uses these)
+    statement = "SsnsKeywordStatement",
+    clause = "SsnsKeywordClause",
+    sql_operator = "SsnsKeywordOperator",
+    sql_function = "SsnsKeywordFunction",
+    datatype = "SsnsKeywordDatatype",
+    constraint = "SsnsKeywordConstraint",
+    modifier = "SsnsKeywordModifier",
+    sysproc = "SsnsKeywordSystemProcedure",
+    globalvar = "SsnsKeywordGlobalVariable",
+
+    -- SQL Objects
+    sql_column = "SsnsColumn",
+    sql_table = "SsnsTable",
+    sql_schema = "SsnsSchema",
+    sql_database = "SsnsDatabase",
+    sql_procedure = "SsnsProcedure",
+    sql_parameter = "SsnsParameter",
+    sql_alias = "SsnsAlias",
+    sql_index = "SsnsIndex",
+    unresolved = "SsnsUnresolved",
+
+    -- Result table styles
+    result_header = "SsnsResultHeader",
+    result_null = "SsnsResultNull",
+    result_number = "SsnsResultNumber",
+    result_string = "SsnsResultString",
+    result_date = "SsnsResultDate",
+    result_boolean = "SsnsResultBool",
+    result_binary = "SsnsResultBinary",
+    result_guid = "SsnsResultGuid",
+    result_border = "SsnsResultBorder",
+    result_row_number = "SsnsResultRowNumber",
+  })
+
   -- Initialize lualine colors cache asynchronously (for non-blocking statusline)
   local LualineColors = require('ssns.lualine_colors')
   LualineColors.init_async()

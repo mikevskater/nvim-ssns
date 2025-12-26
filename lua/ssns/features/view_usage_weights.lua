@@ -5,7 +5,7 @@
 local ViewUsageWeights = {}
 
 local BaseViewer = require('ssns.features.base_viewer')
-local UiFloat = require('ssns.ui.core.float')
+local UiFloat = require('nvim-float.float')
 local UsageTracker = require('ssns.completion.usage_tracker')
 
 -- Create viewer instance
@@ -91,7 +91,7 @@ function ViewUsageWeights.view_weights()
         local ccb = confirm_win:get_content_builder()
         ccb:line("")
         ccb:line("  Clear ALL usage weights?", "WarningMsg")
-        ccb:line("  This cannot be undone.", "SsnsUiHint")
+        ccb:line("  This cannot be undone.", "NvimFloatHint")
         ccb:line("")
         ccb:line("  Press <Enter> to confirm, <Esc> to cancel", "Comment")
         confirm_win:render()

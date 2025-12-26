@@ -4,7 +4,7 @@ local M = {}
 
 local State = require('ssns.ui.panels.object_search.state')
 local Helpers = require('ssns.ui.panels.object_search.helpers')
-local ContentBuilder = require('ssns.ui.core.content_builder')
+local ContentBuilder = require('nvim-float.content_builder')
 local Cache = require('ssns.cache')
 
 ---Forward reference for load_definition (injected by init.lua)
@@ -340,7 +340,7 @@ function M.render_search(state)
     table.insert(highlights, {0, 0, -1, "Comment"})
   else
     table.insert(lines, " " .. ui_state.search_term)
-    table.insert(highlights, {0, 0, -1, "SsnsUiHint"})
+    table.insert(highlights, {0, 0, -1, "NvimFloatHint"})
   end
 
   return lines, highlights

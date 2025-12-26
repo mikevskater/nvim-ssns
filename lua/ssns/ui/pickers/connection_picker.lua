@@ -3,8 +3,8 @@
 local UiConnectionPicker = {}
 
 local UiFloatInteractive = require('ssns.ui.base.float_interactive')
-local ContentBuilder = require('ssns.ui.core.content_builder')
-local UiFloat = require('ssns.ui.core.float')
+local ContentBuilder = require('nvim-float.content_builder')
+local UiFloat = require('nvim-float.float')
 local UiQuery = require('ssns.ui.core.query')
 local Cache = require('ssns.cache')
 local Connections = require('ssns.connections')

@@ -124,7 +124,7 @@ end
 ---@param results_config table Results display configuration
 ---@return number result_width Width of the formatted result table
 function QueryResults.format_single_result_set_styled(result_set, columns_metadata, builder, results_config)
-  local ContentBuilder = require('ssns.ui.core.content_builder')
+  local ContentBuilder = require('nvim-float.content_builder')
 
   -- Extract config values
   local color_mode = results_config.color_mode or "datatype"
@@ -385,7 +385,7 @@ end
 ---@return ContentBuilder builder ContentBuilder with all styled content
 ---@return table[] result_set_ranges Array of {start_line, end_line, index} for cursor-based result set detection
 function QueryResults.format_results_styled(resultSets, sql, execution_time_ms, query_metadata)
-  local ContentBuilder = require('ssns.ui.core.content_builder')
+  local ContentBuilder = require('nvim-float.content_builder')
   local Config = require('ssns.config')
   local results_config = Config.get_results()
   local ui_config = Config.get_ui()
@@ -562,7 +562,7 @@ end
 ---@param query_bufnr number? The query buffer number (for per-buffer results tracking)
 ---@param results_bufnr number? Pre-created results buffer (from async execute)
 function QueryResults.display_results(result, sql, execution_time_ms, query_bufnr, results_bufnr)
-  local ContentBuilder = require('ssns.ui.core.content_builder')
+  local ContentBuilder = require('nvim-float.content_builder')
 
   -- Use provided buffer or current buffer
   query_bufnr = query_bufnr or vim.api.nvim_get_current_buf()
@@ -672,7 +672,7 @@ end
 ---Toggle the results window for a specific query buffer (show if hidden, hide if visible)
 ---@param query_bufnr number? The query buffer number (defaults to current buffer or associated query buffer)
 function QueryResults.toggle_results(query_bufnr)
-  local ContentBuilder = require('ssns.ui.core.content_builder')
+  local ContentBuilder = require('nvim-float.content_builder')
   local current_buf = vim.api.nvim_get_current_buf()
 
   -- Determine the query buffer:
@@ -802,7 +802,7 @@ end
 
 ---Show controls popup for results buffer
 function QueryResults.show_results_controls()
-  local UiFloat = require('ssns.ui.core.float')
+  local UiFloat = require('nvim-float.float')
   local km = KeymapManager.get_group("results")
   local query_km = KeymapManager.get_group("query")
 

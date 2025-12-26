@@ -2,8 +2,8 @@
 ---Theme picker UI with live preview
 local ThemePicker = {}
 
-local UiFloat = require('ssns.ui.core.float')
-local ContentBuilder = require('ssns.ui.core.content_builder')
+local UiFloat = require('nvim-float.float')
+local ContentBuilder = require('nvim-float.content_builder')
 local ThemeManager = require('ssns.ui.theme_manager')
 local KeymapManager = require('ssns.keymap_manager')
 local PreviewSql = require('ssns.ui.panels.theme_preview_sql')

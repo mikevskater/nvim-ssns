@@ -7,7 +7,7 @@ local ThemeEditor = {}
 
 local KeymapManager = require('ssns.keymap_manager')
 local ThemeManager = require('ssns.ui.theme_manager')
-local UiFloat = require('ssns.ui.core.float')
+local UiFloat = require('nvim-float.float')
 local Data = require('ssns.ui.panels.theme_editor_data')
 local Render = require('ssns.ui.panels.theme_editor_render')
 local Actions = require('ssns.ui.panels.theme_picker_actions')
@@ -393,14 +393,14 @@ function ThemeEditor.show()
           on_create = function(bufnr, winid)
             -- Create a CursorLine highlight that only sets background (no foreground)
             -- This allows the swatch colors to show through
-            vim.api.nvim_set_hl(0, "SsnsFloatSelectedBgOnly", {
-              bg = vim.api.nvim_get_hl(0, { name = "SsnsFloatSelected" }).bg or "#3a3a3a",
+            vim.api.nvim_set_hl(0, "NvimFloatSelectedBgOnly", {
+              bg = vim.api.nvim_get_hl(0, { name = "NvimFloatSelected" }).bg or "#3a3a3a",
             })
 
             -- Set winhighlight to use the bg-only version for CursorLine
             vim.api.nvim_set_option_value(
               'winhighlight',
-              'Normal:Normal,FloatBorder:SsnsFloatBorder,FloatTitle:SsnsFloatTitle,CursorLine:SsnsFloatSelectedBgOnly',
+              'Normal:Normal,FloatBorder:NvimFloatBorder,FloatTitle:NvimFloatTitle,CursorLine:NvimFloatSelectedBgOnly',
               { win = winid }
             )
 

@@ -5,7 +5,7 @@
 local ViewDebugLog = {}
 
 local BaseViewer = require('ssns.features.base_viewer')
-local UiFloat = require('ssns.ui.core.float')
+local UiFloat = require('nvim-float.float')
 local Debug = require('ssns.debug')
 local FileIO = require('ssns.async.file_io')
 
@@ -249,7 +249,7 @@ function ViewDebugLog.view_log(filter)
           width = 35,
         })
         fcb:line("")
-        fcb:line("  <Enter>=Apply | <Esc>=Cancel", "SsnsUiHint")
+        fcb:line("  <Enter>=Apply | <Esc>=Cancel", "NvimFloatHint")
         filter_win:render()
 
         local function apply_filter()
@@ -477,7 +477,7 @@ function ViewDebugLog._show_cached_log(filter)
           width = 35,
         })
         fcb:line("")
-        fcb:line("  <Enter>=Apply | <Esc>=Cancel", "SsnsUiHint")
+        fcb:line("  <Enter>=Apply | <Esc>=Cancel", "NvimFloatHint")
         filter_win:render()
 
         local function apply_filter()

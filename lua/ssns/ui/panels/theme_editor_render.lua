@@ -2,7 +2,7 @@
 ---Rendering functions for the theme editor
 local M = {}
 
-local ContentBuilder = require('ssns.ui.core.content_builder')
+local ContentBuilder = require('nvim-float.content_builder')
 local Data = require('ssns.ui.panels.theme_editor_data')
 local PreviewSql = require('ssns.ui.panels.theme_preview_sql')
 
@@ -171,7 +171,7 @@ function M.render_colors(state)
       cb:spans({
         { text = prefix, style = "emphasis" },
         { text = padded_name, style = "highlight" },
-        { text = swatch, hl_group = swatch_hl or "SsnsFloatHint" },
+        { text = swatch, hl_group = swatch_hl or "NvimFloatHint" },
         { text = " " },
         { text = display_value, style = "string" },
       })
@@ -179,7 +179,7 @@ function M.render_colors(state)
       cb:spans({
         { text = prefix, style = "muted" },
         { text = padded_name, style = "label" },
-        { text = swatch, hl_group = swatch_hl or "SsnsFloatHint" },
+        { text = swatch, hl_group = swatch_hl or "NvimFloatHint" },
         { text = " " },
         { text = display_value, style = "muted" },
       })

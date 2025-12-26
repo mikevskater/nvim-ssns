@@ -5,7 +5,7 @@
 local ViewTypeCompatibility = {}
 
 local BaseViewer = require('ssns.features.base_viewer')
-local UiFloat = require('ssns.ui.core.float')
+local UiFloat = require('nvim-float.float')
 local TypeCompatibility = require('ssns.completion.type_compatibility')
 
 -- Test type pairs for compatibility
@@ -53,12 +53,12 @@ function ViewTypeCompatibility.view_compatibility()
       if test_win then
         local tcb = test_win:get_content_builder()
         tcb:line("")
-        tcb:line("  Compare two SQL types:", "SsnsUiTitle")
+        tcb:line("  Compare two SQL types:", "NvimFloatTitle")
         tcb:line("")
         tcb:labeled_input("  Type 1: ", "type1", "", 35)
         tcb:labeled_input("  Type 2: ", "type2", "", 35)
         tcb:line("")
-        tcb:line("  <Enter>=Check | Tab=Next | <Esc>=Cancel", "SsnsUiHint")
+        tcb:line("  <Enter>=Check | Tab=Next | <Esc>=Cancel", "NvimFloatHint")
         test_win:render()
 
         local function do_check()

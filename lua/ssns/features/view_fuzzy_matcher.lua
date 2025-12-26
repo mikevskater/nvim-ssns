@@ -5,7 +5,7 @@
 local ViewFuzzyMatcher = {}
 
 local BaseViewer = require('ssns.features.base_viewer')
-local UiFloat = require('ssns.ui.core.float')
+local UiFloat = require('nvim-float.float')
 local FuzzyMatcher = require('ssns.completion.fuzzy_matcher')
 
 -- Test pairs for demonstration
@@ -53,12 +53,12 @@ function ViewFuzzyMatcher.view_matcher()
       if test_win then
         local tcb = test_win:get_content_builder()
         tcb:line("")
-        tcb:line("  Compare two strings:", "SsnsUiTitle")
+        tcb:line("  Compare two strings:", "NvimFloatTitle")
         tcb:line("")
         tcb:labeled_input("  String 1: ", "str1", "", 35)
         tcb:labeled_input("  String 2: ", "str2", "", 35)
         tcb:line("")
-        tcb:line("  <Enter>=Compare | Tab=Next | <Esc>=Cancel", "SsnsUiHint")
+        tcb:line("  <Enter>=Compare | Tab=Next | <Esc>=Cancel", "NvimFloatHint")
         test_win:render()
 
         local function do_compare()

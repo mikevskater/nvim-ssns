@@ -70,8 +70,8 @@ function TreeFeatures.show_dependencies(obj)
     end
   end
 
-  local UiFloat = require('ssns.ui.core.float')
-  local ContentBuilder = require('ssns.ui.core.content_builder')
+  local UiFloat = require('nvim-float.float')
+  local ContentBuilder = require('nvim-float.content_builder')
   local cb = ContentBuilder.new()
 
   -- Show "DEPENDS ON" section
@@ -465,7 +465,7 @@ end
 ---@param UiTree table The main UiTree module
 function TreeFeatures.view_metadata(UiTree)
   local Buffer = require('ssns.ui.core.buffer')
-  local Float = require('ssns.ui.core.float')
+  local Float = require('nvim-float.float')
   local Spinner = require('ssns.async.spinner')
 
   local line_number = Buffer.get_current_line()

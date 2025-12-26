@@ -123,7 +123,7 @@ function UiFloatMultiPanel.create(config)
       cursorline = not panel.readonly,
       wrap = false,
       signcolumn = 'no',
-      winhighlight = 'Normal:Normal,FloatBorder:SsnsFloatBorder,FloatTitle:SsnsFloatTitle,CursorLine:SsnsFloatSelected',
+      winhighlight = 'Normal:Normal,FloatBorder:NvimFloatBorder,FloatTitle:NvimFloatTitle,CursorLine:NvimFloatSelected',
     })
   end
 

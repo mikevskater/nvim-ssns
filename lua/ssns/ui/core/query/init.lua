@@ -215,7 +215,7 @@ end
 
 ---Show controls popup for query buffer
 function UiQuery.show_query_controls()
-  local UiFloat = require('ssns.ui.core.float')
+  local UiFloat = require('nvim-float.float')
   local km = KeymapManager.get_group("query")
 
   local controls = {

@@ -43,7 +43,7 @@ function M.copy_theme(state, multi_panel, on_complete)
     return
   end
 
-  local UiFloat = require('ssns.ui.core.float')
+  local UiFloat = require('nvim-float.float')
 
   local default_name = theme.display_name .. " - COPY"
 
@@ -60,7 +60,7 @@ function M.copy_theme(state, multi_panel, on_complete)
   if copy_win then
     local cb = copy_win:get_content_builder()
     cb:line("")
-    cb:line(string.format("  Copy theme '%s':", theme.display_name), "SsnsUiTitle")
+    cb:line(string.format("  Copy theme '%s':", theme.display_name), "NvimFloatTitle")
     cb:line("")
     cb:labeled_input("name", "  New name", {
       value = default_name,
@@ -68,7 +68,7 @@ function M.copy_theme(state, multi_panel, on_complete)
       width = 35,
     })
     cb:line("")
-    cb:line("  <Enter>=Copy | <Esc>=Cancel", "SsnsUiHint")
+    cb:line("  <Enter>=Copy | <Esc>=Cancel", "NvimFloatHint")
     copy_win:render()
 
     local function do_copy()
@@ -209,7 +209,7 @@ end
 function M.rename_theme(state, multi_panel, on_complete)
   if not state then return end
 
-  local UiFloat = require('ssns.ui.core.float')
+  local UiFloat = require('nvim-float.float')
 
   local theme = state.available_themes[get_selected_idx(state)]
   if not theme or theme.is_default then
@@ -235,7 +235,7 @@ function M.rename_theme(state, multi_panel, on_complete)
   if rename_win then
     local cb = rename_win:get_content_builder()
     cb:line("")
-    cb:line(string.format("  Rename theme '%s':", theme.display_name), "SsnsUiTitle")
+    cb:line(string.format("  Rename theme '%s':", theme.display_name), "NvimFloatTitle")
     cb:line("")
     cb:labeled_input("name", "  New name", {
       value = theme.display_name,
@@ -243,7 +243,7 @@ function M.rename_theme(state, multi_panel, on_complete)
       width = 32,
     })
     cb:line("")
-    cb:line("  <Enter>=Rename | <Esc>=Cancel", "SsnsUiHint")
+    cb:line("  <Enter>=Rename | <Esc>=Cancel", "NvimFloatHint")
     rename_win:render()
 
     local function do_rename()
@@ -321,7 +321,7 @@ end
 function M.save_theme(colors, source_theme, multi_panel, on_complete)
   if not colors then return end
 
-  local UiFloat = require('ssns.ui.core.float')
+  local UiFloat = require('nvim-float.float')
 
   local default_name = source_theme and source_theme.is_user
     and source_theme.display_name
@@ -340,7 +340,7 @@ function M.save_theme(colors, source_theme, multi_panel, on_complete)
   if save_win then
     local cb = save_win:get_content_builder()
     cb:line("")
-    cb:line("  Save current colors as theme:", "SsnsUiTitle")
+    cb:line("  Save current colors as theme:", "NvimFloatTitle")
     cb:line("")
     cb:labeled_input("name", "  Name", {
       value = default_name,
@@ -348,7 +348,7 @@ function M.save_theme(colors, source_theme, multi_panel, on_complete)
       width = 35,
     })
     cb:line("")
-    cb:line("  <Enter>=Save | <Esc>=Cancel", "SsnsUiHint")
+    cb:line("  <Enter>=Save | <Esc>=Cancel", "NvimFloatHint")
     save_win:render()
 
     local function do_save()

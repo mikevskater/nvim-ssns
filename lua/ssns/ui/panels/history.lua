@@ -2,7 +2,7 @@
 ---Query history UI with 3-panel floating window layout using UiFloat
 local UiHistory = {}
 
-local UiFloat = require('ssns.ui.core.float')
+local UiFloat = require('nvim-float.float')
 local QueryHistory = require('ssns.query_history')
 local UiQuery = require('ssns.ui.core.query')
 local Cache = require('ssns.cache')
@@ -136,9 +136,9 @@ local function render_buffers(state)
   -- Header
   table.insert(lines, "")
   table.insert(lines, string.format(" Total: %d buffers | %d entries", stats.total_buffers, stats.total_entries))
-  table.insert(highlights, {1, 0, -1, "SsnsUiHint"})
+  table.insert(highlights, {1, 0, -1, "NvimFloatHint"})
   table.insert(lines, string.format(" Success: %d | Errors: %d", stats.success_count, stats.error_count))
-  table.insert(highlights, {2, 0, -1, "SsnsUiHint"})
+  table.insert(highlights, {2, 0, -1, "NvimFloatHint"})
   table.insert(lines, "")
 
   for i, buffer_history in ipairs(ui_state.buffer_histories) do
@@ -158,16 +158,16 @@ local function render_buffers(state)
 
     local line_idx = #lines - 1
     if i == ui_state.selected_buffer_idx then
-      table.insert(highlights, {line_idx, 0, -1, "SsnsFloatSelected"})
+      table.insert(highlights, {line_idx, 0, -1, "NvimFloatSelected"})
       table.insert(highlights, {line_idx, 1, 4, "SsnsServer"})
     else
-      table.insert(highlights, {line_idx, 3, 3 + #buffer_history.buffer_name, "SsnsUiHint"})
+      table.insert(highlights, {line_idx, 3, 3 + #buffer_history.buffer_name, "NvimFloatHint"})
     end
   end
 
   if #ui_state.buffer_histories == 0 then
     table.insert(lines, "   (No history)")
-    table.insert(highlights, {#lines - 1, 0, -1, "SsnsUiHint"})
+    table.insert(highlights, {#lines - 1, 0, -1, "NvimFloatHint"})
   end
 
   return lines, highlights
@@ -187,7 +187,7 @@ local function render_history(state)
 
     table.insert(lines, "")
     table.insert(lines, string.format(" %s Searching... %d%%", spinner_char, ui_state.search_progress))
-    table.insert(highlights, {1, 0, -1, "SsnsUiHint"})
+    table.insert(highlights, {1, 0, -1, "NvimFloatHint"})
 
     if #ui_state.buffer_histories > 0 then
       table.insert(lines, string.format(" %d matches so far", #ui_state.buffer_histories))
@@ -200,7 +200,7 @@ local function render_history(state)
     if not ui_state.search_in_progress then
       table.insert(lines, "")
       table.insert(lines, " No buffer selected")
-      table.insert(highlights, {1, 0, -1, "SsnsUiHint"})
+      table.insert(highlights, {1, 0, -1, "NvimFloatHint"})
     end
     return lines, highlights
   end
@@ -221,7 +221,7 @@ local function render_history(state)
     table.insert(lines, "")
   end
   table.insert(lines, string.format(" %s", buffer_history.buffer_name))
-  table.insert(highlights, {#lines - 1, 0, -1, "SsnsUiTitle"})
+  table.insert(highlights, {#lines - 1, 0, -1, "NvimFloatTitle"})
   table.insert(lines, "")
 
   for i, entry in ipairs(buffer_history.entries) do
@@ -234,7 +234,7 @@ local function render_history(state)
     local status_icon, icon_hl, icon_len
     if entry.source == "auto_save" then
       status_icon = "[A]"
-      icon_hl = "SsnsUiHint"
+      icon_hl = "NvimFloatHint"
       icon_len = 3
     elseif entry.status == "success" then
       status_icon = "✓"
@@ -269,7 +269,7 @@ local function render_history(state)
 
     local line_idx = #lines - 1
     if i == ui_state.selected_entry_idx then
-      table.insert(highlights, {line_idx, 0, -1, "SsnsFloatSelected"})
+      table.insert(highlights, {line_idx, 0, -1, "NvimFloatSelected"})
     end
 
     -- Highlight status icon
@@ -296,7 +296,7 @@ local function render_history(state)
 
   if #buffer_history.entries == 0 then
     table.insert(lines, "   (No entries)")
-    table.insert(highlights, {#lines - 1, 0, -1, "SsnsUiHint"})
+    table.insert(highlights, {#lines - 1, 0, -1, "NvimFloatHint"})
   end
 
   return lines, highlights
@@ -440,7 +440,7 @@ local function render_search(state)
     table.insert(highlights, {0, 0, -1, "Comment"})
   else
     table.insert(lines, " " .. ui_state.search_term)
-    table.insert(highlights, {0, 0, -1, "SsnsUiHint"})
+    table.insert(highlights, {0, 0, -1, "NvimFloatHint"})
   end
 
   -- Line 2: Settings hints
@@ -1064,7 +1064,7 @@ local function delete_entry()
       local cb = confirm_win:get_content_builder()
       cb:line("")
       cb:line(string.format("  Delete buffer '%s'?", buffer_history.buffer_name), "WarningMsg")
-      cb:line(string.format("  Contains %d history entries.", count), "SsnsUiHint")
+      cb:line(string.format("  Contains %d history entries.", count), "NvimFloatHint")
       cb:line("")
       cb:line("  Press <Enter> to confirm, <Esc> to cancel", "Comment")
       confirm_win:render()
@@ -1116,7 +1116,7 @@ local function clear_all()
     local cb = confirm_win:get_content_builder()
     cb:line("")
     cb:line("  ⚠ Clear ALL query history?", "WarningMsg")
-    cb:line(string.format("  %d buffers, %d entries will be deleted.", stats.total_buffers, stats.total_entries), "SsnsUiHint")
+    cb:line(string.format("  %d buffers, %d entries will be deleted.", stats.total_buffers, stats.total_entries), "NvimFloatHint")
     cb:line("")
     cb:line("  Press <Enter> to confirm, <Esc> to cancel", "Comment")
     confirm_win:render()
@@ -1155,7 +1155,7 @@ local function export_history()
   if export_win then
     local cb = export_win:get_content_builder()
     cb:line("")
-    cb:line("  Export query history to file:", "SsnsUiTitle")
+    cb:line("  Export query history to file:", "NvimFloatTitle")
     cb:line("")
     cb:labeled_input("filepath", "  File", {
       value = default_path,
@@ -1165,7 +1165,7 @@ local function export_history()
     cb:line("")
     cb:line("  Use .json extension for JSON format, otherwise plain text.", "Comment")
     cb:line("")
-    cb:line("  <Enter>=Export | <Esc>=Cancel", "SsnsUiHint")
+    cb:line("  <Enter>=Export | <Esc>=Cancel", "NvimFloatHint")
     export_win:render()
 
     local function do_export()
