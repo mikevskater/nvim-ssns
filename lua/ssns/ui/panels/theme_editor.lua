@@ -436,6 +436,7 @@ function ThemeEditor.show()
           name = "themes",
           title = "Themes",
           ratio = 0.18,
+          filetype = "nvim-float",
           on_render = function() return Render.render_themes(state) end,
           on_focus = function()
             if multi_panel and state then
@@ -450,6 +451,7 @@ function ThemeEditor.show()
           name = "colors",
           title = string.format("Colors [%s]", theme_name),
           ratio = 0.40,
+          filetype = "nvim-float",
           on_render = function() return Render.render_colors(state) end,
           on_create = function(bufnr, winid)
             -- Create a CursorLine highlight that only sets background (no foreground)
@@ -483,6 +485,7 @@ function ThemeEditor.show()
           name = "preview",
           title = "Preview",
           ratio = 0.42,
+          filetype = "nvim-float",
           cursorline = false,
           on_render = function() return Render.render_preview(state) end,
           on_create = function(bufnr)
