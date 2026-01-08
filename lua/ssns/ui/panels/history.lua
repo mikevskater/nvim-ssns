@@ -3,6 +3,7 @@
 local UiHistory = {}
 
 local UiFloat = require('nvim-float.float')
+local ContentBuilder = require('nvim-float.content')
 local QueryHistory = require('ssns.query_history')
 local UiQuery = require('ssns.ui.core.query')
 local Cache = require('ssns.cache')
@@ -127,82 +128,85 @@ end
 
 ---Render the buffer list panel
 ---@param state MultiPanelState
----@return string[] lines, table[] highlights
+---@return string[] lines, table[] highlights, ContentBuilder cb
 local function render_buffers(state)
-  local lines = {}
-  local highlights = {}
+  local cb = ContentBuilder.new()
   local stats = QueryHistory.get_stats()
 
   -- Header
-  table.insert(lines, "")
-  table.insert(lines, string.format(" Total: %d buffers | %d entries", stats.total_buffers, stats.total_entries))
-  table.insert(highlights, {1, 0, -1, "NvimFloatHint"})
-  table.insert(lines, string.format(" Success: %d | Errors: %d", stats.success_count, stats.error_count))
-  table.insert(highlights, {2, 0, -1, "NvimFloatHint"})
-  table.insert(lines, "")
+  cb:line("")
+  cb:line(string.format(" Total: %d buffers | %d entries", stats.total_buffers, stats.total_entries), "NvimFloatHint")
+  cb:line(string.format(" Success: %d | Errors: %d", stats.success_count, stats.error_count), "NvimFloatHint")
+  cb:line("")
 
   for i, buffer_history in ipairs(ui_state.buffer_histories) do
-    local prefix = i == ui_state.selected_buffer_idx and " ▶ " or "   "
     local entry_count = #buffer_history.entries
+    local db_suffix = buffer_history.database and ("/" .. buffer_history.database) or ""
 
-    local line = string.format(
-      "%s%s (%s%s) - %d %s",
-      prefix,
-      buffer_history.buffer_name,
-      buffer_history.server_name,
-      buffer_history.database and ("/" .. buffer_history.database) or "",
-      entry_count,
-      entry_count == 1 and "entry" or "entries"
-    )
-    table.insert(lines, line)
-
-    local line_idx = #lines - 1
-    if i == ui_state.selected_buffer_idx then
-      table.insert(highlights, {line_idx, 0, -1, "NvimFloatSelected"})
-      table.insert(highlights, {line_idx, 1, 4, "SsnsServer"})
-    else
-      table.insert(highlights, {line_idx, 3, 3 + #buffer_history.buffer_name, "NvimFloatHint"})
-    end
+    cb:spans({
+      { text = " " },
+      { text = buffer_history.buffer_name, style = "NvimFloatHint",
+        track = {
+          name = "buffer_" .. i,
+          type = "buffer",
+          data = { buffer_history = buffer_history, index = i },
+          row_based = true,
+        },
+      },
+      { text = string.format(" (%s%s) - %d %s",
+          buffer_history.server_name,
+          db_suffix,
+          entry_count,
+          entry_count == 1 and "entry" or "entries"
+        ), style = "Comment" },
+    })
+    cb:nl()
   end
 
   if #ui_state.buffer_histories == 0 then
-    table.insert(lines, "   (No history)")
-    table.insert(highlights, {#lines - 1, 0, -1, "NvimFloatHint"})
+    cb:line("   (No history)", "NvimFloatHint")
   end
 
-  return lines, highlights
+  local lines, highlights = cb:build()
+
+  -- Associate ContentBuilder with panel for element tracking
+  if multi_panel then
+    multi_panel:set_panel_content_builder("buffers", cb)
+  end
+
+  return lines, highlights, cb
 end
 
 ---Render the history list panel
 ---@param state MultiPanelState
----@return string[] lines, table[] highlights
+---@return string[] lines, table[] highlights, ContentBuilder cb
 local function render_history(state)
-  local lines = {}
-  local highlights = {}
+  local cb = ContentBuilder.new()
 
   -- Show search progress if searching
   if ui_state.search_in_progress then
     local spinner_char = get_search_spinner_frame()
     if spinner_char == "" then spinner_char = "⠋" end
 
-    table.insert(lines, "")
-    table.insert(lines, string.format(" %s Searching... %d%%", spinner_char, ui_state.search_progress))
-    table.insert(highlights, {1, 0, -1, "NvimFloatHint"})
+    cb:line("")
+    cb:line(string.format(" %s Searching... %d%%", spinner_char, ui_state.search_progress), "NvimFloatHint")
 
     if #ui_state.buffer_histories > 0 then
-      table.insert(lines, string.format(" %d matches so far", #ui_state.buffer_histories))
-      table.insert(highlights, {2, 0, -1, "SsnsStatusConnected"})
+      cb:line(string.format(" %d matches so far", #ui_state.buffer_histories), "SsnsStatusConnected")
     end
-    table.insert(lines, "")
+    cb:line("")
   end
 
   if ui_state.selected_buffer_idx < 1 or ui_state.selected_buffer_idx > #ui_state.buffer_histories then
     if not ui_state.search_in_progress then
-      table.insert(lines, "")
-      table.insert(lines, " No buffer selected")
-      table.insert(highlights, {1, 0, -1, "NvimFloatHint"})
+      cb:line("")
+      cb:line(" No buffer selected", "NvimFloatHint")
     end
-    return lines, highlights
+    local lines, highlights = cb:build()
+    if multi_panel then
+      multi_panel:set_panel_content_builder("history", cb)
+    end
+    return lines, highlights, cb
   end
 
   local buffer_history = ui_state.buffer_histories[ui_state.selected_buffer_idx]
@@ -218,32 +222,23 @@ local function render_history(state)
 
   -- Header
   if not ui_state.search_in_progress then
-    table.insert(lines, "")
+    cb:line("")
   end
-  table.insert(lines, string.format(" %s", buffer_history.buffer_name))
-  table.insert(highlights, {#lines - 1, 0, -1, "NvimFloatTitle"})
-  table.insert(lines, "")
+  cb:line(string.format(" %s", buffer_history.buffer_name), "NvimFloatTitle")
+  cb:line("")
 
   for i, entry in ipairs(buffer_history.entries) do
-    local prefix = i == ui_state.selected_entry_idx and " ▶ " or "   "
-
-    -- Determine icon based on source and status:
-    -- - Auto-save entries: [A]
-    -- - Executed success: ✓
-    -- - Executed error: ✗
-    local status_icon, icon_hl, icon_len
+    -- Determine icon based on source and status
+    local status_icon, icon_hl
     if entry.source == "auto_save" then
       status_icon = "[A]"
       icon_hl = "NvimFloatHint"
-      icon_len = 3
     elseif entry.status == "success" then
       status_icon = "✓"
       icon_hl = "SsnsStatusConnected"
-      icon_len = 3  -- UTF-8 checkmark is 3 bytes
     else
       status_icon = "✗"
       icon_hl = "SsnsStatusError"
-      icon_len = 3  -- UTF-8 cross is 3 bytes
     end
 
     -- Get first line of query (no normalization - display exactly as saved)
@@ -255,112 +250,124 @@ local function render_history(state)
       was_truncated = true
     end
 
-    -- Build the metadata prefix
-    local meta_prefix = string.format(
-      "%s%s %s | %dms | ",
-      prefix,
-      status_icon,
-      entry.timestamp:sub(12, 19),  -- HH:MM:SS
-      entry.execution_time_ms or 0
-    )
-
-    local line = meta_prefix .. query_preview .. (was_truncated and "..." or "")
-    table.insert(lines, line)
-
-    local line_idx = #lines - 1
-    if i == ui_state.selected_entry_idx then
-      table.insert(highlights, {line_idx, 0, -1, "NvimFloatSelected"})
+    -- Check for search matches
+    local match_positions = nil
+    if orig_buf_idx then
+      local match_key = string.format("%d:%d", orig_buf_idx, i)
+      match_positions = ui_state.entry_matches[match_key]
     end
 
-    -- Highlight status icon
-    local icon_col = i == ui_state.selected_entry_idx and 4 or 3
-    table.insert(highlights, {line_idx, icon_col, icon_col + icon_len, icon_hl})
+    -- Build spans for this entry
+    local spans = {
+      { text = " " },
+      { text = status_icon, style = icon_hl },
+      { text = string.format(" %s | %dms | ",
+          entry.timestamp:sub(12, 19),  -- HH:MM:SS
+          entry.execution_time_ms or 0
+        ), style = "Comment" },
+    }
 
-    -- Highlight search matches in query_preview (skip if selected row)
-    if orig_buf_idx and i ~= ui_state.selected_entry_idx then
-      local match_key = string.format("%d:%d", orig_buf_idx, i)
-      local positions = ui_state.entry_matches[match_key]
-      if positions and #positions > 0 then
-        local query_start_col = #meta_prefix
-        for _, pos in ipairs(positions) do
-          -- Only highlight if position is within the visible preview
-          if pos.start <= #query_preview then
-            local col_start = query_start_col + pos.start - 1
-            local col_end = query_start_col + math.min(pos.end_, #query_preview)
-            table.insert(highlights, {line_idx, col_start, col_end, "SsnsSearchMatch"})
+    -- Add query preview with match highlighting
+    if match_positions and #match_positions > 0 then
+      -- Build query text with highlighted matches
+      local last_end = 1
+      for _, pos in ipairs(match_positions) do
+        if pos.start <= #query_preview then
+          -- Text before match
+          if pos.start > last_end then
+            table.insert(spans, { text = query_preview:sub(last_end, pos.start - 1) })
           end
+          -- Matched text
+          local match_end = math.min(pos.end_, #query_preview)
+          table.insert(spans, { text = query_preview:sub(pos.start, match_end), style = "SsnsSearchMatch" })
+          last_end = match_end + 1
         end
       end
+      -- Remaining text after last match
+      if last_end <= #query_preview then
+        table.insert(spans, { text = query_preview:sub(last_end) })
+      end
+    else
+      table.insert(spans, { text = query_preview })
     end
+
+    if was_truncated then
+      table.insert(spans, { text = "...", style = "Comment" })
+    end
+
+    -- Add element tracking to the first significant span
+    spans[2].track = {
+      name = "entry_" .. i,
+      type = "entry",
+      data = { entry = entry, index = i, buffer_history = buffer_history },
+      row_based = true,
+    }
+
+    cb:spans(spans)
+    cb:nl()
   end
 
   if #buffer_history.entries == 0 then
-    table.insert(lines, "   (No entries)")
-    table.insert(highlights, {#lines - 1, 0, -1, "NvimFloatHint"})
+    cb:line("   (No entries)", "NvimFloatHint")
   end
 
-  return lines, highlights
+  local lines, highlights = cb:build()
+
+  -- Associate ContentBuilder with panel for element tracking
+  if multi_panel then
+    multi_panel:set_panel_content_builder("history", cb)
+  end
+
+  return lines, highlights, cb
 end
 
 ---Render the code preview panel
 ---@param state MultiPanelState
----@return string[] lines, table[] highlights
+---@return string[] lines, table[] highlights, ContentBuilder cb
 local function render_preview(state)
-  local lines = {}
-  local highlights = {}
+  local cb = ContentBuilder.new()
 
   if ui_state.selected_buffer_idx < 1 or ui_state.selected_buffer_idx > #ui_state.buffer_histories then
-    table.insert(lines, "-- No buffer selected")
-    return lines, highlights
+    cb:line("-- No buffer selected", "Comment")
+    local lines, highlights = cb:build()
+    return lines, highlights, cb
   end
 
   local buffer_history = ui_state.buffer_histories[ui_state.selected_buffer_idx]
 
   if ui_state.selected_entry_idx < 1 or ui_state.selected_entry_idx > #buffer_history.entries then
-    table.insert(lines, "-- No entry selected")
-    return lines, highlights
+    cb:line("-- No entry selected", "Comment")
+    local lines, highlights = cb:build()
+    return lines, highlights, cb
   end
 
   local entry = buffer_history.entries[ui_state.selected_entry_idx]
 
   -- Add metadata header as SQL comments
-  table.insert(lines, string.format("-- Buffer: %s", buffer_history.buffer_name))
-  table.insert(lines, string.format("-- Server: %s | Database: %s",
-    buffer_history.server_name, buffer_history.database or "N/A"))
+  cb:line(string.format("-- Buffer: %s", buffer_history.buffer_name), "Comment")
+  cb:line(string.format("-- Server: %s | Database: %s",
+    buffer_history.server_name, buffer_history.database or "N/A"), "Comment")
 
   -- Show different info based on source type
   if entry.source == "auto_save" then
-    table.insert(lines, string.format("-- Time: %s | Type: Auto-Save", entry.timestamp))
+    cb:line(string.format("-- Time: %s | Type: Auto-Save", entry.timestamp), "Comment")
   else
-    table.insert(lines, string.format("-- Time: %s | Duration: %dms | Status: %s",
-      entry.timestamp, entry.execution_time_ms or 0, entry.status))
+    cb:line(string.format("-- Time: %s | Duration: %dms | Status: %s",
+      entry.timestamp, entry.execution_time_ms or 0, entry.status), "Comment")
 
     if entry.status == "error" then
-      table.insert(lines, string.format("-- Error: %s", entry.error_message or "Unknown"))
+      cb:line(string.format("-- Error: %s", entry.error_message or "Unknown"), "Comment")
     elseif entry.row_count then
-      table.insert(lines, string.format("-- Rows: %d", entry.row_count))
+      cb:line(string.format("-- Rows: %d", entry.row_count), "Comment")
     end
   end
 
-  table.insert(lines, "")
-  table.insert(lines, "-- " .. string.rep("─", 40))
-  table.insert(lines, "")
+  cb:line("", "Comment")
+  cb:line("-- " .. string.rep("─", 40), "Comment")
+  cb:line("")
 
   -- Track where query content starts (for match position offsets)
-  local query_start_line = #lines
-
-  -- Add query lines
-  local query_lines = vim.split(entry.query, "\n")
-  for _, query_line in ipairs(query_lines) do
-    table.insert(lines, query_line)
-  end
-
-  -- Highlights for comment lines (first 5-7 lines)
-  for i = 0, 6 do
-    if lines[i + 1] and lines[i + 1]:match("^%-%-") then
-      table.insert(highlights, {i, 0, -1, "Comment"})
-    end
-  end
+  local query_start_line = cb:get_line_count()
 
   -- Get match positions for overlay highlighting
   local orig_buf_idx = nil
@@ -371,36 +378,66 @@ local function render_preview(state)
     end
   end
 
+  local match_positions = nil
   if orig_buf_idx then
     local match_key = string.format("%d:%d", orig_buf_idx, ui_state.selected_entry_idx)
-    local positions = ui_state.entry_matches[match_key]
+    match_positions = ui_state.entry_matches[match_key]
+  end
 
-    if positions and #positions > 0 then
-      -- Track character position in the full query text
-      local current_pos = 1
+  -- Add query lines with search match highlighting
+  local query_lines = vim.split(entry.query, "\n")
 
-      for line_idx, query_line in ipairs(query_lines) do
-        local line_start = current_pos
-        local line_end = current_pos + #query_line - 1
-        local display_line_idx = query_start_line + line_idx - 1  -- 0-indexed
+  if match_positions and #match_positions > 0 then
+    -- Track character position in the full query text
+    local current_pos = 1
 
-        -- Find positions overlapping this line
-        for _, pos in ipairs(positions) do
-          if pos.end_ >= line_start and pos.start <= line_end then
-            -- Calculate column positions (0-indexed for nvim API)
-            local col_start = math.max(0, pos.start - line_start)
-            local col_end = math.min(#query_line, pos.end_ - line_start + 1)
-            table.insert(highlights, {display_line_idx, col_start, col_end, "SsnsSearchMatch"})
-          end
+    for _, query_line in ipairs(query_lines) do
+      local line_start = current_pos
+      local line_end = current_pos + #query_line - 1
+
+      -- Find positions overlapping this line
+      local line_matches = {}
+      for _, pos in ipairs(match_positions) do
+        if pos.end_ >= line_start and pos.start <= line_end then
+          table.insert(line_matches, {
+            col_start = math.max(1, pos.start - line_start + 1),
+            col_end = math.min(#query_line, pos.end_ - line_start + 1),
+          })
         end
-
-        -- Move position past this line plus newline character
-        current_pos = line_end + 2
       end
+
+      if #line_matches > 0 then
+        -- Build line with highlighted matches
+        local spans = {}
+        local last_end = 1
+        for _, m in ipairs(line_matches) do
+          if m.col_start > last_end then
+            table.insert(spans, { text = query_line:sub(last_end, m.col_start - 1) })
+          end
+          table.insert(spans, { text = query_line:sub(m.col_start, m.col_end), style = "SsnsSearchMatch" })
+          last_end = m.col_end + 1
+        end
+        if last_end <= #query_line then
+          table.insert(spans, { text = query_line:sub(last_end) })
+        end
+        cb:spans(spans)
+        cb:nl()
+      else
+        cb:line(query_line)
+      end
+
+      -- Move position past this line plus newline character
+      current_pos = line_end + 2
+    end
+  else
+    -- No matches, just add lines directly
+    for _, query_line in ipairs(query_lines) do
+      cb:line(query_line)
     end
   end
 
-  return lines, highlights
+  local lines, highlights = cb:build()
+  return lines, highlights, cb
 end
 
 ---Build the search settings hint line
@@ -423,36 +460,29 @@ end
 
 ---Render the search panel
 ---@param state MultiPanelState
----@return string[] lines, table[] highlights
+---@return string[] lines, table[] highlights, ContentBuilder cb
 local function render_search(state)
-  local lines = {}
-  local highlights = {}
+  local cb = ContentBuilder.new()
 
   if ui_state.search_editing then
     -- Don't render while editing - buffer content is live
     -- Settings line will be shown via virtual text in activate_search
-    return {""}, {}
+    return {""}, {}, cb
   end
 
   -- Line 1: Search term or placeholder
   if ui_state.search_term == "" then
-    table.insert(lines, " Press / to search")
-    table.insert(highlights, {0, 0, -1, "Comment"})
+    cb:line(" Press / to search", "Comment")
   else
-    table.insert(lines, " " .. ui_state.search_term)
-    table.insert(highlights, {0, 0, -1, "NvimFloatHint"})
+    cb:line(" " .. ui_state.search_term, "NvimFloatHint")
   end
 
   -- Line 2: Settings hints
-  local settings_line, settings_hl = build_search_settings_line()
-  table.insert(lines, settings_line)
-  -- Adjust highlight line numbers for line 2
-  for _, hl in ipairs(settings_hl) do
-    hl[1] = 1  -- Line index 1 (second line)
-    table.insert(highlights, hl)
-  end
+  local settings_line, _ = build_search_settings_line()
+  cb:line(settings_line, "Comment")
 
-  return lines, highlights
+  local lines, highlights = cb:build()
+  return lines, highlights, cb
 end
 
 ---@type string? Current search thread task ID
@@ -836,62 +866,62 @@ local function activate_search()
   update_search_settings_virt_text()
 end
 
----Navigate in buffers panel
----@param direction number 1 for down, -1 for up
-local function navigate_buffers(direction)
-  if #ui_state.buffer_histories == 0 then return end
-
-  ui_state.selected_buffer_idx = ui_state.selected_buffer_idx + direction
-
-  -- Wrap around
-  if ui_state.selected_buffer_idx < 1 then
-    ui_state.selected_buffer_idx = #ui_state.buffer_histories
-  elseif ui_state.selected_buffer_idx > #ui_state.buffer_histories then
-    ui_state.selected_buffer_idx = 1
+---Get buffer element at cursor
+---@return table|nil element The element data or nil
+local function get_buffer_at_cursor()
+  if not multi_panel then return nil end
+  local element = multi_panel:get_element_at_cursor()
+  if element and element.type == "buffer" then
+    return element.data
   end
-
-  -- Reset entry selection
-  ui_state.selected_entry_idx = 1
-
-  -- Re-render all panels
-  if multi_panel then
-    multi_panel:render_all()
-    multi_panel:set_cursor("buffers", ui_state.selected_buffer_idx + 4, 0)
-  end
+  return nil
 end
 
----Navigate in history panel
----@param direction number 1 for down, -1 for up
-local function navigate_history(direction)
-  local buffer_history = ui_state.buffer_histories[ui_state.selected_buffer_idx]
-  if not buffer_history or #buffer_history.entries == 0 then return end
-
-  ui_state.selected_entry_idx = ui_state.selected_entry_idx + direction
-
-  -- Wrap around
-  if ui_state.selected_entry_idx < 1 then
-    ui_state.selected_entry_idx = #buffer_history.entries
-  elseif ui_state.selected_entry_idx > #buffer_history.entries then
-    ui_state.selected_entry_idx = 1
+---Get entry element at cursor
+---@return table|nil element The element data or nil
+local function get_entry_at_cursor()
+  if not multi_panel then return nil end
+  local element = multi_panel:get_element_at_cursor()
+  if element and element.type == "entry" then
+    return element.data
   end
+  return nil
+end
 
-  -- DON'T re-render history panel on navigation - just move cursor
-  -- This avoids expensive re-renders on every j/k press
+---Select buffer at cursor and update history panel
+local function select_buffer_at_cursor()
+  local buffer_data = get_buffer_at_cursor()
+  if not buffer_data then return end
+
+  ui_state.selected_buffer_idx = buffer_data.index
+  ui_state.selected_entry_idx = 1
+
+  -- Re-render history and preview panels
   if multi_panel then
-    multi_panel:set_cursor("history", ui_state.selected_entry_idx + 3, 0)
-    -- Only re-render preview panel (shows selected entry content)
+    multi_panel:render_panel("history")
     multi_panel:render_panel("preview")
   end
 end
 
 ---Load selected query into new buffer
 local function load_query()
-  if ui_state.selected_buffer_idx < 1 or ui_state.selected_buffer_idx > #ui_state.buffer_histories then
+  local buffer_history, entry
+
+  -- Check which panel we're in
+  if multi_panel and multi_panel.focused_panel == "buffers" then
+    local buffer_data = get_buffer_at_cursor()
+    if not buffer_data then return end
+    buffer_history = buffer_data.buffer_history
+    -- Load first entry when selecting from buffers panel
+    entry = buffer_history.entries[1]
+  elseif multi_panel and multi_panel.focused_panel == "history" then
+    local entry_data = get_entry_at_cursor()
+    if not entry_data then return end
+    buffer_history = entry_data.buffer_history
+    entry = entry_data.entry
+  else
     return
   end
-
-  local buffer_history = ui_state.buffer_histories[ui_state.selected_buffer_idx]
-  local entry = buffer_history.entries[ui_state.selected_entry_idx]
 
   if not entry then return end
 
@@ -1029,28 +1059,33 @@ end
 
 ---Delete current entry or buffer
 local function delete_entry()
-  if ui_state.selected_buffer_idx < 1 then return end
+  if not multi_panel then return end
 
-  local buffer_history = ui_state.buffer_histories[ui_state.selected_buffer_idx]
+  if multi_panel.focused_panel == "history" then
+    -- Delete single entry - use element tracking
+    local entry_data = get_entry_at_cursor()
+    if not entry_data then return end
 
-  if multi_panel and multi_panel.focused_panel == "history" and ui_state.selected_entry_idx > 0 then
-    -- Delete single entry
-    table.remove(buffer_history.entries, ui_state.selected_entry_idx)
+    local buffer_history = entry_data.buffer_history
+    local entry_idx = entry_data.index
+
+    table.remove(buffer_history.entries, entry_idx)
 
     if QueryHistory.auto_persist then
       QueryHistory.save_to_file()
     end
 
-    -- Adjust selection
-    if ui_state.selected_entry_idx > #buffer_history.entries then
-      ui_state.selected_entry_idx = math.max(1, #buffer_history.entries)
-    end
-
     vim.notify("History entry deleted", vim.log.levels.INFO)
-    if multi_panel then multi_panel:render_all() end
-  elseif multi_panel and multi_panel.focused_panel == "buffers" then
-    -- Delete entire buffer history - show confirmation dialog
+    multi_panel:render_all()
+
+  elseif multi_panel.focused_panel == "buffers" then
+    -- Delete entire buffer history - use element tracking
+    local buffer_data = get_buffer_at_cursor()
+    if not buffer_data then return end
+
+    local buffer_history = buffer_data.buffer_history
     local count = #buffer_history.entries
+
     local confirm_win = UiFloat.create({
       title = "Delete Buffer History",
       width = 50,
@@ -1075,15 +1110,14 @@ local function delete_entry()
           QueryHistory.clear_buffer_history(buffer_history.buffer_id)
 
           -- Refresh
-          ui_state.buffer_histories = QueryHistory.get_all_buffer_histories()
+          ui_state.all_buffer_histories = QueryHistory.get_all_buffer_histories()
+          ui_state.buffer_histories = ui_state.all_buffer_histories
 
           if #ui_state.buffer_histories == 0 then
             UiHistory.close()
             vim.notify("All history cleared", vim.log.levels.INFO)
           else
-            if ui_state.selected_buffer_idx > #ui_state.buffer_histories then
-              ui_state.selected_buffer_idx = #ui_state.buffer_histories
-            end
+            ui_state.selected_buffer_idx = 1
             ui_state.selected_entry_idx = 1
             if multi_panel then multi_panel:render_all() end
             vim.notify("Buffer history deleted", vim.log.levels.INFO)
@@ -1284,13 +1318,14 @@ function UiHistory.show_history(options)
               name = "buffers",
               title = "Buffers",
               ratio = 0.55,  -- Taller buffers list
+              cursorline = true,  -- Visual selection via cursorline
               on_render = render_buffers,
               on_focus = function()
                 if multi_panel then
                   multi_panel:update_panel_title("buffers", "Buffers ●")
                   multi_panel:update_panel_title("history", "History")
-                  -- Position cursor on selected buffer
-                  multi_panel:set_cursor("buffers", ui_state.selected_buffer_idx + 4, 0)
+                  -- Update selected buffer based on cursor when focusing
+                  select_buffer_at_cursor()
                 end
               end,
             },
@@ -1298,13 +1333,12 @@ function UiHistory.show_history(options)
               name = "history",
               title = "History",
               ratio = 0.44,  -- Shorter history list
+              cursorline = true,  -- Visual selection via cursorline
               on_render = render_history,
               on_focus = function()
                 if multi_panel then
                   multi_panel:update_panel_title("buffers", "Buffers")
                   multi_panel:update_panel_title("history", "History ●")
-                  -- Position cursor on selected entry
-                  multi_panel:set_cursor("history", ui_state.selected_entry_idx + 3, 0)
                 end
               end,
             },
@@ -1337,7 +1371,7 @@ function UiHistory.show_history(options)
       {
         header = "Navigation",
         keys = {
-          { key = "j/k", desc = "Navigate up/down" },
+          { key = "j/k/arrows", desc = "Navigate (vim motions)" },
           { key = "Tab", desc = "Switch panels" },
           { key = "S-Tab", desc = "Previous panel" },
         },
@@ -1396,16 +1430,24 @@ function UiHistory.show_history(options)
   multi_panel:render_all()
 
   -- Setup keymaps for buffers panel
+  -- Uses standard vim navigation (j/k), only Enter for interaction
   multi_panel:set_panel_keymaps("buffers", {
     [common.close or "q"] = function() UiHistory.close() end,
     [common.cancel or "<Esc>"] = function() UiHistory.close() end,
-    [common.nav_down or "j"] = function() navigate_buffers(1) end,
-    [common.nav_up or "k"] = function() navigate_buffers(-1) end,
-    [common.nav_down_alt or "<Down>"] = function() navigate_buffers(1) end,
-    [common.nav_up_alt or "<Up>"] = function() navigate_buffers(-1) end,
-    [common.confirm or "<CR>"] = load_query,
-    [common.next_field or "<Tab>"] = function() multi_panel:focus_next_panel() end,
-    [common.prev_field or "<S-Tab>"] = function() multi_panel:focus_prev_panel() end,
+    [common.confirm or "<CR>"] = function()
+      -- Select buffer and update history panel, then load query
+      select_buffer_at_cursor()
+      load_query()
+    end,
+    [common.next_field or "<Tab>"] = function()
+      -- Update selected buffer before switching panels
+      select_buffer_at_cursor()
+      multi_panel:focus_next_panel()
+    end,
+    [common.prev_field or "<S-Tab>"] = function()
+      select_buffer_at_cursor()
+      multi_panel:focus_prev_panel()
+    end,
     [km.delete or "d"] = delete_entry,
     [km.clear_all or "c"] = clear_all,
     [km.export or "x"] = export_history,
@@ -1413,13 +1455,10 @@ function UiHistory.show_history(options)
   })
 
   -- Setup keymaps for history panel
+  -- Uses standard vim navigation (j/k), only Enter for interaction
   multi_panel:set_panel_keymaps("history", {
     [common.close or "q"] = function() UiHistory.close() end,
     [common.cancel or "<Esc>"] = function() UiHistory.close() end,
-    [common.nav_down or "j"] = function() navigate_history(1) end,
-    [common.nav_up or "k"] = function() navigate_history(-1) end,
-    [common.nav_down_alt or "<Down>"] = function() navigate_history(1) end,
-    [common.nav_up_alt or "<Up>"] = function() navigate_history(-1) end,
     [common.confirm or "<CR>"] = load_query,
     [common.next_field or "<Tab>"] = function() multi_panel:focus_next_panel() end,
     [common.prev_field or "<S-Tab>"] = function() multi_panel:focus_prev_panel() end,
@@ -1429,7 +1468,7 @@ function UiHistory.show_history(options)
     [km.search or "/"] = activate_search,
   })
 
-  -- Setup keymaps for preview panel (limited - just close, navigate, and search)
+  -- Setup keymaps for preview panel (limited - just close and search)
   multi_panel:set_panel_keymaps("preview", {
     [common.close or "q"] = function() UiHistory.close() end,
     [common.cancel or "<Esc>"] = function() UiHistory.close() end,
@@ -1438,10 +1477,52 @@ function UiHistory.show_history(options)
     [km.search or "/"] = activate_search,
   })
 
-  -- Position cursor on first buffer (after render is complete)
+  -- Setup CursorMoved autocmds for master-detail updates
+  local history_augroup = vim.api.nvim_create_augroup("SSNSHistoryCursor", { clear = true })
+
+  -- When cursor moves in buffers panel, update history + preview
+  local buffers_buf = multi_panel:get_panel_buffer("buffers")
+  if buffers_buf then
+    vim.api.nvim_create_autocmd("CursorMoved", {
+      group = history_augroup,
+      buffer = buffers_buf,
+      callback = function()
+        local buffer_data = get_buffer_at_cursor()
+        if buffer_data and buffer_data.index ~= ui_state.selected_buffer_idx then
+          ui_state.selected_buffer_idx = buffer_data.index
+          ui_state.selected_entry_idx = 1
+          if multi_panel then
+            multi_panel:render_panel("history")
+            multi_panel:render_panel("preview")
+          end
+        end
+      end,
+    })
+  end
+
+  -- When cursor moves in history panel, update preview
+  local history_buf = multi_panel:get_panel_buffer("history")
+  if history_buf then
+    vim.api.nvim_create_autocmd("CursorMoved", {
+      group = history_augroup,
+      buffer = history_buf,
+      callback = function()
+        local entry_data = get_entry_at_cursor()
+        if entry_data and entry_data.index ~= ui_state.selected_entry_idx then
+          ui_state.selected_entry_idx = entry_data.index
+          if multi_panel then
+            multi_panel:render_panel("preview")
+          end
+        end
+      end,
+    })
+  end
+
+  -- Position cursor on first element (after render is complete)
   vim.schedule(function()
     if multi_panel and multi_panel:is_valid() then
-      multi_panel:set_cursor("buffers", ui_state.selected_buffer_idx + 4, 0)
+      -- Set cursor to first buffer element (line 5: header lines + first buffer)
+      multi_panel:set_cursor("buffers", 5, 0)
     end
   end)
 
