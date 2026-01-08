@@ -200,7 +200,7 @@ local function render_history(state)
   if ui_state.selected_buffer_idx < 1 or ui_state.selected_buffer_idx > #ui_state.buffer_histories then
     if not ui_state.search_in_progress then
       cb:line("")
-      cb:line(" No buffer selected", "NvimFloatHint")
+      cb:styled(" No buffer selected", "NvimFloatHint")
     end
     local lines = cb:build_lines()
   local highlights = cb:build_highlights()
@@ -329,7 +329,7 @@ local function render_preview(state)
   local cb = ContentBuilder.new()
 
   if ui_state.selected_buffer_idx < 1 or ui_state.selected_buffer_idx > #ui_state.buffer_histories then
-    cb:line("-- No buffer selected", "Comment")
+    cb:styled("-- No buffer selected", "Comment")
     local lines = cb:build_lines()
   local highlights = cb:build_highlights()
     return lines, highlights, cb
@@ -338,7 +338,7 @@ local function render_preview(state)
   local buffer_history = ui_state.buffer_histories[ui_state.selected_buffer_idx]
 
   if ui_state.selected_entry_idx < 1 or ui_state.selected_entry_idx > #buffer_history.entries then
-    cb:line("-- No entry selected", "Comment")
+    cb:styled("-- No entry selected", "Comment")
     local lines = cb:build_lines()
   local highlights = cb:build_highlights()
     return lines, highlights, cb
@@ -365,7 +365,7 @@ local function render_preview(state)
     end
   end
 
-  cb:line("", "Comment")
+  cb:styled("", "Comment")
   cb:line("-- " .. string.rep("─", 40), "Comment")
   cb:line("")
 
@@ -475,14 +475,14 @@ local function render_search(state)
 
   -- Line 1: Search term or placeholder
   if ui_state.search_term == "" then
-    cb:line(" Press / to search", "Comment")
+    cb:styled(" Press / to search", "Comment")
   else
-    cb:line(" " .. ui_state.search_term, "NvimFloatHint")
+    cb:styled(" " .. ui_state.search_term, "NvimFloatHint")
   end
 
   -- Line 2: Settings hints
   local settings_line, _ = build_search_settings_line()
-  cb:line(settings_line, "Comment")
+  cb:styled(settings_line, "Comment")
 
   local lines = cb:build_lines()
   local highlights = cb:build_highlights()
@@ -1105,7 +1105,7 @@ local function delete_entry()
       cb:line(string.format("  Delete buffer '%s'?", buffer_history.buffer_name), "WarningMsg")
       cb:line(string.format("  Contains %d history entries.", count), "NvimFloatHint")
       cb:line("")
-      cb:line("  Press <Enter> to confirm, <Esc> to cancel", "Comment")
+      cb:styled("  Press <Enter> to confirm, <Esc> to cancel", "Comment")
       confirm_win:render()
 
       local confirm_keymaps = {
@@ -1153,10 +1153,10 @@ local function clear_all()
   if confirm_win then
     local cb = confirm_win:get_content_builder()
     cb:line("")
-    cb:line("  ⚠ Clear ALL query history?", "WarningMsg")
+    cb:styled("  ⚠ Clear ALL query history?", "WarningMsg")
     cb:line(string.format("  %d buffers, %d entries will be deleted.", stats.total_buffers, stats.total_entries), "NvimFloatHint")
     cb:line("")
-    cb:line("  Press <Enter> to confirm, <Esc> to cancel", "Comment")
+    cb:styled("  Press <Enter> to confirm, <Esc> to cancel", "Comment")
     confirm_win:render()
 
     local confirm_keymaps = {
@@ -1193,7 +1193,7 @@ local function export_history()
   if export_win then
     local cb = export_win:get_content_builder()
     cb:line("")
-    cb:line("  Export query history to file:", "NvimFloatTitle")
+    cb:styled("  Export query history to file:", "NvimFloatTitle")
     cb:line("")
     cb:labeled_input("filepath", "  File", {
       value = default_path,
@@ -1201,9 +1201,9 @@ local function export_history()
       width = 50,  -- Default width, expands for longer paths
     })
     cb:line("")
-    cb:line("  Use .json extension for JSON format, otherwise plain text.", "Comment")
+    cb:styled("  Use .json extension for JSON format, otherwise plain text.", "Comment")
     cb:line("")
-    cb:line("  <Enter>=Export | <Esc>=Cancel", "NvimFloatHint")
+    cb:styled("  <Enter>=Export | <Esc>=Cancel", "NvimFloatHint")
     export_win:render()
 
     local function do_export()
