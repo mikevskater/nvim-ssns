@@ -223,7 +223,7 @@ function M.save_preset(state, multi_panel)
   if save_win then
     local cb = save_win:get_content_builder()
     cb:line("")
-    cb:line("  Save current settings as preset:", "NvimFloatTitle")
+    cb:styled("  Save current settings as preset:", "NvimFloatTitle")
     cb:line("")
     cb:labeled_input("name", "  Name", {
       value = default_name,
@@ -231,7 +231,7 @@ function M.save_preset(state, multi_panel)
       width = 35,
     })
     cb:line("")
-    cb:line("  <Enter>=Save | <Esc>=Cancel", "NvimFloatHint")
+    cb:styled("  <Enter>=Save | <Esc>=Cancel", "NvimFloatHint")
     save_win:render()
 
     local function do_save()
@@ -362,7 +362,7 @@ function M.rename_preset(state, multi_panel)
       width = 32,
     })
     cb:line("")
-    cb:line("  <Enter>=Rename | <Esc>=Cancel", "NvimFloatHint")
+    cb:styled("  <Enter>=Rename | <Esc>=Cancel", "NvimFloatHint")
     rename_win:render()
 
     local function do_rename()

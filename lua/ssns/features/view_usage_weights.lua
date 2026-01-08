@@ -90,10 +90,10 @@ function ViewUsageWeights.view_weights()
       if confirm_win then
         local ccb = confirm_win:get_content_builder()
         ccb:line("")
-        ccb:line("  Clear ALL usage weights?", "WarningMsg")
-        ccb:line("  This cannot be undone.", "NvimFloatHint")
-        ccb:line("")
-        ccb:line("  Press <Enter> to confirm, <Esc> to cancel", "Comment")
+        ccb:styled("  Clear ALL usage weights?", "WarningMsg")
+        ccb:styled("  This cannot be undone.", "NvimFloatHint")
+        ccb:blank()
+        ccb:styled("  Press <Enter> to confirm, <Esc> to cancel", "Comment")
         confirm_win:render()
 
         local confirm_keymaps = {

@@ -249,7 +249,7 @@ function ViewDebugLog.view_log(filter)
           width = 35,
         })
         fcb:line("")
-        fcb:line("  <Enter>=Apply | <Esc>=Cancel", "NvimFloatHint")
+        fcb:styled("  <Enter>=Apply | <Esc>=Cancel", "NvimFloatHint")
         filter_win:render()
 
         local function apply_filter()
@@ -477,7 +477,7 @@ function ViewDebugLog._show_cached_log(filter)
           width = 35,
         })
         fcb:line("")
-        fcb:line("  <Enter>=Apply | <Esc>=Cancel", "NvimFloatHint")
+        fcb:styled("  <Enter>=Apply | <Esc>=Cancel", "NvimFloatHint")
         filter_win:render()
 
         local function apply_filter()

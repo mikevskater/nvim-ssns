@@ -163,7 +163,7 @@ local function render_buffers(state)
   end
 
   if #ui_state.buffer_histories == 0 then
-    cb:line("   (No history)", "NvimFloatHint")
+    cb:styled("   (No history)", "NvimFloatHint")
   end
 
   local lines = cb:build_lines()
@@ -308,7 +308,7 @@ local function render_history(state)
   end
 
   if #buffer_history.entries == 0 then
-    cb:line("   (No entries)", "NvimFloatHint")
+    cb:styled("   (No entries)", "NvimFloatHint")
   end
 
   local lines = cb:build_lines()
