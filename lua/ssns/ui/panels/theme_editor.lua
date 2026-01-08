@@ -32,6 +32,66 @@ local state = nil
 -- Internal Helpers
 -- ============================================================================
 
+---Calculate the line number for a theme based on its index
+---This matches the rendering order in theme_editor_render.lua
+---@param st ThemeEditorState
+---@param theme_idx number The index in available_themes
+---@return number line_number 1-indexed line number
+local function get_theme_line_number(st, theme_idx)
+  if not st or not st.available_themes then return 2 end
+
+  -- Separate themes into categories (same logic as render_themes)
+  local default_idx = nil
+  local user_themes = {}
+  local builtin_themes = {}
+
+  for i, theme in ipairs(st.available_themes) do
+    if theme.is_default then
+      default_idx = i
+    elseif theme.is_user then
+      table.insert(user_themes, { idx = i })
+    else
+      table.insert(builtin_themes, { idx = i })
+    end
+  end
+
+  -- Calculate line number based on rendering order:
+  -- Line 1: Blank
+  -- Line 2: Default theme
+  local line = 2
+
+  -- Check if target is the default theme
+  if theme_idx == default_idx then
+    return line
+  end
+
+  -- After default theme, check user themes section
+  if #user_themes > 0 then
+    -- Line: blank, "User Themes" header, blank
+    line = line + 3
+
+    for _, entry in ipairs(user_themes) do
+      if entry.idx == theme_idx then
+        return line
+      end
+      line = line + 1
+    end
+  end
+
+  -- Built-in section: blank, "Built-in" header, blank
+  line = line + 3
+
+  for _, entry in ipairs(builtin_themes) do
+    if entry.idx == theme_idx then
+      return line
+    end
+    line = line + 1
+  end
+
+  -- Fallback
+  return 2
+end
+
 ---Get title for colors panel
 ---@param st ThemeEditorState
 ---@return string
@@ -148,19 +208,14 @@ local function edit_color()
 
   -- Check if we need to create a user copy first
   local theme = state.available_themes[state.selected_theme_idx]
-  if theme and not theme.is_user and not theme.is_default then
-    -- Auto-create a user copy before editing
+  if theme and not theme.is_user then
+    -- Auto-create a user copy before editing (works for both built-in and default themes)
     local success = Actions.ensure_user_copy(state, multi_panel)
     if not success then
       return
     end
     -- Reload state after copy was created
     load_theme_colors(state)
-  end
-
-  if theme and theme.is_default then
-    vim.notify("Cannot edit default theme colors. Select a theme first.", vim.log.levels.WARN)
-    return
   end
 
   -- Get current color value and save original for cancel
@@ -219,25 +274,17 @@ local function edit_color()
         options = { "fg", "bg" },
         default = initial_target,
         key = "B",
-        -- When target changes, swap colors
+        -- When target changes, swap colors (no live preview, just swap picker color)
         on_change = function(new_target, old_target)
-          vim.notify(string.format("TARGET SWAP: %s -> %s", old_target, new_target))
           -- Save current picker color to the old target
           local current_color = colorpicker.get_color()
-          vim.notify(string.format("  Current picker color: %s", current_color or "nil"))
-          vim.notify(string.format("  working_colors BEFORE: fg=%s, bg=%s", working_colors.fg, working_colors.bg))
-          vim.notify(string.format("  original_colors: fg=%s, bg=%s", original_colors.fg, original_colors.bg))
           if current_color then
             working_colors[old_target] = current_color
           end
-          vim.notify(string.format("  working_colors AFTER save: fg=%s, bg=%s", working_colors.fg, working_colors.bg))
           -- Load the new target's color into the picker (with its original for comparison)
           local new_color = working_colors[new_target]
           local new_original = original_colors[new_target]
-          vim.notify(string.format("  Calling set_color(%s, %s)", new_color, new_original))
           colorpicker.set_color(new_color, new_original)
-          -- Apply preview
-          apply_working_colors()
         end,
       },
       {
@@ -248,7 +295,6 @@ local function edit_color()
         key = "b",
         on_change = function(new_val)
           working_colors.bold = new_val
-          apply_working_colors()
         end,
       },
       {
@@ -259,30 +305,9 @@ local function edit_color()
         key = "i",
         on_change = function(new_val)
           working_colors.italic = new_val
-          apply_working_colors()
         end,
       },
     },
-
-    -- Live preview as user navigates the color grid
-    on_change = function(result)
-      if not state then return end
-
-      -- Update the current target's color in working_colors
-      local target = result.custom and result.custom.target or "fg"
-      vim.notify(string.format("PICKER on_change: target=%s, color=%s", target, result.color))
-      vim.notify(string.format("  working_colors BEFORE: fg=%s, bg=%s", working_colors.fg, working_colors.bg))
-      working_colors[target] = result.color
-      vim.notify(string.format("  working_colors AFTER: fg=%s, bg=%s", working_colors.fg, working_colors.bg))
-
-      -- Update bold/italic from result
-      if result.custom then
-        working_colors.bold = result.custom.bold
-        working_colors.italic = result.custom.italic
-      end
-
-      apply_working_colors()
-    end,
 
     -- User confirmed selection
     on_select = function(result)
@@ -304,19 +329,9 @@ local function edit_color()
       end
     end,
 
-    -- User cancelled - restore original
+    -- User cancelled - nothing to restore since we don't update during navigation
     on_cancel = function()
-      if not state then return end
-
-      -- Restore original color
-      state.current_colors[color_def.key] = original_value
-
-      -- Re-apply original colors
-      ThemeManager.apply_colors(state.current_colors)
-      if multi_panel then
-        multi_panel:render_panel("colors")
-        multi_panel:render_panel("preview")
-      end
+      -- No-op: colors weren't changed during navigation
     end,
   })
 end
@@ -576,11 +591,11 @@ function ThemeEditor.show()
   -- Mark initial focus
   multi_panel:update_panel_title("themes", "Themes *")
 
-  -- Position cursor on the first theme element (Default theme, line 2)
-  -- The Default theme is always first and appears on line 2 (after the blank line)
+  -- Position cursor on the currently selected theme
   vim.schedule(function()
     if multi_panel and multi_panel:is_valid() and state then
-      multi_panel:set_cursor("themes", 2, 0)
+      local line = get_theme_line_number(state, state.selected_theme_idx)
+      multi_panel:set_cursor("themes", line, 0)
     end
   end)
 end

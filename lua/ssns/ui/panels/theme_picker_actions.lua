@@ -398,7 +398,7 @@ end
 -- Auto-copy on edit (for future color editing support)
 -- ============================================================================
 
----Auto-create a user copy when editing a built-in theme
+---Auto-create a user copy when editing a built-in or default theme
 ---Used when color editing is introduced - creates a copy before allowing edits
 ---@param state table UI state
 ---@param multi_panel MultiPanelWindow? The multi-panel window
@@ -408,28 +408,40 @@ function M.ensure_user_copy(state, multi_panel)
   if not state then return false end
 
   local theme = state.available_themes[get_selected_idx(state)]
-  if not theme or theme.is_default then
-    vim.notify("Cannot edit default theme option", vim.log.levels.WARN)
-    return false
-  end
+  if not theme then return false end
 
   -- Already a user theme
   if theme.is_user then
     return true
   end
 
-  -- Create a user copy
-  local copy_name = theme.display_name .. " - COPY"
-  local file_name = (theme.name or theme.display_name:lower():gsub("%s+", "_")) .. "_copy"
-  file_name = ThemeManager.generate_unique_name(file_name, true)
+  local copy_name, file_name, colors, description, author
 
-  local source = ThemeManager.get_theme(theme.name, false)
-  if not source then
-    vim.notify("Failed to load source theme", vim.log.levels.ERROR)
-    return false
+  if theme.is_default then
+    -- For default theme, create a new custom theme from current colors
+    copy_name = "Custom Theme"
+    file_name = ThemeManager.generate_unique_name("custom_theme", true)
+    -- Use current colors from state (already loaded default colors)
+    colors = state.current_colors or ThemeManager.get_colors(nil)
+    description = "Custom theme based on default colors"
+    author = "User"
+  else
+    -- For built-in themes, copy from the theme file
+    copy_name = theme.display_name .. " - COPY"
+    file_name = (theme.name or theme.display_name:lower():gsub("%s+", "_")) .. "_copy"
+    file_name = ThemeManager.generate_unique_name(file_name, true)
+
+    local source = ThemeManager.get_theme(theme.name, false)
+    if not source then
+      vim.notify("Failed to load source theme", vim.log.levels.ERROR)
+      return false
+    end
+    colors = source.colors
+    description = source.description
+    author = source.author
   end
 
-  local ok, err = ThemeManager.save(file_name, copy_name, source.colors, source.description, source.author)
+  local ok, err = ThemeManager.save(file_name, copy_name, colors, description, author)
   if ok then
     -- Reload themes
     ThemeManager.clear_cache()
