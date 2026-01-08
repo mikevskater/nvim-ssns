@@ -5,7 +5,7 @@
 local ViewUsageWeights = {}
 
 local BaseViewer = require('ssns.features.base_viewer')
-local UiFloat = require('nvim-float.float')
+local UiFloat = require('nvim-float.window')
 local UsageTracker = require('ssns.completion.usage_tracker')
 
 -- Create viewer instance

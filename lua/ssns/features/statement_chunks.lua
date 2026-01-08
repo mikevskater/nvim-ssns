@@ -4,8 +4,8 @@
 ---@module ssns.features.statement_chunks
 local StatementChunksViewer = {}
 
-local UiFloat = require('nvim-float.float')
-local ContentBuilder = require('nvim-float.content_builder')
+local UiFloat = require('nvim-float.window')
+local ContentBuilder = require('nvim-float.content')
 local JsonUtils = require('ssns.utils.json')
 local StatementParser = require('ssns.completion.statement_parser')
 local StatementCache = require('ssns.completion.statement_cache')

@@ -2,8 +2,8 @@
 ---Floating UI for adding and managing server connections
 local AddServerUI = {}
 
-local UiFloat = require('nvim-float.float')
-local ContentBuilder = require('nvim-float.content_builder')
+local UiFloat = require('nvim-float.window')
+local ContentBuilder = require('nvim-float.content')
 local Connections = require('ssns.connections')
 local Cache = require('ssns.cache')
 local KeymapManager = require('ssns.keymap_manager')

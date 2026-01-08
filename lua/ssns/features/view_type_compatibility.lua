@@ -5,7 +5,7 @@
 local ViewTypeCompatibility = {}
 
 local BaseViewer = require('ssns.features.base_viewer')
-local UiFloat = require('nvim-float.float')
+local UiFloat = require('nvim-float.window')
 local TypeCompatibility = require('ssns.completion.type_compatibility')
 
 -- Test type pairs for compatibility

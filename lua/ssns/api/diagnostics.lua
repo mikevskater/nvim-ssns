@@ -5,8 +5,8 @@ local M = {}
 ---Show cache statistics
 function M.show_stats()
   local Cache = require('ssns.cache')
-  local UiFloat = require('nvim-float.float')
-  local ContentBuilder = require('nvim-float.content_builder')
+  local UiFloat = require('nvim-float.window')
+  local ContentBuilder = require('nvim-float.content')
   local stats = Cache.get_stats()
 
   local cb = ContentBuilder.new()
@@ -53,8 +53,8 @@ end
 ---Show completion performance statistics
 function M.show_completion_stats()
   local Source = require('ssns.completion.source')
-  local UiFloat = require('nvim-float.float')
-  local ContentBuilder = require('nvim-float.content_builder')
+  local UiFloat = require('nvim-float.window')
+  local ContentBuilder = require('nvim-float.content')
 
   -- Try to get stats from the source module
   local success, result = pcall(function()
@@ -172,8 +172,8 @@ end
 function M.show_usage_stats()
   local UsageTracker = require('ssns.completion.usage_tracker')
   local Cache = require('ssns.cache')
-  local UiFloat = require('nvim-float.float')
-  local ContentBuilder = require('nvim-float.content_builder')
+  local UiFloat = require('nvim-float.window')
+  local ContentBuilder = require('nvim-float.content')
 
   -- Get active database
   local active_db = Cache.get_active_database()

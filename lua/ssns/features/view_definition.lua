@@ -4,7 +4,7 @@
 local ViewDefinition = {}
 
 local GoTo = require('ssns.features.go_to')
-local UiFloat = require('nvim-float.float')
+local UiFloat = require('nvim-float.window')
 
 -- Store reference to current floating window for cleanup
 local current_float = nil

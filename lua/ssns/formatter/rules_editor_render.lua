@@ -6,7 +6,7 @@ local M = {}
 local Helpers = require('ssns.formatter.rules_editor_helpers')
 local Formatter = require('ssns.formatter')
 local Data = require('ssns.formatter.rules_editor_data')
-local ContentBuilder = require('nvim-float.content_builder')
+local ContentBuilder = require('nvim-float.content')
 
 ---Render the presets panel using ContentBuilder
 ---@param state RulesEditorState

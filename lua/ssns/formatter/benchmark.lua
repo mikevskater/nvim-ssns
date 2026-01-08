@@ -421,8 +421,8 @@ function Benchmark.run_and_display(opts)
 
   local results = Benchmark.run_suite(opts)
   
-  local UiFloat = require('nvim-float.float')
-  local ContentBuilder = require('nvim-float.content_builder')
+  local UiFloat = require('nvim-float.window')
+  local ContentBuilder = require('nvim-float.content')
   
   local cb = ContentBuilder.new()
   

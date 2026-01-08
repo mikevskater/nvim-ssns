@@ -5,7 +5,7 @@
 local ViewDebugLog = {}
 
 local BaseViewer = require('ssns.features.base_viewer')
-local UiFloat = require('nvim-float.float')
+local UiFloat = require('nvim-float.window')
 local Debug = require('ssns.debug')
 local FileIO = require('ssns.async.file_io')
 

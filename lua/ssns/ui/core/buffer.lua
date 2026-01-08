@@ -704,8 +704,8 @@ end
 
 ---Show help in floating window
 function UiBuffer.show_help()
-  local UiFloat = require('nvim-float.float')
-  local ContentBuilder = require('nvim-float.content_builder')
+  local UiFloat = require('nvim-float.window')
+  local ContentBuilder = require('nvim-float.content')
 
   local cb = ContentBuilder.new()
   
@@ -779,6 +779,86 @@ function UiBuffer.set_lines(lines)
 
   -- Auto-expand width if enabled
   UiBuffer.auto_expand_width(lines)
+end
+
+---Apply highlights to buffer from ContentBuilder highlight data
+---@param highlights table[] Array of { line, col_start, col_end, hl_group }
+---@param opts { batch_size: number?, on_complete: function? }? Options for async application
+function UiBuffer.apply_highlights(highlights, opts)
+  if not UiBuffer.exists() then
+    if opts and opts.on_complete then opts.on_complete() end
+    return
+  end
+
+  opts = opts or {}
+  local ns_id = vim.api.nvim_create_namespace("ssns_tree_hl")
+
+  -- Clear existing highlights first
+  vim.api.nvim_buf_clear_namespace(UiBuffer.bufnr, ns_id, 0, -1)
+
+  if not highlights or #highlights == 0 then
+    if opts.on_complete then opts.on_complete() end
+    return
+  end
+
+  local batch_size = opts.batch_size or 100
+  local on_complete = opts.on_complete
+
+  -- For small highlight counts, apply synchronously
+  if #highlights <= batch_size then
+    for _, hl in ipairs(highlights) do
+      if hl.line and hl.col_start and hl.col_end and hl.hl_group then
+        pcall(vim.api.nvim_buf_add_highlight,
+          UiBuffer.bufnr,
+          ns_id,
+          hl.hl_group,
+          hl.line,  -- 0-indexed
+          hl.col_start,
+          hl.col_end
+        )
+      end
+    end
+    if on_complete then on_complete() end
+    return
+  end
+
+  -- For large highlight counts, apply in chunks asynchronously
+  local current_idx = 1
+  local total = #highlights
+
+  local function apply_chunk()
+    if not UiBuffer.exists() then
+      if on_complete then on_complete() end
+      return
+    end
+
+    local chunk_end = math.min(current_idx + batch_size - 1, total)
+
+    for i = current_idx, chunk_end do
+      local hl = highlights[i]
+      if hl.line and hl.col_start and hl.col_end and hl.hl_group then
+        pcall(vim.api.nvim_buf_add_highlight,
+          UiBuffer.bufnr,
+          ns_id,
+          hl.hl_group,
+          hl.line,  -- 0-indexed
+          hl.col_start,
+          hl.col_end
+        )
+      end
+    end
+
+    current_idx = chunk_end + 1
+
+    if current_idx <= total then
+      vim.schedule(apply_chunk)
+    else
+      if on_complete then on_complete() end
+    end
+  end
+
+  -- Start applying chunks
+  apply_chunk()
 end
 
 ---Auto-expand tree window width to fit content if enabled

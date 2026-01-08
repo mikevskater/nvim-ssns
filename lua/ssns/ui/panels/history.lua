@@ -2,7 +2,7 @@
 ---Query history UI with 3-panel floating window layout using UiFloat
 local UiHistory = {}
 
-local UiFloat = require('nvim-float.float')
+local UiFloat = require('nvim-float.window')
 local ContentBuilder = require('nvim-float.content')
 local QueryHistory = require('ssns.query_history')
 local UiQuery = require('ssns.ui.core.query')

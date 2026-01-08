@@ -5,7 +5,7 @@
 local ViewFuzzyMatcher = {}
 
 local BaseViewer = require('ssns.features.base_viewer')
-local UiFloat = require('nvim-float.float')
+local UiFloat = require('nvim-float.window')
 local FuzzyMatcher = require('ssns.completion.fuzzy_matcher')
 
 -- Test pairs for demonstration

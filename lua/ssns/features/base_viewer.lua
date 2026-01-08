@@ -3,8 +3,8 @@
 ---@module ssns.features.base_viewer
 ---@class BaseViewer
 
-local UiFloat = require('nvim-float.float')
-local ContentBuilder = require('nvim-float.content_builder')
+local UiFloat = require('nvim-float.window')
+local ContentBuilder = require('nvim-float.content')
 local JsonUtils = require('ssns.utils.json')
 
 local M = {}

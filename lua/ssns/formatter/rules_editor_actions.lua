@@ -205,7 +205,7 @@ end
 function M.save_preset(state, multi_panel)
   if not state or not multi_panel then return end
 
-  local UiFloat = require('nvim-float.float')
+  local UiFloat = require('nvim-float.window')
 
   local current_preset = state.available_presets[state.selected_preset_idx]
   local default_name = current_preset and current_preset.is_user and current_preset.name or Presets.generate_unique_name("Custom")
@@ -333,7 +333,7 @@ end
 function M.rename_preset(state, multi_panel)
   if not state or not multi_panel then return end
 
-  local UiFloat = require('nvim-float.float')
+  local UiFloat = require('nvim-float.window')
 
   local preset = state.available_presets[state.selected_preset_idx]
   if not preset or not preset.is_user then

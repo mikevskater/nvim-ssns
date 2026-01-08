@@ -4,7 +4,7 @@ local M = {}
 
 local State = require('ssns.ui.panels.object_search.state')
 local Helpers = require('ssns.ui.panels.object_search.helpers')
-local ContentBuilder = require('nvim-float.content_builder')
+local ContentBuilder = require('nvim-float.content')
 local Cache = require('ssns.cache')
 
 ---Forward reference for load_definition (injected by init.lua)
