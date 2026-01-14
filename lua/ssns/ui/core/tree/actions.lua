@@ -72,15 +72,10 @@ function TreeActions.toggle_node(UiTree)
       local Buffer = require('ssns.ui.core.buffer')
       local Config = require('ssns.config')
       local Spinner = require('ssns.async.spinner')
-      local smart_positioning = Config.get_ui().smart_cursor_positioning
 
       -- Set loading state on the group object
       obj.ui_state.loading = true
       UiTree.render()
-
-      -- Keep cursor on the expanded group while loading
-      local col = smart_positioning and Buffer.get_name_column(line_number) or 0
-      Buffer.set_cursor(line_number, col)
 
       -- Start animated spinner on the loading line (line after group header)
       -- line_number is 1-indexed, spinner uses 0-indexed, loading indicator is on next line
@@ -114,39 +109,11 @@ function TreeActions.toggle_node(UiTree)
           vim.notify(string.format("SSNS: Failed to load %s: %s", obj.object_type, err), vim.log.levels.ERROR)
         end
 
-        -- Render with on_complete callback to defer cursor positioning until after
-        -- all lines are written to the buffer (handles chunked rendering)
-        UiTree.render({
-          on_complete = function()
-            -- Now position cursor on first child after render completes
-            if obj:has_children() then
-              local child_line = line_number + 1
-              local child_col = smart_positioning and Buffer.get_name_column(child_line) or 0
-              Buffer.set_cursor(child_line, child_col)
-              if smart_positioning then
-                Buffer.last_indent_info = {
-                  line = child_line,
-                  indent_level = Buffer.get_indent_level(child_line),
-                  column = child_col,
-                }
-              end
-            else
-              -- No children loaded (error case or empty), stay on group
-              local group_col = smart_positioning and Buffer.get_name_column(line_number) or 0
-              Buffer.set_cursor(line_number, group_col)
-              if smart_positioning then
-                Buffer.last_indent_info = {
-                  line = line_number,
-                  indent_level = Buffer.get_indent_level(line_number),
-                  column = group_col,
-                }
-              end
-            end
-          end,
-        })
+        -- Re-render tree (cursor restoration handled by render function)
+        UiTree.render()
       end)
 
-      -- Return early - cursor positioning is handled in the callback
+      -- Return early
       return
     elseif obj.object_type == "schemas_group" and adapter.features.schemas then
       -- Schemas are typically fast to load, use sync for simplicity
@@ -159,57 +126,8 @@ function TreeActions.toggle_node(UiTree)
   if should_load then
     TreeActions.load_node_async(UiTree, obj, line_number)
   else
-    -- Check if smart cursor positioning is enabled
-    local Config = require('ssns.config')
-    local smart_positioning = Config.get_ui().smart_cursor_positioning
-
-    -- Re-render tree with on_complete callback to defer cursor positioning
-    -- until after all lines are written (handles chunked rendering for large trees)
-    UiTree.render({
-      on_complete = function()
-        -- Position cursor appropriately
-        if obj.ui_state.expanded and not was_expanded then
-          -- Just expanded - move to first child if exists
-          if obj:has_children() or obj.ui_state.loading or obj.ui_state.error then
-            local child_line = line_number + 1
-            local col = smart_positioning and Buffer.get_name_column(child_line) or 0
-            Buffer.set_cursor(child_line, col)
-            -- Update indent tracking
-            if smart_positioning then
-              Buffer.last_indent_info = {
-                line = child_line,
-                indent_level = Buffer.get_indent_level(child_line),
-                column = col,
-              }
-            end
-          else
-            -- No children, stay on current line
-            local col = smart_positioning and Buffer.get_name_column(line_number) or 0
-            Buffer.set_cursor(line_number, col)
-            -- Update indent tracking
-            if smart_positioning then
-              Buffer.last_indent_info = {
-                line = line_number,
-                indent_level = Buffer.get_indent_level(line_number),
-                column = col,
-              }
-            end
-          end
-        else
-          -- Collapsed or stayed same - restore cursor position
-          local col = smart_positioning and Buffer.get_name_column(line_number) or 0
-          Buffer.set_cursor(line_number, col)
-          -- Update indent tracking
-          if smart_positioning then
-            Buffer.last_indent_info = {
-              line = line_number,
-              indent_level = Buffer.get_indent_level(line_number),
-              column = col,
-            }
-          end
-        end
-      end,
-    })
+    -- Re-render tree (cursor restoration handled by render function)
+    UiTree.render()
   end
 end
 
@@ -222,7 +140,6 @@ function TreeActions.load_node_async(UiTree, obj, line_number)
   local Config = require('ssns.config')
   local Async = require('ssns.async')
   local Spinner = require('ssns.async.spinner')
-  local smart_positioning = Config.get_ui().smart_cursor_positioning
 
   -- Cancel any existing load operation for this object
   if obj._cancel_load then
@@ -236,8 +153,6 @@ function TreeActions.load_node_async(UiTree, obj, line_number)
 
   -- Render with loading indicator
   UiTree.render()
-  local col = smart_positioning and Buffer.get_name_column(line_number) or 0
-  Buffer.set_cursor(line_number, col)
 
   -- Start animated spinner on the loading line (line after the node header)
   -- line_number is 1-indexed, spinner uses 0-indexed, loading indicator is on next line
@@ -291,38 +206,8 @@ function TreeActions.load_node_async(UiTree, obj, line_number)
       vim.notify(string.format("SSNS: Failed to load %s: %s", obj.name, error_msg), vim.log.levels.ERROR)
     end
 
-    -- Re-render tree with results or error
-    -- Defer cursor positioning until after render completes (handles chunked rendering)
-    UiTree.render({
-      on_complete = function()
-        -- Position cursor at first child if loaded successfully
-        if success and obj:has_children() then
-          local child_line = line_number + 1
-          local child_col = smart_positioning and Buffer.get_name_column(child_line) or 0
-          Buffer.set_cursor(child_line, child_col)
-          -- Update indent tracking
-          if smart_positioning then
-            Buffer.last_indent_info = {
-              line = child_line,
-              indent_level = Buffer.get_indent_level(child_line),
-              column = child_col,
-            }
-          end
-        else
-          -- Error or no children, stay on current line
-          local current_col = smart_positioning and Buffer.get_name_column(line_number) or 0
-          Buffer.set_cursor(line_number, current_col)
-          -- Update indent tracking
-          if smart_positioning then
-            Buffer.last_indent_info = {
-              line = line_number,
-              indent_level = Buffer.get_indent_level(line_number),
-              column = current_col,
-            }
-          end
-        end
-      end,
-    })
+    -- Re-render tree (cursor restoration handled by render function)
+    UiTree.render()
   end
 
   -- Check if object supports true async RPC (ServerClass)
@@ -634,8 +519,6 @@ end
 ---@param UiTree table The main UiTree module
 function TreeActions.refresh_node(UiTree)
   local Buffer = require('ssns.ui.core.buffer')
-  local Config = require('ssns.config')
-  local smart_positioning = Config.get_ui().smart_cursor_positioning
   local line_number = Buffer.get_current_line()
 
   -- Get object at current line
@@ -652,8 +535,6 @@ function TreeActions.refresh_node(UiTree)
 
     -- Render with loading indicator
     UiTree.render()
-    local col = smart_positioning and Buffer.get_name_column(line_number) or 0
-    Buffer.set_cursor(line_number, col)
 
     -- Reload asynchronously
     vim.schedule(function()
@@ -672,22 +553,8 @@ function TreeActions.refresh_node(UiTree)
         vim.notify(string.format("SSNS: Failed to refresh %s: %s", obj.name, err), vim.log.levels.ERROR)
       end
 
-      -- Re-render tree with results or error
-      -- Defer cursor positioning until after render completes
-      UiTree.render({
-        on_complete = function()
-          local col = smart_positioning and Buffer.get_name_column(line_number) or 0
-          Buffer.set_cursor(line_number, col)
-          -- Update indent tracking
-          if smart_positioning then
-            Buffer.last_indent_info = {
-              line = line_number,
-              indent_level = Buffer.get_indent_level(line_number),
-              column = col,
-            }
-          end
-        end,
-      })
+      -- Re-render tree (cursor restoration handled by render function)
+      UiTree.render()
     end)
   end
 end
@@ -707,8 +574,6 @@ end
 ---@param UiTree table The main UiTree module
 function TreeActions.toggle_connection(UiTree)
   local Buffer = require('ssns.ui.core.buffer')
-  local Config = require('ssns.config')
-  local smart_positioning = Config.get_ui().smart_cursor_positioning
   local line_number = Buffer.get_current_line()
 
   -- Get object at current line
@@ -725,23 +590,8 @@ function TreeActions.toggle_connection(UiTree)
         vim.notify(string.format("Connection failed: %s", err), vim.log.levels.ERROR)
       end
 
-      -- Re-render tree after connection state changes
-      -- Defer cursor positioning until after render completes
-      UiTree.render({
-        on_complete = function()
-          -- Restore cursor position with smart column
-          local col = smart_positioning and Buffer.get_name_column(line_number) or 0
-          Buffer.set_cursor(line_number, col)
-          -- Update indent tracking
-          if smart_positioning then
-            Buffer.last_indent_info = {
-              line = line_number,
-              indent_level = Buffer.get_indent_level(line_number),
-              column = col,
-            }
-          end
-        end,
-      })
+      -- Re-render tree (cursor restoration handled by render function)
+      UiTree.render()
     end)
   else
     vim.notify("Can only toggle connection on servers/databases", vim.log.levels.WARN)
@@ -753,8 +603,6 @@ end
 function TreeActions.toggle_favorite(UiTree)
   local Buffer = require('ssns.ui.core.buffer')
   local Connections = require('ssns.connections')
-  local Config = require('ssns.config')
-  local smart_positioning = Config.get_ui().smart_cursor_positioning
   local line_number = Buffer.get_current_line()
 
   -- Get object at current line
@@ -783,22 +631,8 @@ function TreeActions.toggle_favorite(UiTree)
         local status = new_state and "added to" or "removed from"
         vim.notify(string.format("'%s' %s favorites", obj.name, status), vim.log.levels.INFO)
 
-        -- Re-render tree to show updated star icon
-        -- Defer cursor positioning until after render completes
-        UiTree.render({
-          on_complete = function()
-            -- Restore cursor position with smart column
-            local col = smart_positioning and Buffer.get_name_column(line_number) or 0
-            Buffer.set_cursor(line_number, col)
-            if smart_positioning then
-              Buffer.last_indent_info = {
-                line = line_number,
-                indent_level = Buffer.get_indent_level(line_number),
-                column = col,
-              }
-            end
-          end,
-        })
+        -- Re-render tree (cursor restoration handled by render function)
+        UiTree.render()
       end
     end)
   end)
