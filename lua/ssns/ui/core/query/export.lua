@@ -486,6 +486,425 @@ function QueryExport.yank_all_results_as_csv()
   vim.notify(string.format("SSNS: Copied %d result sets (%d total rows) as CSV to clipboard", #stored.resultSets, total_rows), vim.log.levels.INFO)
 end
 
+-- ============================================================================
+-- Visual Selection Export Functions
+-- ============================================================================
+
+---Escape a value for TSV format
+---@param value any The value to escape
+---@return string escaped The escaped TSV value
+local function escape_tsv_value(value)
+  if value == nil or value == vim.NIL then
+    return ""
+  end
+
+  local str = tostring(value)
+
+  -- TSV: replace tabs with spaces, replace newlines with spaces
+  str = str:gsub("\t", " ")
+  str = str:gsub("\r\n", " ")
+  str = str:gsub("\r", " ")
+  str = str:gsub("\n", " ")
+
+  return str
+end
+
+---Get visual selection bounds from current visual mode or marks
+---@return {start_line: number, start_col: number, end_line: number, end_col: number, mode: string}?
+local function get_visual_selection_bounds()
+  local cur_mode = vim.fn.mode()
+  local in_visual = cur_mode:match("[vV\x16]") ~= nil
+
+  local start_pos, end_pos, vis_mode
+  if in_visual then
+    start_pos = vim.fn.getpos("v")
+    end_pos = vim.fn.getpos(".")
+    vis_mode = cur_mode
+  else
+    -- After visual mode exited, use marks
+    start_pos = vim.fn.getpos("'<")
+    end_pos = vim.fn.getpos("'>")
+    vis_mode = vim.fn.visualmode()
+  end
+
+  if not start_pos or not end_pos then
+    return nil
+  end
+
+  -- Normalize so start is before end
+  local start_line = start_pos[2]
+  local start_col = start_pos[3] - 1  -- Convert to 0-based
+  local end_line = end_pos[2]
+  local end_col = end_pos[3] - 1  -- Convert to 0-based
+
+  if start_line > end_line or (start_line == end_line and start_col > end_col) then
+    start_line, end_line = end_line, start_line
+    start_col, end_col = end_col, start_col
+  end
+
+  return {
+    start_line = start_line,
+    start_col = start_col,
+    end_line = end_line,
+    end_col = end_col,
+    mode = vis_mode,
+  }
+end
+
+---Get selected cells based on visual selection and cell map
+---@param cell_map table The cell map from ContentBuilder
+---@param selection table The visual selection bounds
+---@return {rows: number[], cols: number[], includes_header: boolean}?
+local function get_selected_cells(cell_map, selection)
+  if not cell_map or not selection then
+    return nil
+  end
+
+  local start_line = selection.start_line
+  local start_col = selection.start_col
+  local end_line = selection.end_line
+  local end_col = selection.end_col
+
+  local result = {
+    rows = {},
+    cols = {},
+    includes_header = false,
+  }
+
+  -- Check if row number column is in range (selects all columns)
+  local row_num_selected = false
+  if cell_map.row_num_column then
+    row_num_selected = start_col < cell_map.row_num_column.end_col and end_col >= cell_map.row_num_column.start_col
+  end
+
+  -- Find columns in range
+  local cols_set = {}
+  if row_num_selected then
+    -- Row number selected = all columns
+    for _, col_info in ipairs(cell_map.columns or {}) do
+      cols_set[col_info.index] = true
+    end
+  else
+    for _, col_info in ipairs(cell_map.columns or {}) do
+      -- Check if column overlaps with selection
+      if start_col < col_info.end_col and end_col >= col_info.start_col then
+        cols_set[col_info.index] = true
+      end
+    end
+  end
+
+  -- Convert to sorted array
+  for col_idx in pairs(cols_set) do
+    table.insert(result.cols, col_idx)
+  end
+  table.sort(result.cols)
+
+  -- Check header
+  if cell_map.header_lines then
+    if start_line <= cell_map.header_lines.end_line and end_line >= cell_map.header_lines.start_line then
+      result.includes_header = true
+    end
+  end
+
+  -- Find rows in range
+  local rows_set = {}
+  for _, row_info in ipairs(cell_map.data_rows or {}) do
+    if start_line <= row_info.end_line and end_line >= row_info.start_line then
+      rows_set[row_info.index] = true
+    end
+  end
+
+  -- Convert to sorted array
+  for row_idx in pairs(rows_set) do
+    table.insert(result.rows, row_idx)
+  end
+  table.sort(result.rows)
+
+  return result
+end
+
+---Convert selected cells to output format (TSV or CSV)
+---@param resultSet table The result set data
+---@param selected_cells table Selected cells {rows, cols, includes_header}
+---@param opts table Options: format ("tsv"|"csv"), include_headers (boolean)
+---@return string output The formatted output
+local function selection_to_output(resultSet, selected_cells, opts)
+  opts = opts or {}
+  local format = opts.format or "tsv"
+  local include_headers = opts.include_headers ~= false
+
+  local rows = resultSet.rows or {}
+  local columns_metadata = resultSet.columns
+
+  -- Get ordered column names
+  local all_columns = {}
+  if columns_metadata and type(columns_metadata) == "table" then
+    for col_name, col_info in pairs(columns_metadata) do
+      if col_name ~= vim.NIL then
+        table.insert(all_columns, { name = col_name, index = col_info.index or 0 })
+      end
+    end
+    table.sort(all_columns, function(a, b) return a.index < b.index end)
+  elseif #rows > 0 then
+    for key, _ in pairs(rows[1]) do
+      table.insert(all_columns, { name = key, index = #all_columns + 1 })
+    end
+    table.sort(all_columns, function(a, b) return tostring(a.name) < tostring(b.name) end)
+  end
+
+  -- Filter to only selected columns
+  local selected_columns = {}
+  for _, col_idx in ipairs(selected_cells.cols) do
+    if all_columns[col_idx] then
+      table.insert(selected_columns, all_columns[col_idx])
+    end
+  end
+
+  if #selected_columns == 0 then
+    return ""
+  end
+
+  local separator = format == "tsv" and "\t" or ","
+  local escape_fn = format == "tsv" and escape_tsv_value or escape_csv_value
+  local output_lines = {}
+
+  -- Add header row if requested
+  if include_headers then
+    local header_parts = {}
+    for _, col in ipairs(selected_columns) do
+      table.insert(header_parts, escape_fn(col.name))
+    end
+    table.insert(output_lines, table.concat(header_parts, separator))
+  end
+
+  -- Add data rows
+  for _, row_idx in ipairs(selected_cells.rows) do
+    local row = rows[row_idx]
+    if row then
+      local row_parts = {}
+      for _, col in ipairs(selected_columns) do
+        table.insert(row_parts, escape_fn(row[col.name]))
+      end
+      table.insert(output_lines, table.concat(row_parts, separator))
+    end
+  end
+
+  return table.concat(output_lines, "\n")
+end
+
+---Yank visual selection to clipboard
+---@param include_headers boolean? Include headers (nil = use config)
+function QueryExport.yank_selection(include_headers)
+  local query_bufnr = get_current_query_bufnr()
+  local stored = query_bufnr and UiQuery.buffer_results[query_bufnr]
+
+  if not stored or not stored.resultSets or not stored.cell_maps then
+    vim.notify("SSNS: No results with cell tracking available", vim.log.levels.WARN)
+    return
+  end
+
+  -- Get visual selection bounds
+  local selection = get_visual_selection_bounds()
+  if not selection then
+    vim.notify("SSNS: No visual selection", vim.log.levels.WARN)
+    return
+  end
+
+  -- Get config
+  local Config = require('ssns.config')
+  local results_config = Config.get_results()
+  local format = results_config.selection_output_format or "tsv"
+  if include_headers == nil then
+    include_headers = results_config.include_headers_on_selection ~= false
+  end
+
+  -- Find which result set the selection is in
+  local cursor_line = selection.start_line
+  local result_set_index = nil
+  for _, range in ipairs(stored.result_set_ranges or {}) do
+    if cursor_line >= range.start_line and cursor_line <= range.end_line then
+      result_set_index = range.index
+      break
+    end
+  end
+
+  if not result_set_index then
+    -- Default to first result set
+    result_set_index = 1
+  end
+
+  local cell_map = stored.cell_maps[result_set_index]
+  if not cell_map then
+    vim.notify("SSNS: No cell map for result set", vim.log.levels.WARN)
+    return
+  end
+
+  -- Get selected cells
+  local selected_cells = get_selected_cells(cell_map, selection)
+  if not selected_cells or #selected_cells.rows == 0 or #selected_cells.cols == 0 then
+    vim.notify("SSNS: No cells selected", vim.log.levels.WARN)
+    return
+  end
+
+  local resultSet = stored.resultSets[result_set_index]
+  if not resultSet then
+    vim.notify("SSNS: Result set not found", vim.log.levels.WARN)
+    return
+  end
+
+  -- Convert to output format
+  local output = selection_to_output(resultSet, selected_cells, {
+    format = format,
+    include_headers = include_headers,
+  })
+
+  if output == "" then
+    vim.notify("SSNS: No data to copy", vim.log.levels.WARN)
+    return
+  end
+
+  -- Copy to clipboard
+  vim.fn.setreg("+", output)
+  vim.fn.setreg("*", output)
+
+  local format_name = format == "tsv" and "TSV" or "CSV"
+  local row_count = #selected_cells.rows
+  local col_count = #selected_cells.cols
+  local header_text = include_headers and " (with headers)" or ""
+  vim.notify(string.format("SSNS: Copied %d rows x %d cols as %s%s", row_count, col_count, format_name, header_text), vim.log.levels.INFO)
+end
+
+---Export visual selection to file
+---@param include_headers boolean? Include headers (nil = use config)
+---@param filepath string? Optional file path
+function QueryExport.export_selection(include_headers, filepath)
+  local query_bufnr = get_current_query_bufnr()
+  local stored = query_bufnr and UiQuery.buffer_results[query_bufnr]
+
+  if not stored or not stored.resultSets or not stored.cell_maps then
+    vim.notify("SSNS: No results with cell tracking available", vim.log.levels.WARN)
+    return
+  end
+
+  -- Get visual selection bounds
+  local selection = get_visual_selection_bounds()
+  if not selection then
+    vim.notify("SSNS: No visual selection", vim.log.levels.WARN)
+    return
+  end
+
+  -- Get config
+  local Config = require('ssns.config')
+  local results_config = Config.get_results()
+  local query_config = Config.get_query()
+  local format = results_config.selection_output_format or "tsv"
+  if include_headers == nil then
+    include_headers = results_config.include_headers_on_selection ~= false
+  end
+
+  -- Find which result set the selection is in
+  local cursor_line = selection.start_line
+  local result_set_index = nil
+  for _, range in ipairs(stored.result_set_ranges or {}) do
+    if cursor_line >= range.start_line and cursor_line <= range.end_line then
+      result_set_index = range.index
+      break
+    end
+  end
+
+  if not result_set_index then
+    result_set_index = 1
+  end
+
+  local cell_map = stored.cell_maps[result_set_index]
+  if not cell_map then
+    vim.notify("SSNS: No cell map for result set", vim.log.levels.WARN)
+    return
+  end
+
+  -- Get selected cells
+  local selected_cells = get_selected_cells(cell_map, selection)
+  if not selected_cells or #selected_cells.rows == 0 or #selected_cells.cols == 0 then
+    vim.notify("SSNS: No cells selected", vim.log.levels.WARN)
+    return
+  end
+
+  local resultSet = stored.resultSets[result_set_index]
+  if not resultSet then
+    vim.notify("SSNS: Result set not found", vim.log.levels.WARN)
+    return
+  end
+
+  -- Convert to output format
+  local output = selection_to_output(resultSet, selected_cells, {
+    format = format,
+    include_headers = include_headers,
+  })
+
+  if output == "" then
+    vim.notify("SSNS: No data to export", vim.log.levels.WARN)
+    return
+  end
+
+  -- Generate filename with timestamp
+  local extension = format == "tsv" and ".tsv" or ".csv"
+  local filename = os.date("ssns_selection_%Y%m%d_%H%M%S") .. extension
+
+  if not filepath then
+    local export_dir = query_config.export_directory
+
+    if export_dir == "" then
+      -- Empty string means prompt for location
+      filepath = vim.fn.input({
+        prompt = "Export selection to: ",
+        default = filename,
+        completion = "file",
+      })
+
+      if filepath == "" then
+        vim.notify("SSNS: Export cancelled", vim.log.levels.INFO)
+        return
+      end
+
+      filepath = vim.fn.expand(filepath)
+    else
+      -- Use configured directory or fall back to temp
+      local dir = export_dir or get_temp_dir()
+      dir = vim.fn.expand(dir)
+
+      if vim.fn.isdirectory(dir) == 0 then
+        vim.fn.mkdir(dir, "p")
+      end
+
+      filepath = dir .. "/" .. filename
+
+      if vim.fn.has("win32") == 1 or vim.fn.has("win64") == 1 then
+        filepath = filepath:gsub("/", "\\")
+      end
+    end
+  else
+    filepath = vim.fn.expand(filepath)
+  end
+
+  -- Write to file
+  local file, err = io.open(filepath, "w")
+  if not file then
+    vim.notify(string.format("SSNS: Failed to write file: %s", err or "unknown error"), vim.log.levels.ERROR)
+    return
+  end
+
+  file:write(output)
+  file:close()
+
+  local format_name = format == "tsv" and "TSV" or "CSV"
+  local row_count = #selected_cells.rows
+  local col_count = #selected_cells.cols
+  vim.notify(string.format("SSNS: Exported %d rows x %d cols as %s to %s", row_count, col_count, format_name, filepath), vim.log.levels.INFO)
+
+  -- Open in default application
+  open_with_default_app(filepath)
+end
+
 ---Get the results for a specific query buffer (for external access)
 ---@param query_bufnr number? The query buffer number (defaults to current context)
 ---@return table? results The stored results or nil

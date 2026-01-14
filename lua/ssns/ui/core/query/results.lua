@@ -384,6 +384,7 @@ end
 ---@param query_metadata table? Query metadata including rowsAffected and timing
 ---@return ContentBuilder builder ContentBuilder with all styled content
 ---@return table[] result_set_ranges Array of {start_line, end_line, index} for cursor-based result set detection
+---@return table<number, ResultCellMap> cell_maps Map of result set index to cell map for visual selection
 function QueryResults.format_results_styled(resultSets, sql, execution_time_ms, query_metadata)
   local ContentBuilder = require('nvim-float.content')
   local Config = require('ssns.config')
@@ -392,6 +393,8 @@ function QueryResults.format_results_styled(resultSets, sql, execution_time_ms, 
 
   -- Track line ranges for each result set (for cursor-based export)
   local result_set_ranges = {}
+  -- Track cell maps for each result set (for visual selection)
+  local cell_maps = {}
 
   local builder = ContentBuilder.new()
 
@@ -514,8 +517,29 @@ function QueryResults.format_results_styled(resultSets, sql, execution_time_ms, 
     -- Track start line for this result set (1-indexed for cursor position)
     local start_line = builder:line_count() + 1
 
+    -- Begin cell tracking for this result set
+    builder:begin_result_table()
+
     -- Format this result set
     QueryResults.format_single_result_set_styled(rows, resultSet.columns, builder, results_config)
+
+    -- Get cell map for visual selection support
+    local cell_map = builder:get_result_cell_map()
+    if cell_map then
+      -- Adjust line numbers to be absolute (add start_line offset - 1 since cell_map uses 1-based)
+      -- The cell map tracks lines relative to when begin_result_table() was called
+      -- We need to offset them to match the actual buffer line numbers
+      local line_offset = start_line - 1
+      if cell_map.header_lines then
+        cell_map.header_lines.start_line = cell_map.header_lines.start_line + line_offset
+        cell_map.header_lines.end_line = cell_map.header_lines.end_line + line_offset
+      end
+      for _, row_info in ipairs(cell_map.data_rows or {}) do
+        row_info.start_line = row_info.start_line + line_offset
+        row_info.end_line = row_info.end_line + line_offset
+      end
+      cell_maps[i] = cell_map
+    end
 
     -- Track end line for this result set
     local end_line = builder:line_count()
@@ -553,7 +577,7 @@ function QueryResults.format_results_styled(resultSets, sql, execution_time_ms, 
     builder:styled(string.format("Total execution time: %s", total_time), "muted")
   end
 
-  return builder, result_set_ranges
+  return builder, result_set_ranges, cell_maps
 end
 
 ---Display query results
@@ -618,11 +642,13 @@ function QueryResults.display_results(result, sql, execution_time_ms, query_bufn
     end
   end
 
-  -- Format results with styled ContentBuilder (also returns line ranges for cursor-based export)
-  local builder, result_set_ranges = QueryResults.format_results_styled(result.resultSets, sql, execution_time_ms, result.metadata)
+  -- Format results with styled ContentBuilder (also returns line ranges and cell maps)
+  local builder, result_set_ranges, cell_maps = QueryResults.format_results_styled(result.resultSets, sql, execution_time_ms, result.metadata)
 
   -- Store result set ranges for cursor-based export
   UiQuery.buffer_results[query_bufnr].result_set_ranges = result_set_ranges
+  -- Store cell maps for visual selection support
+  UiQuery.buffer_results[query_bufnr].cell_maps = cell_maps
 
   -- Create namespace for result highlights
   local ns_id = vim.api.nvim_create_namespace("ssns_results")
@@ -742,15 +768,16 @@ function QueryResults.toggle_results(query_bufnr)
     vim.api.nvim_buf_set_var(result_buf, 'ssns_query_bufnr', query_bufnr)
 
     -- Re-format and populate with styled results
-    local builder, result_set_ranges = QueryResults.format_results_styled(
+    local builder, result_set_ranges, cell_maps = QueryResults.format_results_styled(
       stored.resultSets,
       stored.sql,
       stored.execution_time_ms,
       stored.metadata
     )
 
-    -- Update stored ranges in case they weren't saved before
+    -- Update stored ranges and cell maps in case they weren't saved before
     stored.result_set_ranges = result_set_ranges
+    stored.cell_maps = cell_maps
 
     -- Create namespace and render styled content
     local ns_id = vim.api.nvim_create_namespace("ssns_results")
@@ -809,14 +836,24 @@ function QueryResults.show_results_controls()
 
   local controls = {
     {
-      header = "Results Buffer",
+      header = "Results Buffer (Normal Mode)",
       keys = {
         { key = km.close or "q", desc = "Close results window" },
         { key = km.toggle or query_km.toggle_results or "C-r", desc = "Toggle results window" },
-        { key = km.export_csv or "A-e", desc = "Export cursor result set to CSV" },
-        { key = km.export_all_csv or "A-E", desc = "Export ALL result sets to CSV files" },
-        { key = km.yank_csv or "A-y", desc = "Yank cursor result set as CSV" },
-        { key = km.yank_all_csv or "A-Y", desc = "Yank ALL result sets as CSV" },
+        { key = km.export_csv or "A-e", desc = "Export cursor result set" },
+        { key = km.export_all_csv or "A-E", desc = "Export ALL result sets" },
+        { key = km.yank_csv or "A-y", desc = "Yank cursor result set" },
+        { key = km.yank_all_csv or "A-Y", desc = "Yank ALL result sets" },
+      },
+    },
+    {
+      header = "Visual Mode Selection",
+      keys = {
+        { key = km.yank_selection or "A-y", desc = "Yank selection (with headers)" },
+        { key = km.yank_selection_no_headers or "A-Y", desc = "Yank selection (no headers)" },
+        { key = km.export_selection or "A-e", desc = "Export selection (with headers)" },
+        { key = km.export_selection_no_headers or "A-E", desc = "Export selection (no headers)" },
+        { key = "Mouse drag", desc = "Block select (SSMS-style)" },
       },
     },
   }
@@ -841,6 +878,8 @@ end
 ---@param result_buf number The results buffer number
 function QueryResults.setup_results_keymaps(result_buf)
   local QueryExport = require('ssns.ui.core.query.export')
+  local Config = require('ssns.config')
+  local results_config = Config.get_results()
   local km = KeymapManager.get_group("results")
   local query_km = KeymapManager.get_group("query")
 
@@ -880,10 +919,48 @@ function QueryResults.setup_results_keymaps(result_buf)
     { mode = "n", lhs = "?", rhs = function()
       QueryResults.show_results_controls()
     end, desc = "Show controls" },
+
+    -- Visual mode: Yank selection (with headers per config)
+    { mode = "v", lhs = km.yank_selection or "<A-y>", rhs = function()
+      -- Exit visual mode first, then yank
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+      vim.schedule(function()
+        QueryExport.yank_selection(nil)  -- nil = use config for headers
+      end)
+    end, desc = "Yank selection (with headers)" },
+
+    -- Visual mode: Yank selection without headers
+    { mode = "v", lhs = km.yank_selection_no_headers or "<A-Y>", rhs = function()
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+      vim.schedule(function()
+        QueryExport.yank_selection(false)  -- false = no headers
+      end)
+    end, desc = "Yank selection (no headers)" },
+
+    -- Visual mode: Export selection (with headers per config)
+    { mode = "v", lhs = km.export_selection or "<A-e>", rhs = function()
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+      vim.schedule(function()
+        QueryExport.export_selection(nil, nil)  -- nil = use config for headers
+      end)
+    end, desc = "Export selection (with headers)" },
+
+    -- Visual mode: Export selection without headers
+    { mode = "v", lhs = km.export_selection_no_headers or "<A-E>", rhs = function()
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+      vim.schedule(function()
+        QueryExport.export_selection(false, nil)  -- false = no headers
+      end)
+    end, desc = "Export selection (no headers)" },
   }
 
   KeymapManager.set_multiple(result_buf, keymaps, true)
   KeymapManager.mark_group_active(result_buf, "results")
+
+  -- Setup mouse block mode (SSMS-style cell selection)
+  if results_config.mouse_block_mode ~= false then
+    QueryResults.setup_mouse_block_mode(result_buf)
+  end
 
   -- Set up autocmd to save window height when closed by any means
   -- Use BufWinLeave which fires when buffer leaves a window (i.e., window closes)
@@ -902,6 +979,53 @@ function QueryResults.setup_results_keymaps(result_buf)
     end,
     desc = "Save results window height on close",
   })
+end
+
+---Setup mouse block mode for SSMS-style cell selection
+---When user drags with mouse, use block visual mode instead of charwise
+---@param result_buf number The results buffer number
+function QueryResults.setup_mouse_block_mode(result_buf)
+  -- Map mouse drag to enter block visual mode
+  -- <LeftDrag> is triggered when mouse is dragged after click
+  vim.api.nvim_buf_set_keymap(result_buf, "n", "<LeftDrag>", "<LeftDrag><Cmd>lua require('ssns.ui.core.query.results').convert_to_block_visual()<CR>", {
+    noremap = true,
+    silent = true,
+    desc = "Mouse drag in block visual mode",
+  })
+
+  -- Also handle drag starting from visual mode
+  vim.api.nvim_buf_set_keymap(result_buf, "v", "<LeftDrag>", "<Esc><LeftMouse><C-v><LeftDrag>", {
+    noremap = true,
+    silent = true,
+    desc = "Mouse drag in block visual mode",
+  })
+end
+
+---Convert current visual selection to block visual mode
+---Called after mouse drag to switch from charwise to blockwise
+function QueryResults.convert_to_block_visual()
+  local mode = vim.fn.mode()
+  -- Only convert if we're in charwise visual mode (from mouse drag)
+  if mode == "v" then
+    -- Get current visual selection bounds
+    local start_pos = vim.fn.getpos("v")
+    local end_pos = vim.fn.getpos(".")
+
+    -- Exit visual mode
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+
+    -- Re-enter in block visual mode at the same position
+    vim.schedule(function()
+      -- Go to start position
+      vim.api.nvim_win_set_cursor(0, { start_pos[2], start_pos[3] - 1 })
+      -- Enter block visual mode
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, false, true), "n", false)
+      -- Go to end position
+      vim.schedule(function()
+        vim.api.nvim_win_set_cursor(0, { end_pos[2], end_pos[3] - 1 })
+      end)
+    end)
+  end
 end
 
 ---Show cancelled message in results buffer

@@ -94,6 +94,9 @@
 ---@field preserve_newlines boolean Honor newlines in values, rendering as multi-line cells (default: true)
 ---@field row_separators boolean|string Show separators between data rows: true | false | "auto" (default: "auto" = on for multi-line, off for truncate)
 ---@field max_display_rows number Maximum rows to display per result set (0 = no limit, default: 0). All rows still available for export.
+---@field selection_output_format string Output format for visual selection yank/export: "tsv" | "csv" (default: "tsv")
+---@field include_headers_on_selection boolean Include column headers when yanking/exporting visual selection (default: true)
+---@field mouse_block_mode boolean Use block visual mode for mouse drag in results buffer (SSMS-style) (default: true)
 
 ---@class AsyncConfig Async execution configuration
 ---@field enabled boolean Enable async execution (default: true)
@@ -173,6 +176,10 @@
 ---@field toggle string Toggle results window (default: "<C-r>")
 ---@field export_csv string Export results to CSV (default: "<A-e>")
 ---@field yank_csv string Yank results as CSV to clipboard (default: "<A-y>")
+---@field yank_selection string Yank visual selection (default: "<A-y>")
+---@field yank_selection_no_headers string Yank visual selection without headers (default: "<A-Y>")
+---@field export_selection string Export visual selection (default: "<A-e>")
+---@field export_selection_no_headers string Export visual selection without headers (default: "<A-E>")
 
 ---@class HistoryKeymaps History UI specific keymaps
 ---@field switch_panel string Switch between panels (default: "<Tab>")
@@ -639,6 +646,17 @@ local default_config = {
     -- Maximum rows to display per result set in the buffer (0 = no limit)
     -- Any value > 0 limits displayed rows. All rows are still saved for export.
     max_display_rows = 0,
+
+    -- Output format for visual selection yank/export
+    -- "tsv" = tab-separated values (pastes well into Excel/SSMS)
+    -- "csv" = comma-separated values
+    selection_output_format = "tsv",
+
+    -- Include column headers when yanking/exporting visual selection
+    include_headers_on_selection = true,
+
+    -- Use block visual mode for mouse drag in results buffer (SSMS-style cell selection)
+    mouse_block_mode = true,
   },
 
   query_history = {
@@ -718,6 +736,11 @@ local default_config = {
       toggle = "<C-r>",      -- Toggle results window (show/hide)
       export_csv = "<A-e>",  -- Export results to CSV file and open
       yank_csv = "<A-y>",    -- Yank results as CSV to clipboard
+      -- Visual mode keymaps for selection-based yank/export
+      yank_selection = "<A-y>",           -- Yank visual selection (with headers per config)
+      yank_selection_no_headers = "<A-Y>", -- Yank visual selection without headers
+      export_selection = "<A-e>",          -- Export visual selection (with headers per config)
+      export_selection_no_headers = "<A-E>", -- Export visual selection without headers
     },
 
     -- History UI keymaps
