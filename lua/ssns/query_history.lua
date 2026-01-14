@@ -1,7 +1,17 @@
+---@class QuerySelectionRange
+---Selection range within buffer (for partial executions)
+---@field start_line number 1-based start line
+---@field start_col number 1-based start column
+---@field end_line number 1-based end line
+---@field end_col number 1-based end column
+---@field mode string Visual mode used: 'v' (char), 'V' (line), or '\x16' (block)
+
 ---@class QueryHistoryEntry
 ---A single query execution entry
 ---@field id number Unique entry ID within buffer
----@field query string Full SQL query text
+---@field query string SQL that was executed (may be selection or full buffer)
+---@field buffer_content string? Full buffer content at execution time (for selection executions)
+---@field selection QuerySelectionRange? Selection range if this was a partial execution
 ---@field timestamp string ISO 8601 timestamp (YYYY-MM-DD HH:MM:SS)
 ---@field execution_time_ms number Query execution time in milliseconds
 ---@field status "success"|"error" Execution status

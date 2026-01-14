@@ -331,7 +331,7 @@ local function render_preview(state)
   if ui_state.selected_buffer_idx < 1 or ui_state.selected_buffer_idx > #ui_state.buffer_histories then
     cb:styled("-- No buffer selected", "Comment")
     local lines = cb:build_lines()
-  local highlights = cb:build_highlights()
+    local highlights = cb:build_highlights()
     return lines, highlights, cb
   end
 
@@ -340,7 +340,7 @@ local function render_preview(state)
   if ui_state.selected_entry_idx < 1 or ui_state.selected_entry_idx > #buffer_history.entries then
     cb:styled("-- No entry selected", "Comment")
     local lines = cb:build_lines()
-  local highlights = cb:build_highlights()
+    local highlights = cb:build_highlights()
     return lines, highlights, cb
   end
 
@@ -365,14 +365,20 @@ local function render_preview(state)
     end
   end
 
+  -- Show selection info if this was a partial execution
+  if entry.selection then
+    cb:line(string.format("-- Selection: lines %d-%d (executed portion highlighted)",
+      entry.selection.start_line, entry.selection.end_line), "Comment")
+  end
+
   cb:styled("", "Comment")
   cb:line("-- " .. string.rep("─", 40), "Comment")
   cb:line("")
 
-  -- Track where query content starts (for match position offsets)
-  local query_start_line = cb:line_count()
+  -- Track where content starts (for selection highlighting)
+  local content_start_line = cb:line_count()
 
-  -- Get match positions for overlay highlighting
+  -- Get match positions for search highlighting
   local orig_buf_idx = nil
   for idx, bh in ipairs(ui_state.all_buffer_histories) do
     if bh == buffer_history then
@@ -387,54 +393,61 @@ local function render_preview(state)
     match_positions = ui_state.entry_matches[match_key]
   end
 
-  -- Add query lines with search match highlighting
-  local query_lines = vim.split(entry.query, "\n")
+  -- Determine what content to show: full buffer or just the query
+  local display_content = entry.buffer_content or entry.query
+  local content_lines = vim.split(display_content, "\n")
 
-  if match_positions and #match_positions > 0 then
-    -- Track character position in the full query text
-    local current_pos = 1
+  -- Build line-by-line with selection and search highlighting
+  for line_idx, content_line in ipairs(content_lines) do
+    -- Check if this line is within the executed selection
+    local in_selection = false
+    if entry.selection and entry.buffer_content then
+      in_selection = line_idx >= entry.selection.start_line and line_idx <= entry.selection.end_line
+    end
 
-    for _, query_line in ipairs(query_lines) do
-      local line_start = current_pos
-      local line_end = current_pos + #query_line - 1
+    -- For search match highlighting, we need to track position in query (not buffer_content)
+    -- Search matches are relative to entry.query, so only apply when showing query directly
+    local line_matches = {}
+    if match_positions and #match_positions > 0 and not entry.buffer_content then
+      -- Calculate character position for this line in the query
+      local char_pos = 1
+      for i = 1, line_idx - 1 do
+        char_pos = char_pos + #content_lines[i] + 1  -- +1 for newline
+      end
+      local line_start = char_pos
+      local line_end = char_pos + #content_line - 1
 
-      -- Find positions overlapping this line
-      local line_matches = {}
       for _, pos in ipairs(match_positions) do
         if pos.end_ >= line_start and pos.start <= line_end then
           table.insert(line_matches, {
             col_start = math.max(1, pos.start - line_start + 1),
-            col_end = math.min(#query_line, pos.end_ - line_start + 1),
+            col_end = math.min(#content_line, pos.end_ - line_start + 1),
           })
         end
       end
-
-      if #line_matches > 0 then
-        -- Build line with highlighted matches
-        local spans = {}
-        local last_end = 1
-        for _, m in ipairs(line_matches) do
-          if m.col_start > last_end then
-            table.insert(spans, { text = query_line:sub(last_end, m.col_start - 1) })
-          end
-          table.insert(spans, { text = query_line:sub(m.col_start, m.col_end), style = "SsnsSearchMatch" })
-          last_end = m.col_end + 1
-        end
-        if last_end <= #query_line then
-          table.insert(spans, { text = query_line:sub(last_end) })
-        end
-        cb:spans(spans)
-          else
-        cb:line(query_line)
-      end
-
-      -- Move position past this line plus newline character
-      current_pos = line_end + 2
     end
-  else
-    -- No matches, just add lines directly
-    for _, query_line in ipairs(query_lines) do
-      cb:line(query_line)
+
+    -- Build spans for this line
+    if #line_matches > 0 then
+      -- Search match highlighting takes priority
+      local spans = {}
+      local last_end = 1
+      for _, m in ipairs(line_matches) do
+        if m.col_start > last_end then
+          table.insert(spans, { text = content_line:sub(last_end, m.col_start - 1) })
+        end
+        table.insert(spans, { text = content_line:sub(m.col_start, m.col_end), style = "SsnsSearchMatch" })
+        last_end = m.col_end + 1
+      end
+      if last_end <= #content_line then
+        table.insert(spans, { text = content_line:sub(last_end) })
+      end
+      cb:spans(spans)
+    elseif in_selection then
+      -- Highlight executed selection with a distinct style
+      cb:styled(content_line, "Visual")
+    else
+      cb:line(content_line)
     end
   end
 
@@ -935,7 +948,9 @@ local function load_query()
   local history_buffer_id = buffer_history.buffer_id
   local buffer_name = buffer_history.buffer_name
   local timestamp = entry.timestamp
-  local query_content = entry.query
+  -- Use full buffer content if available, otherwise just the executed query
+  local query_content = entry.buffer_content or entry.query
+  local selection_info = entry.selection  -- May be nil if not a selection execution
 
   -- Close history window first
   UiHistory.close()
@@ -973,6 +988,39 @@ local function load_query()
 
   -- Set buffer content directly (history entries are stored exactly as written)
   vim.api.nvim_buf_set_lines(query_buf, 0, -1, false, vim.split(query_content, "\n"))
+
+  -- If this was a selection execution, restore the visual selection
+  if selection_info then
+    vim.schedule(function()
+      if not vim.api.nvim_buf_is_valid(query_buf) then return end
+
+      -- Find the window displaying this buffer
+      local win = vim.fn.bufwinid(query_buf)
+      if win == -1 then return end
+
+      -- Set cursor to selection start
+      vim.api.nvim_win_set_cursor(win, { selection_info.start_line, selection_info.start_col - 1 })
+
+      -- Enter visual mode and select to end position
+      -- Use the appropriate visual mode based on what was used originally
+      local mode_key = "v"  -- Default to charwise
+      if selection_info.mode == "V" then
+        mode_key = "V"
+      elseif selection_info.mode == "\x16" then
+        mode_key = "<C-v>"
+      end
+
+      -- Enter visual mode and move to end of selection
+      vim.api.nvim_feedkeys(
+        vim.api.nvim_replace_termcodes(mode_key, true, false, true),
+        "n",
+        false
+      )
+
+      -- Move to end position
+      vim.api.nvim_win_set_cursor(win, { selection_info.end_line, selection_info.end_col - 1 })
+    end)
+  end
 
   if needs_async_connect then
     -- Start connecting spinner in lualine
