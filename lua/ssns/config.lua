@@ -73,15 +73,67 @@
 ---@class ExportConfig Export configuration
 ---@field format string Default export format: "excel" | "csv" (default: "csv")
 ---@field include_headers boolean Include column headers in export (default: true)
----@field header_style ExportHeaderStyle? Custom header style for Excel exports
 ---@field multi_result_mode string How to handle multiple result sets: "sheets" | "workbooks" (default: "sheets")
+---@field header_style ExportHeaderStyle? Header row styling for Excel exports
+---@field table_style ExportTableStyle? Data table styling for Excel exports
+---@field sheet_style ExportSheetStyle? Sheet-level styling for Excel exports
 
----@class ExportHeaderStyle Excel header styling options
+---@class ExportHeaderStyle Excel header row styling options
 ---@field bold boolean Bold text (default: true)
+---@field italic boolean Italic text (default: false)
 ---@field font_color string Font color hex (default: "#FFFFFF")
 ---@field bg_color string Background color hex (default: "#4472C4")
----@field font_size number? Font size (default: nil = Excel default)
+---@field font_size number? Font size in points (default: nil = Excel default)
+---@field font_name string? Font name (default: nil = Excel default)
 ---@field halign string? Horizontal alignment: "left" | "center" | "right" (default: "center")
+---@field valign string? Vertical alignment: "top" | "center" | "bottom" (default: "center")
+---@field border boolean Enable borders (default: true)
+---@field border_style string? Border style: "thin" | "medium" | "thick" (default: "thin")
+---@field border_color string? Border color hex (default: nil = auto)
+---@field wrap_text boolean Wrap text in header cells (default: false)
+
+---@class ExportTableStyle Excel data table styling options (SSRS-style)
+---@field alternating_rows boolean Enable zebra striping (default: false)
+---@field odd_row_color string? Background color for odd rows (default: nil = no color)
+---@field even_row_color string? Background color for even rows (default: "#F2F2F2")
+---@field font_color string? Default font color for data (default: nil = black)
+---@field font_size number? Font size in points (default: nil = Excel default)
+---@field font_name string? Font name (default: nil = Excel default)
+---@field border boolean Enable cell borders (default: true)
+---@field border_style string? Border style: "thin" | "medium" | "thick" (default: "thin")
+---@field border_color string? Border color hex (default: "#D9D9D9")
+---@field halign string? Default horizontal alignment: "left" | "center" | "right" (default: nil = auto by type)
+---@field valign string? Vertical alignment: "top" | "center" | "bottom" (default: "top")
+---@field auto_fit_columns boolean Auto-fit column widths (default: true)
+---@field min_col_width number? Minimum column width in characters (default: 8)
+---@field max_col_width number? Maximum column width in characters (default: 50)
+---@field null_display string? How to display NULL values (default: "" = empty)
+---@field null_style ExportNullStyle? Styling for NULL values
+
+---@class ExportNullStyle Styling for NULL values in Excel exports
+---@field italic boolean Italic text for NULLs (default: true)
+---@field font_color string? Font color for NULLs (default: "#808080" = gray)
+
+---@class ExportSheetStyle Excel sheet-level styling options
+---@field title string? Title text at top of sheet (default: nil = no title)
+---@field title_style ExportTitleStyle? Styling for title row
+---@field freeze_header boolean Freeze header row for scrolling (default: true)
+---@field auto_filter boolean Enable auto-filter dropdowns on headers (default: true)
+---@field print_gridlines boolean Print gridlines (default: false)
+---@field print_headers boolean Print row/column headers (default: false)
+---@field fit_to_page boolean Fit to one page width when printing (default: true)
+---@field orientation string? Page orientation: "portrait" | "landscape" (default: nil = Excel default)
+
+---@class ExportTitleStyle Styling for title row in Excel exports
+---@field bold boolean Bold text (default: true)
+---@field italic boolean Italic text (default: false)
+---@field font_color string Font color hex (default: "#000000")
+---@field bg_color string? Background color hex (default: nil = no background)
+---@field font_size number? Font size in points (default: 14)
+---@field font_name string? Font name (default: nil = Excel default)
+---@field halign string? Horizontal alignment: "left" | "center" | "right" (default: "left")
+---@field merge_cells boolean Merge title across all columns (default: true)
+---@field margin_bottom number Blank rows after title (default: 1)
 
 ---@class ResultsConfig Result buffer display configuration
 ---@field color_mode string Styling mode: "datatype" | "uniform" | "none" (default: "datatype")
@@ -592,15 +644,158 @@ local default_config = {
     -- Export configuration
     export = {
       format = "excel",           -- Default format: "excel" | "csv" (requires nvim-xlsx for Excel)
-      include_headers = true,   -- Include column headers in exports
-      header_style = {          -- Excel header styling (only used when format = "excel")
-        bold = true,
-        font_color = "#FFFFFF",
-        bg_color = "#4472C4",
-        font_size = nil,        -- nil = Excel default
-        halign = "center",
-      },
+      include_headers = true,     -- Include column headers in exports
       multi_result_mode = "sheets",  -- Multiple result sets: "sheets" (one workbook) | "workbooks" (separate files)
+
+      -- Header row styling (SSRS-style)
+      header_style = {
+        bold = true,
+        italic = false,
+        font_color = "#FFFFFF",
+        bg_color = "#4472C4",       -- SSRS default blue
+        font_size = nil,            -- nil = Excel default
+        font_name = nil,            -- nil = Excel default
+        halign = "center",
+        valign = "center",
+        border = true,
+        border_style = "thin",
+        border_color = nil,         -- nil = auto
+        wrap_text = false,
+      },
+
+      -- Data table styling (SSRS-style)
+      table_style = {
+        alternating_rows = true,    -- SSRS default: zebra striping
+        odd_row_color = nil,        -- nil = no color (white)
+        even_row_color = "#F2F2F2", -- Light gray for even rows
+        font_color = nil,           -- nil = black
+        font_size = nil,            -- nil = Excel default
+        font_name = nil,            -- nil = Excel default
+        border = true,
+        border_style = "thin",
+        border_color = "#D9D9D9",   -- Light gray borders
+        halign = nil,               -- nil = auto by data type
+        valign = "top",
+        auto_fit_columns = true,
+        min_col_width = 8,
+        max_col_width = 50,
+        null_display = "",          -- Empty string for NULLs
+        null_style = {
+          italic = true,
+          font_color = "#808080",   -- Gray for NULLs
+        },
+      },
+
+      -- Sheet-level styling (SSRS-style)
+      sheet_style = {
+        title = nil,                -- No title by default
+        title_style = {
+          bold = true,
+          italic = false,
+          font_color = "#000000",
+          bg_color = nil,           -- No background
+          font_size = 14,
+          font_name = nil,
+          halign = "left",
+          merge_cells = true,
+          margin_bottom = 1,        -- 1 blank row after title
+        },
+        freeze_header = true,       -- Freeze header row for scrolling
+        auto_filter = true,         -- Enable auto-filter dropdowns
+        print_gridlines = false,
+        print_headers = false,
+        fit_to_page = true,
+        orientation = nil,          -- nil = Excel default (portrait)
+      },
+
+      -- Enable/disable automatic type-based formatting
+      auto_type_formatting = true,
+
+      -- Data type-based formatting (auto-detect from column metadata)
+      -- Applied when auto_type_formatting = true
+      type_styles = {
+        -- Integer types (int, bigint, smallint, tinyint)
+        integer = {
+          halign = "right",
+          num_format = "#,##0",
+        },
+        -- Decimal/float types (decimal, numeric, float, real)
+        decimal = {
+          halign = "right",
+          num_format = "#,##0.00",
+        },
+        -- Money types (SQL Server money/smallmoney)
+        money = {
+          halign = "right",
+          num_format = "$#,##0.00",
+        },
+        -- Date types (date only)
+        date = {
+          num_format = "yyyy-mm-dd",
+        },
+        -- DateTime types (datetime, datetime2, smalldatetime)
+        datetime = {
+          num_format = "yyyy-mm-dd hh:mm:ss",
+        },
+        -- Time types
+        time = {
+          num_format = "hh:mm:ss",
+        },
+        -- Boolean/bit types
+        boolean = {
+          halign = "center",
+        },
+        -- Percentage (custom type, apply via column_styles)
+        percent = {
+          halign = "right",
+          num_format = "0.00%",
+        },
+      },
+
+      -- Column-specific style overrides (matched by name or pattern)
+      -- Patterns support * wildcard for prefix/suffix matching
+      -- Examples:
+      --   ["Price"] = { num_format = "$#,##0.00", halign = "right" },
+      --   ["*_pct"] = { num_format = "0.00%" },
+      --   ["ID"] = { halign = "right" },
+      --   ["Status"] = { preset = "highlight_positive" },
+      column_styles = {},
+
+      -- Conditional formatting rules (evaluated in order)
+      -- Each rule can specify:
+      --   condition: "negative", "positive", "zero", "null", "empty", "nonempty"
+      --   match: exact string match (case-sensitive)
+      --   pattern: Lua pattern match
+      --   columns: optional array of column names to apply to (nil = all columns)
+      --   style: style properties to apply when condition is met
+      -- Examples:
+      --   { condition = "negative", style = { font_color = "#FF0000" } },
+      --   { columns = {"Status"}, match = "Active", style = { font_color = "#008000", bold = true } },
+      --   { columns = {"Status"}, match = "Inactive", style = { font_color = "#C00000" } },
+      conditional_styles = {},
+
+      -- Named style presets for reuse
+      -- Reference in column_styles or conditional_styles with preset = "name"
+      style_presets = {
+        currency = {
+          halign = "right",
+          num_format = "$#,##0.00",
+        },
+        percentage = {
+          halign = "right",
+          num_format = "0.00%",
+        },
+        accounting = {
+          halign = "right",
+          num_format = '_($* #,##0.00_);_($* (#,##0.00);_($* "-"??_);_(@_)',
+        },
+        highlight_negative = {
+          font_color = "#C00000",
+        },
+        highlight_positive = {
+          font_color = "#006400",
+        },
+      },
     },
   },
 
@@ -1291,6 +1486,101 @@ function Config.validate(config)
           end
         end
         -- Skip validation if nvim-xlsx not installed - style is ignored for CSV exports
+      end
+
+      -- Validate table_style (data row styling)
+      if exp.table_style then
+        local xlsx_ok, xlsx = pcall(require, 'nvim-xlsx')
+        if xlsx_ok and xlsx.validate_style then
+          local ts = exp.table_style
+          -- Validate style properties that apply to data rows
+          local style_props = {
+            font_color = ts.font_color,
+            font_size = ts.font_size,
+            font_name = ts.font_name,
+            halign = ts.halign,
+            valign = ts.valign,
+            border = ts.border,
+            border_style = ts.border_style,
+            border_color = ts.border_color,
+          }
+          local valid, errors = xlsx.validate_style(style_props)
+          if not valid then
+            return false, "query.export.table_style: " .. errors[1]
+          end
+          -- Validate alternating row colors
+          if ts.odd_row_color then
+            local ok, errs = xlsx.validate_style({ bg_color = ts.odd_row_color })
+            if not ok then
+              return false, "query.export.table_style.odd_row_color: " .. errs[1]
+            end
+          end
+          if ts.even_row_color then
+            local ok, errs = xlsx.validate_style({ bg_color = ts.even_row_color })
+            if not ok then
+              return false, "query.export.table_style.even_row_color: " .. errs[1]
+            end
+          end
+          -- Validate null_style
+          if ts.null_style then
+            local ok, errs = xlsx.validate_style({
+              italic = ts.null_style.italic,
+              font_color = ts.null_style.font_color,
+            })
+            if not ok then
+              return false, "query.export.table_style.null_style: " .. errs[1]
+            end
+          end
+          -- Validate numeric constraints
+          if ts.min_col_width and (type(ts.min_col_width) ~= "number" or ts.min_col_width < 0 or ts.min_col_width > 255) then
+            return false, "query.export.table_style.min_col_width must be between 0 and 255"
+          end
+          if ts.max_col_width and (type(ts.max_col_width) ~= "number" or ts.max_col_width < 0 or ts.max_col_width > 255) then
+            return false, "query.export.table_style.max_col_width must be between 0 and 255"
+          end
+        end
+      end
+
+      -- Validate sheet_style
+      if exp.sheet_style then
+        local ss = exp.sheet_style
+        -- Validate title_style if provided
+        if ss.title_style then
+          local xlsx_ok, xlsx = pcall(require, 'nvim-xlsx')
+          if xlsx_ok and xlsx.validate_style then
+            local valid, errors = xlsx.validate_style(ss.title_style)
+            if not valid then
+              return false, "query.export.sheet_style.title_style: " .. errors[1]
+            end
+          end
+          -- Validate margin_bottom
+          if ss.title_style.margin_bottom and (type(ss.title_style.margin_bottom) ~= "number" or ss.title_style.margin_bottom < 0) then
+            return false, "query.export.sheet_style.title_style.margin_bottom must be a non-negative number"
+          end
+        end
+        -- Validate orientation
+        if ss.orientation then
+          local valid_orientations = { portrait = true, landscape = true }
+          if not valid_orientations[ss.orientation] then
+            return false, "query.export.sheet_style.orientation must be 'portrait' or 'landscape'"
+          end
+        end
+        -- Validate boolean options
+        if ss.freeze_header ~= nil and type(ss.freeze_header) ~= "boolean" then
+          return false, "query.export.sheet_style.freeze_header must be a boolean"
+        end
+        if ss.auto_filter ~= nil and type(ss.auto_filter) ~= "boolean" then
+          return false, "query.export.sheet_style.auto_filter must be a boolean"
+        end
+        if ss.print_gridlines ~= nil and type(ss.print_gridlines) ~= "boolean" then
+          return false, "query.export.sheet_style.print_gridlines must be a boolean"
+        end
+        if ss.print_headers ~= nil and type(ss.print_headers) ~= "boolean" then
+          return false, "query.export.sheet_style.print_headers must be a boolean"
+        end
+        if ss.fit_to_page ~= nil and type(ss.fit_to_page) ~= "boolean" then
+          return false, "query.export.sheet_style.fit_to_page must be a boolean"
+        end
       end
     end
   end

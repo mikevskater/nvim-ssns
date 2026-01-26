@@ -1325,6 +1325,234 @@ local function check_xlsx_available()
   return ok, ok and xlsx or nil
 end
 
+-- ============================================================================
+-- Type-Based Styling Support
+-- ============================================================================
+
+---Map SQL data types to style categories
+---@type table<string, string>
+local TYPE_CATEGORY_MAP = {
+  -- Integer types
+  int = "integer",
+  bigint = "integer",
+  smallint = "integer",
+  tinyint = "integer",
+  long = "integer",
+  short = "integer",
+  tiny = "integer",
+  longlong = "integer",
+  int24 = "integer",
+
+  -- Decimal types
+  decimal = "decimal",
+  numeric = "decimal",
+  float = "decimal",
+  real = "decimal",
+  double = "decimal",
+  newdecimal = "decimal",
+
+  -- Money types (SQL Server specific)
+  money = "money",
+  smallmoney = "money",
+
+  -- Date types
+  date = "date",
+
+  -- DateTime types
+  datetime = "datetime",
+  datetime2 = "datetime",
+  smalldatetime = "datetime",
+  timestamp = "datetime",
+
+  -- Time types
+  time = "time",
+
+  -- Boolean types
+  bit = "boolean",
+  boolean = "boolean",
+  bool = "boolean",
+}
+
+---Match a column name against a pattern (supports * wildcard)
+---@param name string The column name to match
+---@param pattern string The pattern to match against (supports * for prefix/suffix)
+---@return boolean matched Whether the name matches the pattern
+local function matches_pattern(name, pattern)
+  if not name or not pattern then
+    return false
+  end
+
+  -- Exact match
+  if pattern == name then
+    return true
+  end
+
+  -- Pattern with wildcards
+  if pattern:match("%*") then
+    -- Convert glob pattern to Lua pattern
+    local lua_pattern = "^" .. pattern:gsub("%*", ".*"):gsub("%-", "%%-") .. "$"
+    return name:match(lua_pattern) ~= nil
+  end
+
+  return false
+end
+
+---Get style category from SQL type string
+---@param sql_type string? The SQL type from column metadata
+---@return string? category The style category or nil
+local function get_type_category(sql_type)
+  if not sql_type then
+    return nil
+  end
+
+  -- Normalize type string (lowercase, strip size info)
+  local normalized = sql_type:lower():match("^(%w+)")
+  if normalized then
+    return TYPE_CATEGORY_MAP[normalized]
+  end
+
+  return nil
+end
+
+---Resolve column style by name or pattern match
+---@param col_name string The column name
+---@param column_styles table<string, table> Column style definitions
+---@param style_presets table<string, table> Available style presets
+---@return table? style The matched style or nil
+local function resolve_column_style(col_name, column_styles, style_presets)
+  if not column_styles or type(column_styles) ~= "table" then
+    return nil
+  end
+
+  -- Try exact match first
+  if column_styles[col_name] then
+    local style = column_styles[col_name]
+    -- Resolve preset if specified
+    if style.preset and style_presets and style_presets[style.preset] then
+      return vim.tbl_extend("force", style_presets[style.preset], style)
+    end
+    return style
+  end
+
+  -- Try pattern matches
+  for pattern, style in pairs(column_styles) do
+    if pattern:match("%*") and matches_pattern(col_name, pattern) then
+      -- Resolve preset if specified
+      if style.preset and style_presets and style_presets[style.preset] then
+        return vim.tbl_extend("force", style_presets[style.preset], style)
+      end
+      return style
+    end
+  end
+
+  return nil
+end
+
+---Evaluate a conditional rule against a value
+---@param value any The cell value to evaluate
+---@param rule table The conditional rule
+---@param col_name string The column name for column-specific rules
+---@return boolean matches Whether the value matches the condition
+local function evaluate_condition(value, rule, col_name)
+  if not rule then
+    return false
+  end
+
+  -- Check column filter
+  if rule.columns then
+    local col_match = false
+    for _, c in ipairs(rule.columns) do
+      if c == col_name then
+        col_match = true
+        break
+      end
+    end
+    if not col_match then
+      return false
+    end
+  end
+
+  -- Check predefined conditions
+  if rule.condition then
+    local cond = rule.condition
+    local is_null = (value == nil or value == vim.NIL)
+    local is_number = type(value) == "number"
+    local is_string = type(value) == "string"
+
+    if cond == "null" then
+      return is_null
+    elseif cond == "empty" then
+      return is_null or (is_string and value == "")
+    elseif cond == "nonempty" then
+      return not is_null and not (is_string and value == "")
+    elseif cond == "negative" then
+      return is_number and value < 0
+    elseif cond == "positive" then
+      return is_number and value > 0
+    elseif cond == "zero" then
+      return is_number and value == 0
+    end
+  end
+
+  -- Check exact match
+  if rule.match ~= nil then
+    if type(value) == type(rule.match) then
+      return value == rule.match
+    elseif type(value) == "string" then
+      return value == tostring(rule.match)
+    end
+    return false
+  end
+
+  -- Check pattern match
+  if rule.pattern then
+    if type(value) == "string" then
+      return value:match(rule.pattern) ~= nil
+    end
+    return false
+  end
+
+  return false
+end
+
+---Merge multiple style definitions (later styles override earlier)
+---@param ... table Style definitions to merge
+---@return table merged The merged style
+local function merge_styles(...)
+  local result = {}
+  for _, style in ipairs({ ... }) do
+    if style and type(style) == "table" then
+      for k, v in pairs(style) do
+        if k ~= "preset" then  -- Don't copy preset key to final style
+          result[k] = v
+        end
+      end
+    end
+  end
+  return result
+end
+
+---Build a column type map from result set metadata
+---@param resultSet table The result set with columns metadata
+---@return table<string, string> type_map Mapping of column names to type categories
+local function build_column_type_map(resultSet)
+  local type_map = {}
+  local columns_metadata = resultSet.columns
+
+  if columns_metadata and type(columns_metadata) == "table" then
+    for col_name, col_info in pairs(columns_metadata) do
+      if col_name ~= vim.NIL and col_info and col_info.type then
+        local category = get_type_category(col_info.type)
+        if category then
+          type_map[col_name] = category
+        end
+      end
+    end
+  end
+
+  return type_map
+end
+
 ---Get ordered column names from a result set
 ---@param resultSet table The result set with columns metadata
 ---@return string[] columns Ordered column names
@@ -1361,7 +1589,7 @@ local function get_ordered_columns(resultSet)
   return columns
 end
 
----Convert result sets to Excel workbook
+---Convert result sets to Excel workbook with SSRS-style formatting
 ---@param resultSets table[] Array of result sets
 ---@param result_set_index number? Which result set to export (nil = first, 0 = all)
 ---@param opts ExportConfig? Export options
@@ -1378,40 +1606,177 @@ function QueryExport.results_to_xlsx(resultSets, result_set_index, opts)
   end
 
   opts = opts or {}
+  local header_style = opts.header_style or {}
+  local table_style = opts.table_style or {}
+  local sheet_style = opts.sheet_style or {}
+  local null_style = table_style.null_style or {}
+
+  -- Type-based styling options
+  local auto_type_formatting = opts.auto_type_formatting ~= false  -- Default: true
+  local type_styles = opts.type_styles or {}
+  local column_styles = opts.column_styles or {}
+  local conditional_styles = opts.conditional_styles or {}
+  local style_presets = opts.style_presets or {}
+
   local wb = xlsx.new_workbook()
 
-  -- Create header style if headers enabled
-  local header_style_idx = nil
-  if opts.include_headers ~= false then
-    local style = opts.header_style or {}
-    local style_err
-    header_style_idx, style_err = wb:create_style({
-      bold = style.bold ~= false,
-      font_color = style.font_color or "#FFFFFF",
-      bg_color = style.bg_color or "#4472C4",
-      font_size = style.font_size,
-      halign = style.halign or "center",
-      border = true,
-      border_style = "thin",
-    })
-    if style_err then
-      vim.notify(string.format("SSNS: Header style warning: %s", style_err), vim.log.levels.WARN)
-      -- Continue without styling rather than failing
-      header_style_idx = nil
+  -- Style cache for dynamically created styles (keyed by serialized definition)
+  local style_cache = {}
+
+  ---Get or create a cached style from a definition
+  ---@param style_def table The style definition
+  ---@return any? style_id The style ID or nil
+  local function get_or_create_style(style_def)
+    if not style_def or vim.tbl_isempty(style_def) then
+      return nil
     end
+
+    -- Create a cache key from sorted style properties
+    local key_parts = {}
+    local keys = vim.tbl_keys(style_def)
+    table.sort(keys)
+    for _, k in ipairs(keys) do
+      local v = style_def[k]
+      if type(v) == "table" then
+        -- Skip nested tables for cache key (shouldn't happen in our use case)
+        table.insert(key_parts, k .. "=table")
+      else
+        table.insert(key_parts, k .. "=" .. tostring(v))
+      end
+    end
+    local cache_key = table.concat(key_parts, "|")
+
+    if style_cache[cache_key] then
+      return style_cache[cache_key]
+    end
+
+    local style_id, _ = wb:create_style(style_def)
+    if style_id then
+      style_cache[cache_key] = style_id
+    end
+    return style_id
   end
+
+  -- Pre-create styles for reuse across sheets
+  local styles = {}
+
+  -- Title style (if title is configured)
+  if sheet_style.title then
+    local title_cfg = sheet_style.title_style or {}
+    local title_style_def = {
+      bold = title_cfg.bold ~= false,
+      italic = title_cfg.italic == true,
+      font_color = title_cfg.font_color or "#000000",
+      font_size = title_cfg.font_size or 14,
+      halign = title_cfg.halign or "left",
+    }
+    if title_cfg.bg_color then
+      title_style_def.bg_color = title_cfg.bg_color
+    end
+    if title_cfg.font_name then
+      title_style_def.font_name = title_cfg.font_name
+    end
+    styles.title, _ = wb:create_style(title_style_def)
+  end
+
+  -- Header style
+  if opts.include_headers ~= false then
+    local header_style_def = {
+      bold = header_style.bold ~= false,
+      italic = header_style.italic == true,
+      font_color = header_style.font_color or "#FFFFFF",
+      bg_color = header_style.bg_color or "#4472C4",
+      halign = header_style.halign or "center",
+      valign = header_style.valign or "center",
+      wrap_text = header_style.wrap_text == true,
+    }
+    if header_style.font_size then
+      header_style_def.font_size = header_style.font_size
+    end
+    if header_style.font_name then
+      header_style_def.font_name = header_style.font_name
+    end
+    if header_style.border ~= false then
+      header_style_def.border = true
+      header_style_def.border_style = header_style.border_style or "thin"
+      if header_style.border_color then
+        header_style_def.border_color = header_style.border_color
+      end
+    end
+    styles.header, _ = wb:create_style(header_style_def)
+  end
+
+  -- Data row styles (odd and even for alternating rows)
+  local data_style_base = {
+    valign = table_style.valign or "top",
+  }
+  if table_style.font_color then
+    data_style_base.font_color = table_style.font_color
+  end
+  if table_style.font_size then
+    data_style_base.font_size = table_style.font_size
+  end
+  if table_style.font_name then
+    data_style_base.font_name = table_style.font_name
+  end
+  if table_style.halign then
+    data_style_base.halign = table_style.halign
+  end
+  if table_style.border ~= false then
+    data_style_base.border = true
+    data_style_base.border_style = table_style.border_style or "thin"
+    data_style_base.border_color = table_style.border_color or "#D9D9D9"
+  end
+
+  -- Create odd row style
+  local odd_style_def = vim.tbl_extend("force", {}, data_style_base)
+  if table_style.odd_row_color then
+    odd_style_def.bg_color = table_style.odd_row_color
+  end
+  styles.odd_row, _ = wb:create_style(odd_style_def)
+
+  -- Create even row style (with alternating color if enabled)
+  local even_style_def = vim.tbl_extend("force", {}, data_style_base)
+  if table_style.alternating_rows ~= false and table_style.even_row_color then
+    even_style_def.bg_color = table_style.even_row_color
+  elseif table_style.even_row_color then
+    even_style_def.bg_color = table_style.even_row_color
+  end
+  styles.even_row, _ = wb:create_style(even_style_def)
+
+  -- NULL value styles (odd and even)
+  local null_style_base = {
+    italic = null_style.italic ~= false,
+    font_color = null_style.font_color or "#808080",
+    valign = table_style.valign or "top",
+  }
+  if table_style.border ~= false then
+    null_style_base.border = true
+    null_style_base.border_style = table_style.border_style or "thin"
+    null_style_base.border_color = table_style.border_color or "#D9D9D9"
+  end
+
+  local null_odd_def = vim.tbl_extend("force", {}, null_style_base)
+  if table_style.odd_row_color then
+    null_odd_def.bg_color = table_style.odd_row_color
+  end
+  styles.null_odd, _ = wb:create_style(null_odd_def)
+
+  local null_even_def = vim.tbl_extend("force", {}, null_style_base)
+  if table_style.alternating_rows ~= false and table_style.even_row_color then
+    null_even_def.bg_color = table_style.even_row_color
+  end
+  styles.null_even, _ = wb:create_style(null_even_def)
 
   -- Determine which result sets to export
   local sets_to_export = {}
   local export_indices = {}
   if result_set_index == 0 or result_set_index == nil then
-    -- Export all result sets
     for i, rs in ipairs(resultSets) do
       table.insert(sets_to_export, rs)
       table.insert(export_indices, i)
     end
   else
-    -- Export specific result set
     if resultSets[result_set_index] then
       table.insert(sets_to_export, resultSets[result_set_index])
       table.insert(export_indices, result_set_index)
@@ -1427,7 +1792,6 @@ function QueryExport.results_to_xlsx(resultSets, result_set_index, opts)
     local sheet_name = string.format("Result %d", export_indices[idx])
     local sheet = wb:add_sheet(sheet_name)
     if not sheet then
-      -- If sheet name fails, try generic name
       sheet = wb:add_sheet(string.format("Sheet%d", idx))
     end
 
@@ -1438,26 +1802,193 @@ function QueryExport.results_to_xlsx(resultSets, result_set_index, opts)
       goto continue_xlsx
     end
 
-    local data_start_row = 1
+    local current_row = 1
+
+    -- Write title if configured
+    if sheet_style.title and sheet_style.title ~= "" then
+      local title_cfg = sheet_style.title_style or {}
+      sheet:set_cell(current_row, 1, sheet_style.title)
+      if styles.title then
+        sheet:set_cell_style(current_row, 1, styles.title)
+      end
+      -- Merge title across all columns if configured
+      if title_cfg.merge_cells ~= false and #columns > 1 then
+        -- Note: merge_cells API depends on nvim-xlsx implementation
+        pcall(function()
+          sheet:merge_cells(current_row, 1, current_row, #columns)
+        end)
+      end
+      current_row = current_row + 1
+      -- Add margin rows after title
+      local margin = title_cfg.margin_bottom or 1
+      current_row = current_row + margin
+    end
+
+    local header_row = current_row
 
     -- Write headers
     if opts.include_headers ~= false and #columns > 0 then
       for col_idx, col_name in ipairs(columns) do
-        sheet:set_cell(1, col_idx, col_name)
-        if header_style_idx then
-          sheet:set_cell_style(1, col_idx, header_style_idx)
+        sheet:set_cell(current_row, col_idx, col_name)
+        if styles.header then
+          sheet:set_cell_style(current_row, col_idx, styles.header)
         end
       end
-      data_start_row = 2
+      current_row = current_row + 1
     end
 
-    -- Write data rows
+    local data_start_row = current_row
+
+    -- Build column type map for this result set
+    local column_type_map = build_column_type_map(resultSet)
+
+    -- Pre-resolve column styles for each column
+    local resolved_column_styles = {}
+    for _, col_name in ipairs(columns) do
+      resolved_column_styles[col_name] = resolve_column_style(col_name, column_styles, style_presets)
+    end
+
+    -- Get base style definitions for merging
+    local odd_row_base = vim.tbl_extend("force", {}, data_style_base)
+    if table_style.odd_row_color then
+      odd_row_base.bg_color = table_style.odd_row_color
+    end
+
+    local even_row_base = vim.tbl_extend("force", {}, data_style_base)
+    if table_style.alternating_rows ~= false and table_style.even_row_color then
+      even_row_base.bg_color = table_style.even_row_color
+    elseif table_style.even_row_color then
+      even_row_base.bg_color = table_style.even_row_color
+    end
+
+    -- Write data rows with type-based and conditional styling
+    local null_display = table_style.null_display or ""
     for row_idx, row in ipairs(rows) do
+      local is_even = (row_idx % 2 == 0)
+      local base_row_style = is_even and even_row_base or odd_row_base
+      local null_row_style = is_even and styles.null_even or styles.null_odd
+      local excel_row = data_start_row + row_idx - 1
+
       for col_idx, col_name in ipairs(columns) do
         local value = row[col_name]
-        if value ~= nil and value ~= vim.NIL then
-          sheet:set_cell(data_start_row + row_idx - 1, col_idx, value)
+        local is_null = (value == nil or value == vim.NIL)
+
+        if is_null then
+          -- Write NULL display value with NULL styling
+          if null_display ~= "" then
+            sheet:set_cell(excel_row, col_idx, null_display)
+          end
+          if null_row_style then
+            sheet:set_cell_style(excel_row, col_idx, null_row_style)
+          end
+        else
+          sheet:set_cell(excel_row, col_idx, value)
+
+          -- Build merged style: base row -> type style -> column style -> conditional styles
+          local final_style = vim.tbl_extend("force", {}, base_row_style)
+
+          -- Apply type-based style if enabled
+          if auto_type_formatting then
+            local type_category = column_type_map[col_name]
+            if type_category and type_styles[type_category] then
+              final_style = merge_styles(final_style, type_styles[type_category])
+            end
+          end
+
+          -- Apply column-specific style
+          local col_style = resolved_column_styles[col_name]
+          if col_style then
+            final_style = merge_styles(final_style, col_style)
+          end
+
+          -- Apply conditional styles (evaluated in order, all matching rules apply)
+          if conditional_styles and #conditional_styles > 0 then
+            for _, rule in ipairs(conditional_styles) do
+              if evaluate_condition(value, rule, col_name) then
+                local rule_style = rule.style
+                -- Resolve preset if specified
+                if rule_style and rule_style.preset and style_presets[rule_style.preset] then
+                  rule_style = vim.tbl_extend("force", style_presets[rule_style.preset], rule_style)
+                end
+                if rule_style then
+                  final_style = merge_styles(final_style, rule_style)
+                end
+              end
+            end
+          end
+
+          -- Get or create the merged style and apply it
+          local cell_style = get_or_create_style(final_style)
+          if cell_style then
+            sheet:set_cell_style(excel_row, col_idx, cell_style)
+          end
         end
+      end
+    end
+
+    -- Apply sheet-level settings
+    -- Freeze header row
+    if sheet_style.freeze_header ~= false and opts.include_headers ~= false then
+      pcall(function()
+        sheet:freeze_panes(header_row, 0)
+      end)
+    end
+
+    -- Enable auto-filter on headers
+    if sheet_style.auto_filter ~= false and opts.include_headers ~= false and #rows > 0 then
+      pcall(function()
+        local last_row = data_start_row + #rows - 1
+        sheet:set_auto_filter(header_row, 1, last_row, #columns)
+      end)
+    end
+
+    -- Set page orientation for printing
+    if sheet_style.orientation then
+      pcall(function()
+        sheet:set_orientation(sheet_style.orientation)
+      end)
+    end
+
+    -- Configure print settings
+    if sheet_style.fit_to_page or sheet_style.print_gridlines or sheet_style.print_headers then
+      pcall(function()
+        local print_settings = {}
+        if sheet_style.fit_to_page then
+          print_settings.fitToWidth = 1
+          print_settings.fitToHeight = 0  -- 0 = as many pages as needed
+        end
+        if sheet_style.print_gridlines then
+          print_settings.gridLines = true
+        end
+        if sheet_style.print_headers then
+          print_settings.headings = true
+        end
+        sheet:set_print_settings(print_settings)
+      end)
+    end
+
+    -- Auto-fit column widths
+    if table_style.auto_fit_columns ~= false then
+      local min_width = table_style.min_col_width or 8
+      local max_width = table_style.max_col_width or 50
+
+      for col_idx, col_name in ipairs(columns) do
+        -- Calculate width based on header and data
+        local width = #tostring(col_name)
+        for _, row in ipairs(rows) do
+          local value = row[col_name]
+          if value ~= nil and value ~= vim.NIL then
+            local val_len = #tostring(value)
+            if val_len > width then
+              width = val_len
+            end
+          end
+        end
+        -- Apply min/max constraints
+        width = math.max(min_width, math.min(max_width, width + 2))  -- +2 for padding
+        pcall(function()
+          sheet:set_column_width(col_idx, width)
+        end)
       end
     end
 
