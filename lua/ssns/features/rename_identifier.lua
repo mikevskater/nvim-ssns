@@ -243,12 +243,14 @@ local function sync_to_others(session, new_text)
   session.is_syncing = true
 
   local to_update = {}
+  local editing_occ = session.occurrences[session.editing_idx]
   for i, occ in ipairs(session.occurrences) do
     if i ~= session.editing_idx then
       table.insert(to_update, { idx = i, occ = occ })
     end
   end
 
+  -- Sort by line desc, then col desc (process rightmost first to preserve positions)
   table.sort(to_update, function(a, b)
     if a.occ.line ~= b.occ.line then
       return a.occ.line > b.occ.line
@@ -259,6 +261,9 @@ local function sync_to_others(session, new_text)
   for _, item in ipairs(to_update) do
     local occ = item.occ
     local formatted = occ.is_bracketed and ("[" .. new_text .. "]") or new_text
+    local old_len = occ.end_col - occ.start_col + 1
+    local new_len = #formatted
+    local len_diff = new_len - old_len
 
     local lines = vim.api.nvim_buf_get_lines(session.bufnr, occ.line - 1, occ.line, false)
     if lines and lines[1] then
@@ -266,6 +271,14 @@ local function sync_to_others(session, new_text)
       local new_line = line_text:sub(1, occ.start_col - 1) .. formatted .. line_text:sub(occ.end_col + 1)
       vim.api.nvim_buf_set_lines(session.bufnr, occ.line - 1, occ.line, false, { new_line })
       occ.end_col = occ.start_col + #formatted - 1
+
+      -- If this occurrence is on the same line as the editing occurrence
+      -- and comes BEFORE it, adjust the editing position
+      if occ.line == editing_occ.line and occ.start_col < editing_occ.start_col then
+        session.edit_start_col = session.edit_start_col + len_diff
+        editing_occ.start_col = editing_occ.start_col + len_diff
+        editing_occ.end_col = editing_occ.end_col + len_diff
+      end
     end
   end
 
@@ -353,6 +366,11 @@ local function on_text_changed(session)
 
   local new_text = get_current_editing_text(session)
   if new_text and new_text ~= session.last_text then
+    -- Update editing occurrence's end_col to reflect new text length
+    local editing_occ = session.occurrences[session.editing_idx]
+    local display_len = editing_occ.is_bracketed and (#new_text + 2) or #new_text
+    editing_occ.end_col = editing_occ.start_col + display_len - 1
+
     sync_to_others(session, new_text)
     update_extmarks(session)
   end
@@ -585,15 +603,25 @@ local function enter_rename_mode(session)
 
   -- Position cursor at end of identifier and enter insert mode
   -- end_col is 1-indexed inclusive, nvim_win_set_cursor uses 0-indexed column
-  -- So end_col as 0-indexed puts cursor right AFTER the word
   local cursor_col = editing_occ.end_col
   if editing_occ.is_bracketed then
     cursor_col = cursor_col - 1  -- Before the closing ]
   end
-  vim.api.nvim_win_set_cursor(0, { editing_occ.line, cursor_col })
 
-  -- Enter insert mode AT cursor position (not append mode)
-  vim.cmd('startinsert')
+  -- Check if cursor would be at or past end of line
+  -- nvim_win_set_cursor clamps to last char in normal mode, so we need append mode
+  local line_text = vim.api.nvim_buf_get_lines(session.bufnr, editing_occ.line - 1, editing_occ.line, false)[1] or ""
+  local line_len = #line_text
+
+  if cursor_col >= line_len then
+    -- Word is at end of line - set cursor to last char and use append mode
+    vim.api.nvim_win_set_cursor(0, { editing_occ.line, line_len - 1 })
+    vim.cmd('startinsert!')  -- Append mode (like 'a')
+  else
+    -- Word has characters after it - position after word and use insert mode
+    vim.api.nvim_win_set_cursor(0, { editing_occ.line, cursor_col })
+    vim.cmd('startinsert')
+  end
 
   local scope_desc = session.scope == "buffer" and "buffer-wide" or
     string.format("lines %d-%d", session.scope_start_line or 0, session.scope_end_line or 0)
