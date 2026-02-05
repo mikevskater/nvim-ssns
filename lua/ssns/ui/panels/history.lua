@@ -12,6 +12,18 @@ local Spinner = require('ssns.async.spinner')
 local Cancellation = require('ssns.async.cancellation')
 local Thread = require('ssns.async.thread')
 
+-- Lazy load ETL history module
+local EtlHistoryModule
+local function get_etl_history()
+  if not EtlHistoryModule then
+    local ok, mod = pcall(require, "ssns.history.etl_metadata")
+    if ok then
+      EtlHistoryModule = mod
+    end
+  end
+  return EtlHistoryModule
+end
+
 ---@class HistoryMatchPosition
 ---@field start number 1-indexed start position
 ---@field end_ number 1-indexed end position
@@ -66,6 +78,7 @@ local ui_state = {
   search_in_progress = false,
   search_progress = 0,
   search_cancel_token = nil,
+  filter_etl_only = false,  -- Show only ETL entries when true
 }
 
 ---Close the history window
@@ -114,7 +127,60 @@ function UiHistory.close()
     search_in_progress = false,
     search_progress = 0,
     search_cancel_token = nil,
+    filter_etl_only = false,
   }
+end
+
+---Toggle ETL-only filter
+local function toggle_etl_filter()
+  ui_state.filter_etl_only = not ui_state.filter_etl_only
+
+  -- Re-apply filters
+  apply_filters()
+
+  if multi_panel then
+    multi_panel:render_all()
+  end
+
+  local status = ui_state.filter_etl_only and "ETL scripts only" or "All entries"
+  vim.notify("History filter: " .. status, vim.log.levels.INFO)
+end
+
+---Apply all filters (search + ETL filter)
+local function apply_filters()
+  local etl_history = get_etl_history()
+
+  -- Start from all buffers
+  local filtered_buffers = {}
+
+  for _, buffer_history in ipairs(ui_state.all_buffer_histories) do
+    -- If ETL filter is on, filter out non-ETL entries within each buffer
+    if ui_state.filter_etl_only and etl_history then
+      local filtered_entries = {}
+      for _, entry in ipairs(buffer_history.entries) do
+        if etl_history.is_etl_entry(entry) then
+          table.insert(filtered_entries, entry)
+        end
+      end
+
+      if #filtered_entries > 0 then
+        -- Create a filtered view of this buffer history
+        local filtered_buffer = vim.tbl_extend("force", {}, buffer_history)
+        filtered_buffer.entries = filtered_entries
+        table.insert(filtered_buffers, filtered_buffer)
+      end
+    else
+      table.insert(filtered_buffers, buffer_history)
+    end
+  end
+
+  ui_state.buffer_histories = filtered_buffers
+
+  -- Reset selection if out of bounds
+  if ui_state.selected_buffer_idx > #ui_state.buffer_histories then
+    ui_state.selected_buffer_idx = math.max(1, #ui_state.buffer_histories)
+  end
+  ui_state.selected_entry_idx = 1
 end
 
 ---Get the current spinner frame for search progress display
@@ -229,9 +295,20 @@ local function render_history(state)
   cb:line("")
 
   for i, entry in ipairs(buffer_history.entries) do
-    -- Determine icon based on source and status
+    -- Determine icon based on source, status, and type
     local status_icon, icon_hl
-    if entry.source == "auto_save" then
+    local etl_history = get_etl_history()
+    local is_etl = etl_history and etl_history.is_etl_entry(entry)
+
+    if is_etl then
+      -- ETL entry - use special icon
+      status_icon = etl_history.get_etl_icon(entry)
+      if entry.status == "success" then
+        icon_hl = "SsnsStatusConnected"
+      else
+        icon_hl = "SsnsStatusError"
+      end
+    elseif entry.source == "auto_save" then
       status_icon = "[A]"
       icon_hl = "NvimFloatHint"
     elseif entry.status == "success" then
@@ -243,12 +320,19 @@ local function render_history(state)
     end
 
     -- Get first line of query (no normalization - display exactly as saved)
-    local first_newline = entry.query:find("\n")
-    local query_preview = first_newline and entry.query:sub(1, first_newline - 1) or entry.query
-    local was_truncated = false
-    if #query_preview > 50 then
-      query_preview = query_preview:sub(1, 50)
-      was_truncated = true
+    -- For ETL entries, show the ETL summary instead of raw script
+    local query_preview, was_truncated
+    if is_etl then
+      query_preview = etl_history.get_etl_summary(entry)
+      was_truncated = false
+    else
+      local first_newline = entry.query:find("\n")
+      query_preview = first_newline and entry.query:sub(1, first_newline - 1) or entry.query
+      was_truncated = false
+      if #query_preview > 50 then
+        query_preview = query_preview:sub(1, 50)
+        was_truncated = true
+      end
     end
 
     -- Check for search matches
@@ -345,14 +429,33 @@ local function render_preview(state)
   end
 
   local entry = buffer_history.entries[ui_state.selected_entry_idx]
+  local etl_history = get_etl_history()
+  local is_etl = etl_history and etl_history.is_etl_entry(entry)
 
   -- Add metadata header as SQL comments
   cb:line(string.format("-- Buffer: %s", buffer_history.buffer_name), "Comment")
   cb:line(string.format("-- Server: %s | Database: %s",
     buffer_history.server_name, buffer_history.database or "N/A"), "Comment")
 
-  -- Show different info based on source type
-  if entry.source == "auto_save" then
+  -- Show different info based on source type and ETL status
+  if is_etl then
+    -- ETL-specific header
+    local meta = entry.etl_metadata
+    cb:line(string.format("-- Time: %s | Duration: %dms | Type: ETL Script",
+      entry.timestamp, entry.execution_time_ms or 0), "Comment")
+    cb:line(string.format("-- Blocks: %d total, %d completed, %d failed",
+      meta.blocks_total, meta.blocks_completed, meta.blocks_failed), "Comment")
+
+    if entry.status == "error" then
+      cb:line(string.format("-- Error: %s", entry.error_message or "Script execution failed"), "Comment")
+    end
+
+    -- Add ETL block breakdown
+    local block_lines = etl_history.format_block_results(entry)
+    for _, line in ipairs(block_lines) do
+      cb:line(line, "Comment")
+    end
+  elseif entry.source == "auto_save" then
     cb:line(string.format("-- Time: %s | Type: Auto-Save", entry.timestamp), "Comment")
   else
     cb:line(string.format("-- Time: %s | Duration: %dms | Status: %s",
@@ -462,9 +565,11 @@ local function build_search_settings_line()
   local case_state = ui_state.search_case_sensitive and "On" or "Off"
   local regex_state = ui_state.search_use_regex and "On" or "Off"
   local word_state = ui_state.search_whole_word and "On" or "Off"
+  local etl_state = ui_state.filter_etl_only and "On" or "Off"
 
-  -- Format: " A-c Case:Off | A-r Regex:On | A-w Word:Off"
-  local line = string.format(" A-c Case:%s | A-r Regex:%s | A-w Word:%s", case_state, regex_state, word_state)
+  -- Format: " A-c Case:Off | A-r Regex:On | A-w Word:Off | e ETL:Off"
+  local line = string.format(" A-c Case:%s | A-r Regex:%s | A-w Word:%s | e ETL:%s",
+    case_state, regex_state, word_state, etl_state)
 
   -- Simple highlight - just highlight the whole line as Comment
   -- States will be highlighted based on their value
@@ -1338,6 +1443,7 @@ function UiHistory.show_history(options)
     search_in_progress = false,
     search_progress = 0,
     search_cancel_token = nil,
+    filter_etl_only = false,
   }
 
   -- Get keymaps from config
@@ -1442,6 +1548,7 @@ function UiHistory.show_history(options)
         keys = {
           { key = "Enter", desc = "Load selected query" },
           { key = "d", desc = "Delete entry/buffer" },
+          { key = "e", desc = "Toggle ETL filter" },
           { key = "c", desc = "Clear all history" },
           { key = "x", desc = "Export history" },
           { key = "q/Esc", desc = "Close" },
@@ -1470,6 +1577,7 @@ function UiHistory.show_history(options)
         search_in_progress = false,
         search_progress = 0,
         search_cancel_token = nil,
+        filter_etl_only = false,
       }
     end,
   })
@@ -1504,6 +1612,7 @@ function UiHistory.show_history(options)
     [km.clear_all or "c"] = clear_all,
     [km.export or "x"] = export_history,
     [km.search or "/"] = activate_search,
+    ["e"] = toggle_etl_filter,
   })
 
   -- Setup keymaps for history panel
@@ -1518,6 +1627,7 @@ function UiHistory.show_history(options)
     [km.clear_all or "c"] = clear_all,
     [km.export or "x"] = export_history,
     [km.search or "/"] = activate_search,
+    ["e"] = toggle_etl_filter,
   })
 
   -- Setup keymaps for preview panel (limited - just close and search)

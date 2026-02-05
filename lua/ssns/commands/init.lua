@@ -25,6 +25,22 @@ function M.register()
   testing.register()
   features.register()
   cast.register()
+
+  -- Note: ETL commands are lazy-loaded via ftplugin/ssns.lua
+  -- when .ssns files are opened (see M.setup_etl below)
+end
+
+---Setup ETL commands and macros (lazy-loaded for .ssns files)
+---Called from ftplugin/ssns.lua on first .ssns file open
+function M.setup_etl()
+  -- Only initialize once
+  if vim.g.ssns_etl_initialized then
+    return
+  end
+  vim.g.ssns_etl_initialized = true
+
+  local etl = require('ssns.commands.etl')
+  etl.setup()
 end
 
 return M

@@ -140,12 +140,44 @@ end
 ---@param name string Server or database name
 ---@param is_server boolean True if setting color for server, false for database
 ---@param current_color table? Current saved color if any
-function M.show_color_picker_menu(name, is_server, current_color)
+---@param inherited_tree_open boolean? Optional: was tree open (inherited from parent dialog)
+---@param inherited_tree_float boolean? Optional: was tree in float mode (inherited from parent dialog)
+---@param on_complete fun()? Optional callback when menu closes
+function M.show_color_picker_menu(name, is_server, current_color, inherited_tree_open, inherited_tree_float, on_complete)
   local has_float, UiFloat = pcall(require, 'nvim-float.window')
   if not has_float then
     -- Fallback to simpler UI
     M._show_color_picker_menu_simple(name, is_server, current_color)
+    if on_complete then on_complete() end
     return
+  end
+
+  -- Track if tree was open in float mode (to restore after menu closes)
+  -- Use inherited state if provided, otherwise check current state
+  local UiBuffer = require('ssns.ui.core.buffer')
+  local tree_was_open = inherited_tree_open ~= nil and inherited_tree_open or UiBuffer.is_open()
+  local tree_was_float = inherited_tree_float ~= nil and inherited_tree_float or UiBuffer.is_float()
+
+  -- Flag to skip tree restoration when on_complete callback is provided (caller handles restoration)
+  local skip_tree_restore = on_complete ~= nil
+
+  -- Function to restore tree and call on_complete after any close
+  local function on_close_handler()
+    -- Call on_complete callback first (e.g., to reopen edit form)
+    if on_complete then
+      vim.schedule(on_complete)
+    end
+
+    -- Restore tree only if no on_complete callback (caller handles their own restoration)
+    if not skip_tree_restore and tree_was_float and tree_was_open then
+      vim.schedule(function()
+        if not UiBuffer.is_open() then
+          UiBuffer.open("float")
+          local UiTree = require('ssns.ui.core.tree')
+          UiTree.render()
+        end
+      end)
+    end
   end
 
   local type_str = is_server and "server" or "database"
@@ -157,6 +189,7 @@ function M.show_color_picker_menu(name, is_server, current_color)
     height = 14,
     center = true,
     content_builder = true,
+    on_close = on_close_handler,
   })
 
   if not menu_float then
@@ -237,6 +270,10 @@ function M.show_color_picker_menu(name, is_server, current_color)
 
   -- Custom color
   vim.keymap.set("n", "c", function()
+    -- Colorpicker will handle its own completion
+    local saved_on_complete = on_complete
+    local saved_skip = skip_tree_restore
+    skip_tree_restore = true  -- Prevent on_close from running on_complete
     menu_float:close()
     open_colorpicker(name, current_color, function(color)
       if color then
@@ -245,6 +282,18 @@ function M.show_color_picker_menu(name, is_server, current_color)
         if vim.fn.exists(':LualineRefresh') == 2 then
           vim.cmd('LualineRefresh')
         end
+      end
+      -- Call on_complete callback or restore tree
+      if saved_on_complete then
+        vim.schedule(saved_on_complete)
+      elseif not saved_skip and tree_was_float and tree_was_open then
+        vim.schedule(function()
+          if not UiBuffer.is_open() then
+            UiBuffer.open("float")
+            local UiTree = require('ssns.ui.core.tree')
+            UiTree.render()
+          end
+        end)
       end
     end)
   end, { buffer = bufnr, nowait = true })
@@ -339,6 +388,29 @@ function M.prompt_set_color(name, is_server)
 
   -- Show the color picker menu
   M.show_color_picker_menu(name, is_server, current_color)
+end
+
+---Prompt user to set color with inherited tree state
+---Used when opening from another dialog that already closed the tree
+---@param name string Server or database name
+---@param is_server boolean True if setting color for server, false for database
+---@param tree_was_open boolean Was tree open before parent dialog opened
+---@param tree_was_float boolean Was tree in float mode
+---@param on_complete fun()? Optional callback when color picker closes
+function M.prompt_set_color_with_tree_state(name, is_server, tree_was_open, tree_was_float, on_complete)
+  -- Check if lualine is available
+  local has_lualine = pcall(require, 'lualine')
+  if not has_lualine then
+    vim.notify('SSNS: Lualine is not installed or not available', vim.log.levels.WARN)
+    if on_complete then on_complete() end
+    return
+  end
+
+  -- Get current color if any
+  local current_color = M.get_color(name)
+
+  -- Show the color picker menu with inherited tree state
+  M.show_color_picker_menu(name, is_server, current_color, tree_was_open, tree_was_float, on_complete)
 end
 
 ---Set color for a connection (uses lualine component's set_color)

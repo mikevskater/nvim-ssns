@@ -14,6 +14,10 @@ local current_screen = "list"  -- "list" or "new"
 local selected_index = 1
 local connections_list = {}
 
+-- Track if tree was open when we launched (to reopen on close)
+local tree_was_open = false
+local tree_was_float = false
+
 -- Database type options
 local DB_TYPES = {
   { id = "sqlserver", label = "SQL Server", icon = "" },
@@ -186,18 +190,51 @@ local function get_auth_label(db_type, auth_type)
 end
 
 ---Close the current floating window
-function AddServerUI.close()
+---@param opts { reopen_tree: boolean? }? Options (reopen_tree defaults to true)
+function AddServerUI.close(opts)
+  opts = opts or {}
+  local should_reopen_tree = opts.reopen_tree ~= false
+
   if current_float then
     pcall(function() current_float:close() end)
   end
   current_float = nil
   current_screen = "list"
   selected_index = 1
+
+  -- Reopen tree if it was open when we launched
+  if should_reopen_tree and tree_was_open then
+    vim.schedule(function()
+      local UiBuffer = require('ssns.ui.core.buffer')
+      -- Only reopen if tree is not already open
+      if not UiBuffer.is_open() then
+        local mode = tree_was_float and "float" or nil
+        UiBuffer.open(mode)
+        -- Re-render tree content
+        local UiTree = require('ssns.ui.core.tree')
+        UiTree.render()
+      end
+    end)
+  end
+
+  -- Reset tracking state
+  tree_was_open = false
+  tree_was_float = false
 end
 
 ---Open the Add Server UI
 function AddServerUI.open()
-  AddServerUI.close()
+  -- Track tree state before closing anything
+  local UiBuffer = require('ssns.ui.core.buffer')
+  local saved_tree_was_open = UiBuffer.is_open()
+  local saved_tree_was_float = UiBuffer.is_float()
+
+  -- Close without reopening tree (we'll handle that ourselves)
+  AddServerUI.close({ reopen_tree = false })
+
+  -- Restore tree state (close() resets it)
+  tree_was_open = saved_tree_was_open
+  tree_was_float = saved_tree_was_float
 
   -- Load connections asynchronously
   Connections.load_async(function(connections, err)
@@ -485,12 +522,8 @@ function AddServerUI.add_selected_to_tree()
   if server then
     vim.notify(string.format("Added '%s' to tree", conn.name), vim.log.levels.INFO)
 
-    -- Close the UI
+    -- Close the UI (this will reopen and render the tree)
     AddServerUI.close()
-
-    -- Refresh tree
-    local UiTree = require('ssns.ui.core.tree')
-    UiTree.render()
   else
     vim.notify(string.format("Failed to add '%s': %s", conn.name, err or "Unknown error"), vim.log.levels.ERROR)
   end
@@ -809,7 +842,7 @@ function AddServerUI.show_new_connection_form_with_state(form_state, edit_connec
   end
   keymaps[km.set_color or "c"] = function()
     AddServerUI._sync_inputs_to_form_state(form_state)
-    AddServerUI.set_connection_color(form_state)
+    AddServerUI.set_connection_color(form_state, edit_connection)
   end
   keymaps["?"] = function() AddServerUI.show_form_controls() end
 
@@ -985,7 +1018,8 @@ end
 
 ---Set lualine color for the connection being edited
 ---@param form_state table Current form values
-function AddServerUI.set_connection_color(form_state)
+---@param edit_connection ConnectionData? Original connection being edited
+function AddServerUI.set_connection_color(form_state, edit_connection)
   -- Validate - need a name to set color
   if not form_state.name or form_state.name == "" then
     vim.notify("Please enter a connection name first", vim.log.levels.WARN)
@@ -1011,16 +1045,27 @@ function AddServerUI.set_connection_color(form_state)
     return
   end
 
-  -- Close the current form temporarily
+  -- Save tree state before closing (inherit from add_server's tracked state)
+  local saved_tree_was_open = tree_was_open
+  local saved_tree_was_float = tree_was_float
+
+  -- Close the current form temporarily (without reopening tree - color picker will handle it)
   local saved_float = current_float
   current_float = nil
+  tree_was_open = false  -- Prevent AddServerUI.close() from reopening tree
+  tree_was_float = false
   if saved_float then
     pcall(function() saved_float:close() end)
   end
 
-  -- Open the color picker
+  -- Open the color picker with callback to reopen form after
   local LualineColors = require('ssns.lualine_colors')
-  LualineColors.prompt_set_color(lookup_name, true)
+  LualineColors.prompt_set_color_with_tree_state(lookup_name, true, saved_tree_was_open, saved_tree_was_float, function()
+    -- Restore tree state and reopen form
+    tree_was_open = saved_tree_was_open
+    tree_was_float = saved_tree_was_float
+    AddServerUI.show_new_connection_form_with_state(form_state, edit_connection)
+  end)
 end
 
 return AddServerUI

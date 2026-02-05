@@ -37,8 +37,9 @@ end
 ---@return number bufnr The buffer number
 function UiBuffer.create()
   -- Create a new buffer
-  -- First, wipe any stale buffer with this name to avoid E95 error
-  local stale_bufnr = vim.fn.bufnr("SSNS")
+  -- First, wipe any stale buffer with EXACT name "SSNS" to avoid E95 error
+  -- Use bufnr("^SSNS$") for exact match to avoid matching files with SSNS in path
+  local stale_bufnr = vim.fn.bufnr("^SSNS$")
   if stale_bufnr ~= -1 then
     pcall(vim.api.nvim_buf_delete, stale_bufnr, { force = true })
   end
@@ -49,7 +50,7 @@ function UiBuffer.create()
   vim.api.nvim_buf_set_option(bufnr, "buftype", "nofile")
   vim.api.nvim_buf_set_option(bufnr, "swapfile", false)
   vim.api.nvim_buf_set_option(bufnr, "bufhidden", "wipe")
-  vim.api.nvim_buf_set_option(bufnr, "filetype", "ssns")
+  vim.api.nvim_buf_set_option(bufnr, "filetype", "ssns-tree")  -- Use ssns-tree to avoid ftplugin/ssns.lua
   vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
 
   -- Set buffer name
@@ -707,11 +708,15 @@ function UiBuffer.show_help()
   local UiFloat = require('nvim-float.window')
   local ContentBuilder = require('nvim-float.content')
 
+  -- Track if tree was open in float mode (to restore after help closes)
+  local was_float = UiBuffer._is_float
+  local was_open = UiBuffer.is_open()
+
   local cb = ContentBuilder.new()
-  
+
   cb:header("SSNS - SQL Server NeoVim Studio")
   cb:blank()
-  
+
   cb:section("Navigation")
   cb:spans({ { text = "  <CR>, o      ", style = "key" }, { text = "Expand/collapse node" } })
   cb:spans({ { text = "  g            ", style = "key" }, { text = "Toggle parent group (collapse from child)" } })
@@ -720,13 +725,13 @@ function UiBuffer.show_help()
   cb:spans({ { text = "  <C-]>        ", style = "key" }, { text = "Go to last child in group" } })
   cb:spans({ { text = "  q            ", style = "key" }, { text = "Close SSNS window" } })
   cb:blank()
-  
+
   cb:section("Mouse")
   cb:spans({ { text = "  Click        ", style = "key" }, { text = "Select node" } })
   cb:spans({ { text = "  Click icon   ", style = "key" }, { text = "Expand/collapse node" } })
   cb:spans({ { text = "  Double-click ", style = "key" }, { text = "Expand/collapse node" } })
   cb:blank()
-  
+
   cb:section("Actions")
   cb:spans({ { text = "  a            ", style = "key" }, { text = "Add server connection" } })
   cb:spans({ { text = "  *            ", style = "key" }, { text = "Toggle favorite (server)" } })
@@ -736,16 +741,16 @@ function UiBuffer.show_help()
   cb:spans({ { text = "  <C-n>        ", style = "key" }, { text = "New query buffer with USE statement" } })
   cb:spans({ { text = "  <Leader>c    ", style = "key" }, { text = "Set lualine color (server/database)" } })
   cb:blank()
-  
+
   cb:section("Filtering")
   cb:spans({ { text = "  f            ", style = "key" }, { text = "Open filter UI for group" } })
   cb:spans({ { text = "  F            ", style = "key" }, { text = "Clear all filters on group" } })
   cb:blank()
-  
+
   cb:section("Query History")
   cb:spans({ { text = "  <Leader>h    ", style = "key" }, { text = "Open query history panel" } })
   cb:blank()
-  
+
   cb:section("Help")
   cb:spans({ { text = "  ?            ", style = "key" }, { text = "Show this help" } })
 
@@ -757,7 +762,19 @@ function UiBuffer.show_help()
       ['<CR>'] = function()
         vim.cmd('close')
       end,
-    }
+    },
+    on_close = function()
+      -- Restore tree if it was open in float mode
+      if was_float and was_open then
+        vim.schedule(function()
+          if not UiBuffer.is_open() then
+            UiBuffer.open("float")
+            local UiTree = require('ssns.ui.core.tree')
+            UiTree.render()
+          end
+        end)
+      end
+    end,
   })
 end
 

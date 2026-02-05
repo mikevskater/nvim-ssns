@@ -23,3 +23,13 @@ vim.api.nvim_create_user_command("SSNSInputTest", function()
 end, {
   desc = "Test input fields in floating window (dev)",
 })
+
+-- Register .ssns filetype for ETL scripts
+vim.filetype.add({
+  extension = {
+    ssns = "ssns",
+  },
+  pattern = {
+    [".*%.etl%.sql"] = "ssns",  -- Alternative: .etl.sql files
+  },
+})

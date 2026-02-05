@@ -871,6 +871,39 @@ local default_config = {
     max_auto_saves_per_buffer = -1,  -- Maximum auto-save entries per buffer (older ones are removed)
   },
 
+  -- ETL script execution settings
+  etl = {
+    -- Execution settings
+    default_timeout_ms = 60000,      -- Per-block timeout (60 seconds)
+    max_parallel_blocks = 1,         -- Reserved for future parallel execution
+
+    -- Lua sandbox settings
+    lua_timeout_ms = 5000,           -- Lua block timeout
+
+    -- Results display settings
+    show_progress = true,            -- Show progress during execution
+    collapse_successful = false,     -- Collapse successful blocks in results
+    max_preview_rows = 100,          -- Rows to show per block result
+
+    -- Cross-server transfer settings
+    bulk_insert_batch_size = 1000,   -- Rows per INSERT batch
+    inline_values_threshold = 100,   -- Use inline VALUES for small datasets
+
+    -- History integration
+    record_history = true,           -- Record ETL executions to query history
+
+    -- Safety settings
+    require_explicit_server = false, -- Require @server on every block
+    confirm_cross_server = false,    -- Confirm before cross-server ETL
+
+    -- Global macro library settings
+    macros = {
+      enabled = true,                -- Enable global macro system
+      paths = {},                    -- Additional macro search paths
+      reload_on_save = true,         -- Auto-reload macros when files are saved
+    },
+  },
+
   keymaps = {
     -- Common keymaps shared across multiple UIs
     common = {
