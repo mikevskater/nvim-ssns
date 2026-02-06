@@ -62,6 +62,8 @@
 ---@class CacheConfig
 ---@field ttl number Time to live in seconds for cached data
 ---@field enabled boolean Enable query result caching (default: true)
+---@field persist_metadata boolean Persist metadata queries to disk for cross-session caching (default: true)
+---@field metadata_disk_ttl number Time to live in seconds for disk-cached metadata (default: 86400 = 24h)
 
 ---@class QueryConfig
 ---@field default_limit number Default LIMIT for SELECT queries (0 = no limit)
@@ -635,6 +637,8 @@ local default_config = {
   cache = {
     ttl = 300,  -- 5 minutes
     enabled = true,  -- Enable query result caching
+    persist_metadata = true,  -- Persist metadata queries to disk for cross-session caching
+    metadata_disk_ttl = 86400,  -- 24 hours disk TTL for metadata queries
   },
 
   query = {
@@ -1480,9 +1484,12 @@ function Config.validate(config)
   end
 
   -- Validate cache configuration (if provided)
-  if config.cache and config.cache.ttl then
-    if config.cache.ttl < 0 then
+  if config.cache then
+    if config.cache.ttl and config.cache.ttl < 0 then
       return false, "cache.ttl must be a positive number"
+    end
+    if config.cache.metadata_disk_ttl and config.cache.metadata_disk_ttl < 0 then
+      return false, "cache.metadata_disk_ttl must be non-negative"
     end
   end
 

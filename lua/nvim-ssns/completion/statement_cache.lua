@@ -21,6 +21,9 @@ local Debug = require('nvim-ssns.debug')
 -- Private cache storage: bufnr -> BufferStatementCache
 local _cache = {}
 
+-- ETL per-block cache: "bufnr:block_start_line" -> { content_key, chunks, tokens, temp_tables, go_boundaries }
+local _etl_block_cache = {}
+
 -- Callbacks to invoke after cache update: array of functions(bufnr, cache)
 local _update_callbacks = {}
 
@@ -349,6 +352,7 @@ function StatementCache.setup()
     callback = function(args)
       local bufnr = args.buf
       _cache[bufnr] = nil
+      StatementCache._cleanup_etl_cache(bufnr)
       if pending_timers[bufnr] then
         vim.fn.timer_stop(pending_timers[bufnr])
         pending_timers[bufnr] = nil
@@ -772,6 +776,7 @@ function StatementCache.clear_all()
   end
   pending_timers = {}
   _cache = {}
+  _etl_block_cache = {}
 end
 
 ---Get cache statistics (for debugging)
@@ -842,6 +847,237 @@ function StatementCache.get_chunk_tokens(bufnr, chunk)
 
   -- Fallback: return all tokens (caller should filter by position)
   return cache.tokens
+end
+
+-- ============================================================================
+-- ETL Per-Block Cache
+-- ============================================================================
+
+---Compute a lightweight content key for change detection
+---@param text string Block SQL content
+---@return string content_key
+local function etl_content_key(text)
+  local len = #text
+  local first = text:sub(1, 40)
+  local last = len > 40 and text:sub(-40) or ""
+  return string.format("%d:%s:%s", len, first, last)
+end
+
+---Get or build cache for an ETL SQL block
+---@param block_sql string The SQL content of the ETL block
+---@param cache_key string Cache key ("bufnr:block_start_line")
+---@return BufferStatementCache cache The parsed cache entry
+function StatementCache.get_or_build_etl_block_cache(block_sql, cache_key)
+  local content_key = etl_content_key(block_sql)
+
+  -- Check if we have a valid cached entry
+  local entry = _etl_block_cache[cache_key]
+  if entry and entry.content_key == content_key then
+    return entry
+  end
+
+  -- Parse the block SQL
+  local StatementParser = require('nvim-ssns.completion.statement_parser')
+  local chunks, temp_tables, tokens = StatementParser.parse(block_sql)
+
+  -- Extract GO boundaries
+  local go_boundaries = {}
+  local last_batch = 0
+  for _, chunk in ipairs(chunks) do
+    if chunk.go_batch_index and chunk.go_batch_index ~= last_batch then
+      table.insert(go_boundaries, chunk.start_line)
+      last_batch = chunk.go_batch_index
+    end
+  end
+
+  -- Store cache entry
+  _etl_block_cache[cache_key] = {
+    content_key = content_key,
+    chunks = chunks,
+    tokens = tokens,
+    temp_tables = temp_tables,
+    go_boundaries = go_boundaries,
+    last_update = os.clock(),
+  }
+
+  return _etl_block_cache[cache_key]
+end
+
+---Get context for an ETL block at a block-relative position
+---@param block_sql string The SQL content of the ETL block
+---@param cache_key string Cache key ("bufnr:block_start_line")
+---@param line number Block-relative 1-indexed line
+---@param col number 1-indexed column
+---@param connection table? Optional database connection for star column expansion
+---@return table? context Context with tables, aliases, temp_tables, ctes, subquery, chunk
+function StatementCache.get_context_for_etl_block(block_sql, cache_key, line, col, connection)
+  local cache = StatementCache.get_or_build_etl_block_cache(block_sql, cache_key)
+
+  local StatementParser = require('nvim-ssns.completion.statement_parser')
+  local chunk = StatementParser.get_chunk_at_position(cache.chunks, line, col)
+  if not chunk then
+    return nil
+  end
+
+  -- Check if inside a subquery
+  local subquery = StatementParser.get_subquery_at_position(chunk, line, col)
+
+  -- Build available tables/aliases based on scope (mirrors get_context_at_position logic)
+  local tables = {}
+  local aliases = {}
+
+  if subquery then
+    tables = vim.deepcopy(subquery.tables or {})
+    for _, t in ipairs(subquery.tables or {}) do
+      if t.alias then
+        aliases[t.alias] = t
+      end
+    end
+    for _, sq in ipairs(subquery.subqueries or {}) do
+      if sq.alias then
+        local expanded_sq_cols = expand_subquery_columns(sq, connection)
+        expanded_sq_cols = expand_star_columns(expanded_sq_cols, connection)
+        aliases[sq.alias] = {
+          name = sq.alias,
+          alias = sq.alias,
+          is_subquery = true,
+          columns = expanded_sq_cols,
+        }
+        table.insert(tables, {
+          name = sq.alias,
+          alias = sq.alias,
+          is_subquery = true,
+          columns = expanded_sq_cols,
+        })
+      end
+    end
+
+    -- Include outer query tables/aliases for correlated subquery support
+    for _, t in ipairs(chunk.tables or {}) do
+      if t.alias and not aliases[t.alias] then
+        aliases[t.alias] = t
+      end
+      local found = false
+      for _, existing in ipairs(tables) do
+        if existing.name == t.name and existing.alias == t.alias then
+          found = true
+          break
+        end
+      end
+      if not found then
+        table.insert(tables, t)
+      end
+    end
+
+    for alias_name, table_ref in pairs(chunk.aliases or {}) do
+      if not aliases[alias_name] then
+        aliases[alias_name] = table_ref
+      end
+    end
+  else
+    tables = vim.deepcopy(chunk.tables or {})
+    aliases = vim.deepcopy(chunk.aliases or {})
+    for _, sq in ipairs(chunk.subqueries or {}) do
+      if sq.alias then
+        local expanded_sq_cols = expand_subquery_columns(sq, connection)
+        expanded_sq_cols = expand_star_columns(expanded_sq_cols, connection)
+        aliases[sq.alias] = {
+          name = sq.alias,
+          alias = sq.alias,
+          is_subquery = true,
+          columns = expanded_sq_cols,
+        }
+        table.insert(tables, {
+          name = sq.alias,
+          alias = sq.alias,
+          is_subquery = true,
+          columns = expanded_sq_cols,
+        })
+      end
+    end
+  end
+
+  -- Add CTEs as available references (with star column expansion)
+  local ctes_in_tables = {}
+  for i, tbl in ipairs(tables) do
+    if tbl.is_cte and tbl.name then
+      ctes_in_tables[tbl.name:lower()] = i
+    end
+  end
+
+  local ctes = {}
+  for _, cte in ipairs(chunk.ctes or {}) do
+    local expanded_columns = expand_star_columns(cte.columns, connection, ctes, cte.tables)
+    local cte_with_expanded = {
+      name = cte.name,
+      columns = expanded_columns,
+      tables = cte.tables,
+    }
+    ctes[cte.name] = cte_with_expanded
+    local existing_idx = ctes_in_tables[cte.name:lower()]
+    if existing_idx then
+      tables[existing_idx].columns = expanded_columns
+    end
+  end
+
+  -- Get visible temp tables from block cache (self-contained, no cross-block refs)
+  local current_batch = chunk and chunk.go_batch_index or 1
+  local temp_tables_visible = {}
+  for name, info in pairs(cache.temp_tables) do
+    if info.dropped_at_line and info.dropped_at_line < line then
+      goto continue_etl_temp
+    end
+    if info.is_global then
+      temp_tables_visible[name] = info
+    elseif info.created_in_batch == current_batch then
+      temp_tables_visible[name] = info
+    end
+    ::continue_etl_temp::
+  end
+
+  -- Add temp tables to available tables
+  for name, temp_info in pairs(temp_tables_visible) do
+    local expanded_temp_cols = expand_star_columns(temp_info.columns, connection)
+    table.insert(tables, {
+      name = name,
+      is_temp_table = true,
+      is_global = temp_info.is_global,
+      columns = expanded_temp_cols,
+    })
+  end
+
+  return {
+    chunk = chunk,
+    subquery = subquery,
+    tables = tables,
+    aliases = aliases,
+    ctes = ctes,
+    temp_tables = temp_tables_visible,
+  }
+end
+
+---Get tokens for an ETL SQL block
+---@param block_sql string The SQL content of the ETL block
+---@param cache_key string Cache key ("bufnr:block_start_line")
+---@return Token[] tokens Parsed tokens
+function StatementCache.get_etl_block_tokens(block_sql, cache_key)
+  local cache = StatementCache.get_or_build_etl_block_cache(block_sql, cache_key)
+  return cache.tokens or {}
+end
+
+---Clean up ETL block cache entries for a given buffer
+---@param bufnr number Buffer number
+function StatementCache._cleanup_etl_cache(bufnr)
+  local prefix = tostring(bufnr) .. ":"
+  local to_remove = {}
+  for key, _ in pairs(_etl_block_cache) do
+    if key:sub(1, #prefix) == prefix then
+      table.insert(to_remove, key)
+    end
+  end
+  for _, key in ipairs(to_remove) do
+    _etl_block_cache[key] = nil
+  end
 end
 
 return StatementCache

@@ -337,6 +337,163 @@ function Context.detect(bufnr, line_num, col, tokens)
   return context
 end
 
+---Full context detection for ETL (.ssns) files
+---Parses only the current SQL block's content for proper per-block isolation
+---@param bufnr number Buffer number
+---@param line_num number 1-indexed buffer line number
+---@param col number 1-indexed column
+---@return table context Full context with should_complete flag
+function Context._detect_full_etl(bufnr, line_num, col)
+  Debug.log(string.format("[statement_context] _detect_full_etl: bufnr=%d, line=%d, col=%d", bufnr, line_num, col))
+
+  local EtlHighlighting = require('nvim-ssns.etl.highlighting')
+
+  -- Get block at cursor
+  local block = EtlHighlighting.get_block_at_cursor(bufnr)
+
+  local no_complete = {
+    type = Context.Type.UNKNOWN,
+    mode = "unknown",
+    prefix = "",
+    trigger = nil,
+    should_complete = false,
+    line = "",
+    line_num = line_num,
+    col = col,
+    chunk = nil,
+    tables = {},
+    aliases = {},
+    ctes = {},
+    temp_tables = {},
+    subquery = nil,
+  }
+
+  if not block or block.type ~= "sql" then
+    return no_complete
+  end
+
+  local block_content = block.content
+  if not block_content or block_content == "" then
+    return no_complete
+  end
+
+  -- Get buffer lines for coordinate mapping
+  local buf_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local content_start_line = EtlHighlighting.find_content_start_line(block, buf_lines)
+
+  -- Compute block-relative cursor position
+  local relative_line = line_num - content_start_line + 1
+  local relative_col = col
+
+  -- Cursor is above SQL content (still in directives)
+  if relative_line < 1 then
+    return no_complete
+  end
+
+  -- Build cache key
+  local cache_key = string.format("%d:%d", bufnr, block.start_line)
+
+  -- Get tokens for the block
+  local tokens = StatementCache.get_etl_block_tokens(block_content, cache_key)
+
+  -- Get current line text (buffer-absolute)
+  local line_text_arr = vim.api.nvim_buf_get_lines(bufnr, line_num - 1, line_num, false)
+  if #line_text_arr == 0 then
+    return no_complete
+  end
+  local line = line_text_arr[1]
+
+  -- Check if in comment or string (using block-relative coordinates)
+  if TokenContext.is_in_string_or_comment(tokens, relative_line, relative_col) then
+    local token_at = TokenContext.get_token_at_position(tokens, relative_line, relative_col)
+    local mode = "string_or_comment"
+    if token_at then
+      if token_at.type == "comment" or token_at.type == "line_comment" then
+        mode = "comment"
+      elseif token_at.type == "string" then
+        mode = "string"
+      end
+    end
+    no_complete.line = line
+    no_complete.mode = mode
+    return no_complete
+  end
+
+  -- Get context from block cache (block-relative coordinates)
+  local cache_ctx = StatementCache.get_context_for_etl_block(
+    block_content, cache_key, relative_line, relative_col
+  )
+
+  -- Extract prefix and trigger (block-relative coordinates)
+  local prefix, trigger = TokenContext.extract_prefix_and_trigger(tokens, relative_line, relative_col)
+
+  -- Detect type using the same priority chain as detect()
+  local ctx_type, mode, extra
+  local chunk = cache_ctx and cache_ctx.chunk
+
+  -- Try special cases first
+  ctx_type, mode, extra = Context._detect_special_cases(tokens, relative_line, relative_col)
+
+  if not ctx_type and chunk then
+    -- Use clause-based detection with block-relative coordinates
+    -- Pass bufnr for API calls but tokens/chunk are already block-scoped
+    ctx_type, mode, extra = ClauseContext.detect_from_clause(
+      bufnr, relative_line, relative_col, tokens, chunk, cache_ctx,
+      Subquery.detect_unparsed
+    )
+  end
+
+  if not ctx_type then
+    ctx_type, mode, extra = TokenContext.detect_context(tokens, relative_line, relative_col)
+  end
+
+  extra = extra or {}
+
+  -- Build context result with buffer-absolute line_num/col for downstream
+  local context = {
+    type = ctx_type,
+    mode = mode,
+    prefix = prefix,
+    trigger = trigger,
+
+    -- Pass through block-scoped StatementCache data
+    chunk = chunk,
+    tables = cache_ctx and cache_ctx.tables or {},
+    aliases = build_aliases_map(cache_ctx),
+    ctes = cache_ctx and cache_ctx.ctes or {},
+    temp_tables = cache_ctx and cache_ctx.temp_tables or {},
+    subquery = cache_ctx and cache_ctx.subquery,
+    tables_in_scope = build_tables_in_scope(cache_ctx),
+
+    -- Extra context from type detection
+    table_ref = extra.table_ref,
+    schema = extra.schema,
+    database = extra.database,
+    filter_schema = extra.filter_schema,
+    filter_database = extra.filter_database,
+    filter_table = extra.filter_table,
+    potential_database = extra.potential_database,
+    omit_schema = extra.omit_schema,
+    omit_table = extra.omit_table,
+    value_position = extra.value_position,
+    left_side = extra.left_side,
+    insert_table = extra.insert_table,
+    insert_schema = extra.insert_schema,
+    table = extra.table,
+
+    -- Full check fields (buffer-absolute)
+    should_complete = ctx_type ~= Context.Type.UNKNOWN,
+    line = line,
+    line_num = line_num,
+    col = col,
+  }
+
+  Debug.log(string.format("[statement_context] _detect_full_etl result: should_complete=%s, type=%s, mode=%s",
+    tostring(context.should_complete), ctx_type, mode))
+
+  return context
+end
+
 ---Full context detection with all checks (entry point for blink.cmp)
 ---@param bufnr number Buffer number
 ---@param line_num number 1-indexed line number
@@ -344,6 +501,11 @@ end
 ---@return table context Full context with should_complete flag
 function Context.detect_full(bufnr, line_num, col)
   Debug.log(string.format("[statement_context] detect_full: bufnr=%d, line=%d, col=%d", bufnr, line_num, col))
+
+  -- ETL files: use per-block detection for proper isolation
+  if vim.api.nvim_get_option_value('filetype', { buf = bufnr }) == 'ssns' then
+    return Context._detect_full_etl(bufnr, line_num, col)
+  end
 
   -- Get line text
   local lines = vim.api.nvim_buf_get_lines(bufnr, line_num - 1, line_num, false)

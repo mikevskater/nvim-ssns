@@ -74,6 +74,10 @@ function Ssns.setup(user_config)
   local LualineColors = require('nvim-ssns.lualine_colors')
   LualineColors.init_async()
 
+  -- Setup query cache (applies config, registers disk cache VimLeavePre)
+  local QueryCache = require('nvim-ssns.query_cache')
+  QueryCache.setup(Config.get())
+
   -- Load servers from configuration
   local Cache = require('nvim-ssns.cache')
   local Connections = require('nvim-ssns.connections')

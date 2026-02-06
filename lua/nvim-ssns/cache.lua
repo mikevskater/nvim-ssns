@@ -243,6 +243,10 @@ end
 
 ---Refresh all servers (reload databases)
 function Cache.refresh_all()
+  -- Clear disk and memory caches so metadata is re-fetched from server
+  local QueryCache = require('nvim-ssns.query_cache')
+  QueryCache.clear_all()
+
   for _, server in ipairs(Cache.servers) do
     server:reload()
   end
@@ -255,6 +259,14 @@ function Cache.refresh_server(server_name)
   local server = Cache.find_server(server_name)
   if not server then
     return false
+  end
+
+  -- Clear query cache for this server's connection so metadata is re-fetched
+  if server.connection_config then
+    local Connections = require('nvim-ssns.connections')
+    local connection_key = Connections.generate_connection_key(server.connection_config)
+    local QueryCache = require('nvim-ssns.query_cache')
+    QueryCache.invalidate_connection(connection_key)
   end
 
   server:reload()

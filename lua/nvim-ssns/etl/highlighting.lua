@@ -375,4 +375,7 @@ function EtlHighlighting.get_namespace()
   return ns_id
 end
 
+---Exported for use by completion system (coordinate mapping)
+EtlHighlighting.find_content_start_line = find_content_start_line
+
 return EtlHighlighting
