@@ -249,6 +249,37 @@ function M.execute_block()
   end)
 end
 
+---Show a styled error float for validation/dependency errors
+---@param title string Window title
+---@param header_text string Header line
+---@param errors string[] Error messages
+local function show_validation_error_float(title, header_text, errors)
+  local cb = ContentBuilder.new()
+
+  cb:header(header_text)
+  cb:separator("─", 60)
+  cb:blank()
+
+  for _, err_msg in ipairs(errors) do
+    cb:styled("  " .. err_msg, "error")
+  end
+
+  local Float = require("nvim-float.window")
+  local win = Float.create_styled(cb, {
+    title = title,
+    min_width = 70,
+    max_height = 30,
+    center = true,
+    focusable = true,
+    footer = "q: close",
+  })
+
+  if win then
+    vim.keymap.set("n", "q", function() win:close() end, { buffer = win.buf, nowait = true })
+    vim.keymap.set("n", "<Esc>", function() win:close() end, { buffer = win.buf, nowait = true })
+  end
+end
+
 ---Validate ETL script without executing
 function M.validate()
   local bufnr = vim.api.nvim_get_current_buf()
@@ -256,61 +287,154 @@ function M.validate()
   -- Parse script
   local script, err = parse_buffer(bufnr)
   if not script then
-    vim.notify("ETL Validation Failed:\n" .. (err or "Unknown error"), vim.log.levels.ERROR)
+    local error_lines = {}
+    for line in (err or "Unknown error"):gmatch("[^\n]+") do
+      table.insert(error_lines, line)
+    end
+    show_validation_error_float("ETL Validation", "ETL Validation Failed", error_lines)
     return
   end
 
   -- Resolve dependencies
   local resolved, dep_errors = EtlParser.resolve_dependencies(script)
   if not resolved then
-    vim.notify("ETL Dependency Errors:\n" .. table.concat(dep_errors, "\n"), vim.log.levels.ERROR)
+    show_validation_error_float("ETL Validation", "ETL Dependency Errors", dep_errors)
     return
   end
 
-  -- Success
+  -- Success — build styled float
+  local cb = ContentBuilder.new()
+
+  cb:header("ETL Validation")
+  cb:separator("─", 60)
+  cb:blank()
+
+  -- Summary stats
+  local sql_count = vim.tbl_count(vim.tbl_filter(function(b) return b.type == "sql" end, script.blocks))
+  local lua_count = vim.tbl_count(vim.tbl_filter(function(b) return b.type == "lua" end, script.blocks))
+
+  cb:spans({
+    { text = "Blocks: " },
+    { text = tostring(#script.blocks), style = "number" },
+    { text = " (" },
+    { text = tostring(sql_count), style = "number" },
+    { text = " ", },
+    { text = "SQL", style = "keyword" },
+    { text = ", " },
+    { text = tostring(lua_count), style = "number" },
+    { text = " " },
+    { text = "Lua", style = "function" },
+    { text = ")" },
+  })
+
+  cb:spans({
+    { text = "Variables: " },
+    { text = tostring(vim.tbl_count(script.variables)), style = "number" },
+  })
+
+  cb:blank()
+
+  -- Variables section
+  if vim.tbl_count(script.variables) > 0 then
+    cb:section("Variables")
+    for name, value in pairs(script.variables) do
+      cb:spans({
+        { text = "  " },
+        { text = name, style = "identifier" },
+        { text = " = ", style = "muted" },
+        { text = vim.inspect(value), style = "string" },
+      })
+    end
+    cb:blank()
+  end
+
+  -- Blocks section
+  cb:section("Blocks")
+  for i, block in ipairs(script.blocks) do
+    local type_style = block.type == "sql" and "keyword" or "function"
+
+    -- Block line: number + type tag + name + server.database
+    local spans = {
+      { text = string.format("  %d. ", i), style = "number" },
+      { text = "[" .. block.type:upper() .. "]", style = type_style },
+      { text = " " },
+      { text = block.name, style = "identifier" },
+    }
+
+    if block.server or block.database then
+      local parts = {}
+      if block.server then table.insert(parts, block.server) end
+      if block.database then table.insert(parts, block.database) end
+      table.insert(spans, { text = " → ", style = "muted" })
+      table.insert(spans, { text = table.concat(parts, "."), style = "info" })
+    end
+
+    cb:spans(spans)
+
+    -- Details line (indented)
+    local detail_spans = {}
+    local function add_detail(label, value, style)
+      if #detail_spans > 0 then
+        table.insert(detail_spans, { text = "  " })
+      end
+      table.insert(detail_spans, { text = label .. ": ", style = "muted" })
+      table.insert(detail_spans, { text = value, style = style or "string" })
+    end
+
+    if block.mode then add_detail("mode", block.mode, "keyword") end
+    if block.target then add_detail("target", block.target, "identifier") end
+    if block.input then add_detail("input", block.input, "warning") end
+    if block.options.skip_on_empty then add_detail("skip_on_empty", "true", "info") end
+    if block.options.continue_on_error then add_detail("continue_on_error", "true", "info") end
+    if block.options.timeout then add_detail("timeout", tostring(block.options.timeout), "number") end
+
+    if #detail_spans > 0 then
+      table.insert(detail_spans, 1, { text = "     " })
+      cb:spans(detail_spans)
+    end
+
+    -- Description
+    if block.description then
+      cb:styled("     " .. block.description, "muted")
+    end
+  end
+
+  -- Footer
+  cb:blank()
+  cb:separator("─", 60)
+
   local servers = {}
   local databases = {}
   for _, block in ipairs(script.blocks) do
-    if block.server and not servers[block.server] then
-      servers[block.server] = true
-    end
-    if block.database and not databases[block.database] then
-      databases[block.database] = true
-    end
+    if block.server then servers[block.server] = true end
+    if block.database then databases[block.database] = true end
   end
 
   local server_list = vim.tbl_keys(servers)
   local database_list = vim.tbl_keys(databases)
 
-  local lines = {
-    "ETL Script Valid:",
-    string.format("  Blocks: %d (%d SQL, %d Lua)",
-      #script.blocks,
-      vim.tbl_count(vim.tbl_filter(function(b) return b.type == "sql" end, script.blocks)),
-      vim.tbl_count(vim.tbl_filter(function(b) return b.type == "lua" end, script.blocks))),
-    string.format("  Variables: %d", vim.tbl_count(script.variables)),
-    string.format("  Servers: %s", #server_list > 0 and table.concat(server_list, ", ") or "none specified"),
-    string.format("  Databases: %s", #database_list > 0 and table.concat(database_list, ", ") or "none specified"),
-  }
+  cb:spans({
+    { text = "Servers: " },
+    { text = #server_list > 0 and table.concat(server_list, ", ") or "none", style = "info" },
+    { text = " | Databases: " },
+    { text = #database_list > 0 and table.concat(database_list, ", ") or "none", style = "info" },
+  })
 
-  -- Per-block details
-  for i, block in ipairs(script.blocks) do
-    table.insert(lines, string.format("  [%d] %s (%s)", i, block.name, block.type))
-    local details = {}
-    if block.server then table.insert(details, "server=" .. block.server) end
-    if block.database then table.insert(details, "db=" .. block.database) end
-    if block.mode then table.insert(details, "mode=" .. block.mode) end
-    if block.target then table.insert(details, "target=" .. block.target) end
-    if block.input then table.insert(details, "input=" .. block.input) end
-    if block.options.skip_on_empty then table.insert(details, "skip_on_empty") end
-    if block.options.continue_on_error then table.insert(details, "continue_on_error") end
-    if block.options.timeout then table.insert(details, "timeout=" .. block.options.timeout) end
-    if #details > 0 then
-      table.insert(lines, "      " .. table.concat(details, ", "))
-    end
+  -- Display in floating window
+  local Float = require("nvim-float.window")
+  local win = Float.create_styled(cb, {
+    title = "ETL Validation",
+    min_width = 70,
+    max_height = 30,
+    center = true,
+    focusable = true,
+    footer = "q: close",
+  })
+
+  if win then
+    vim.keymap.set("n", "q", function() win:close() end, { buffer = win.buf, nowait = true })
+    vim.keymap.set("n", "<Esc>", function() win:close() end, { buffer = win.buf, nowait = true })
   end
-
-  vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end
 
 ---Show execution plan without running (dry run)
