@@ -1969,27 +1969,10 @@ function QueryExport.results_to_xlsx(resultSets, result_set_index, opts)
 
     -- Auto-fit column widths
     if table_style.auto_fit_columns ~= false then
-      local min_width = table_style.min_col_width or 8
-      local max_width = table_style.max_col_width or 50
-
-      for col_idx, col_name in ipairs(columns) do
-        -- Calculate width based on header and data
-        local width = #tostring(col_name)
-        for _, row in ipairs(rows) do
-          local value = row[col_name]
-          if value ~= nil and value ~= vim.NIL then
-            local val_len = #tostring(value)
-            if val_len > width then
-              width = val_len
-            end
-          end
-        end
-        -- Apply min/max constraints
-        width = math.max(min_width, math.min(max_width, width + 2))  -- +2 for padding
-        pcall(function()
-          sheet:set_column_width(col_idx, width)
-        end)
-      end
+      sheet:auto_fit_columns({
+        min_width = table_style.min_col_width or 8,
+        max_width = table_style.max_col_width or 50,
+      })
     end
 
     ::continue_xlsx::

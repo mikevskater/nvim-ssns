@@ -552,6 +552,14 @@ function QueryResults.format_results_styled(resultSets, sql, execution_time_ms, 
       end
     end
 
+    -- Render captured print() output from Lua blocks
+    if resultSet.log_output and #resultSet.log_output > 0 then
+      for _, log_line in ipairs(resultSet.log_output) do
+        builder:styled("  " .. log_line, "muted")
+      end
+      builder:blank()
+    end
+
     -- Block error entry (from ETL execution) — render inline and skip table
     if resultSet.block_error then
       local err = resultSet.block_error
@@ -569,6 +577,11 @@ function QueryResults.format_results_styled(resultSets, sql, execution_time_ms, 
         builder:styled("Stack: " .. tostring(err.stack):gsub("\n", " "), "muted")
       end
       builder:blank()
+      goto continue_result_set
+    end
+
+    -- Skip table rendering for log-only entries (print output with no data rows)
+    if row_count == 0 and resultSet.log_output and #resultSet.log_output > 0 then
       goto continue_result_set
     end
 

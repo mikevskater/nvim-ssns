@@ -365,17 +365,24 @@ function EtlExecutor:_execute_lua_block(block)
       execution_time_ms + sql_time,
       generated_sql
     )
+    if #env._log > 0 then
+      etl_result.log_output = env._log
+    end
     return etl_result, nil
   end
 
   -- Check if it's a data() return
   if type(return_value) == "table" and return_value._etl_type == "data" then
-    return EtlContext.result_from_data(return_value.data, block.name, execution_time_ms), nil
+    local etl_result = EtlContext.result_from_data(return_value.data, block.name, execution_time_ms)
+    if #env._log > 0 then
+      etl_result.log_output = env._log
+    end
+    return etl_result, nil
   end
 
   -- If nil, block produces no output (valid for side-effect blocks)
   if return_value == nil then
-    return {
+    local etl_result = {
       rows = {},
       columns = {},
       row_count = 0,
@@ -383,12 +390,20 @@ function EtlExecutor:_execute_lua_block(block)
       block_name = block.name,
       block_type = "lua",
       output_type = "data",
-    }, nil
+    }
+    if #env._log > 0 then
+      etl_result.log_output = env._log
+    end
+    return etl_result, nil
   end
 
   -- Plain table return → treat as implicit data()
   if type(return_value) == "table" then
-    return EtlContext.result_from_data(return_value, block.name, execution_time_ms), nil
+    local etl_result = EtlContext.result_from_data(return_value, block.name, execution_time_ms)
+    if #env._log > 0 then
+      etl_result.log_output = env._log
+    end
+    return etl_result, nil
   end
 
   -- Unknown return type (string, number, boolean, etc.)

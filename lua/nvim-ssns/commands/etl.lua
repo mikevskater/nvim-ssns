@@ -50,15 +50,20 @@ local function convert_etl_to_result(script, context)
     if result then
       if result.all_result_sets then
         -- Multi-statement block: emit all result sets
-        for _, rs in ipairs(result.all_result_sets) do
+        for rs_idx, rs in ipairs(result.all_result_sets) do
           if rs.rows and #rs.rows > 0 then
-            table.insert(resultSets, {
+            local entry = {
               columns = rs.columns,
               rows = rs.rows,
               rowCount = #rs.rows,
               chunk_execution_time_ms = block_time,
               block_name = block.name,
-            })
+            }
+            -- Attach log_output only to the first result set entry for this block
+            if rs_idx == 1 and result.log_output then
+              entry.log_output = result.log_output
+            end
+            table.insert(resultSets, entry)
           end
         end
       elseif result.rows and #result.rows > 0 then
@@ -69,6 +74,17 @@ local function convert_etl_to_result(script, context)
           rowCount = result.row_count or #result.rows,
           chunk_execution_time_ms = block_time,
           block_name = block.name,
+          log_output = result.log_output,
+        })
+      elseif result.log_output and #result.log_output > 0 then
+        -- No rows but has print() output — emit a resultSet so log_output is displayed
+        table.insert(resultSets, {
+          columns = result.columns,
+          rows = {},
+          rowCount = 0,
+          chunk_execution_time_ms = block_time,
+          block_name = block.name,
+          log_output = result.log_output,
         })
       elseif result.rows_affected then
         -- DML result: track in rowsAffected

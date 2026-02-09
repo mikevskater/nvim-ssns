@@ -25,6 +25,7 @@ EtlContext.__index = EtlContext
 ---@field generated_sql string? For Lua blocks, the SQL that was generated
 ---@field output_type "sql"|"data" Whether result came from SQL execution or data() return
 ---@field all_result_sets table[]? All result sets from Node.js (for multi-statement blocks)
+---@field log_output string[]? Captured print() output from Lua blocks
 
 ---@class ColumnMeta
 ---@field name string Column name
@@ -407,6 +408,11 @@ end
 ---@param execution_time_ms number Execution time
 ---@return EtlResult
 function EtlContext.result_from_data(data, block_name, execution_time_ms)
+  -- Auto-wrap single object: if data is a hash table (not an array), wrap as single row
+  if #data == 0 and next(data) ~= nil then
+    data = { data }
+  end
+
   -- Infer columns from first row
   local columns = {}
   if data[1] then
