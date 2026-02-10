@@ -230,6 +230,10 @@ function Ssns.setup(user_config)
   local Snippets = require('nvim-ssns.completion.data.snippets')
   Snippets.init_async()
 
+  -- Pre-load user ETL templates asynchronously
+  local EtlSnippets = require('nvim-ssns.completion.data.etl_snippets')
+  EtlSnippets.init_async()
+
   -- Pre-load lualine colors cache asynchronously
   local LualineColors = require('nvim-ssns.lualine_colors')
   LualineColors.init_async()

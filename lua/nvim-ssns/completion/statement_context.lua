@@ -33,6 +33,7 @@ Context.Type = {
   PROCEDURE = "procedure",
   PARAMETER = "parameter",
   ALIAS = "alias",
+  DIRECTIVE = "directive",
 }
 
 ---Detect special cases that have highest priority (before clause-based routing)

@@ -281,14 +281,21 @@ function Source:enabled()
     return false
   end
 
-  -- For SSNS ETL files, only enable if cursor is in SQL block
+  -- For SSNS ETL files, enable on directive lines or inside SQL blocks
   if ft == 'ssns' then
-    local ok, EtlHighlighting = pcall(require, 'nvim-ssns.etl.highlighting')
-    if ok then
-      local block = EtlHighlighting.get_block_at_cursor(vim.api.nvim_get_current_buf())
-      if not block or block.type ~= 'sql' then
-        Debug.log("[COMPLETION] enabled() = false (not in SQL block)")
-        return false
+    local line = vim.api.nvim_get_current_line()
+    local trimmed = line:match("^%s*(.-)%s*$")
+    if trimmed:sub(1, 3) == "--@" or trimmed == "--" or trimmed:match("^%-%-new") then
+      -- On a directive or block-snippet line — enable
+      Debug.log("[COMPLETION] enabled() = true (directive line)")
+    else
+      local ok, EtlHighlighting = pcall(require, 'nvim-ssns.etl.highlighting')
+      if ok then
+        local block = EtlHighlighting.get_block_at_cursor(vim.api.nvim_get_current_buf())
+        if not block or block.type ~= 'sql' then
+          Debug.log("[COMPLETION] enabled() = false (not in SQL block)")
+          return false
+        end
       end
     end
   end
@@ -339,6 +346,19 @@ function Source:get_completions(ctx, callback)
 
   -- Start performance timer
   local start_time = vim.loop.hrtime()
+
+  -- Early directive detection for SSNS ETL files
+  if vim.bo[ctx.bufnr].filetype == 'ssns' then
+    local line = ctx.line or ''
+    local trimmed = line:match("^%s*(.-)%s*$")
+    if trimmed:sub(1, 3) == '--@' or trimmed == '--' or trimmed:match("^%-%-new") then
+      Debug.log("[COMPLETION] Directive line detected, routing to EtlDirectivesProvider")
+      local DirectivesProvider = require('nvim-ssns.completion.providers.etl_directives')
+      local items = DirectivesProvider.get_completions(line, ctx.cursor)
+      callback({ items = items })
+      return
+    end
+  end
 
   -- Detect SQL context
   local context_result = self:detect_context(ctx)
