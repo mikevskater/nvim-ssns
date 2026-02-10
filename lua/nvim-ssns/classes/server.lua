@@ -423,6 +423,10 @@ end
 ---@param opts ServerRPCAsyncOpts? Options
 ---@return string callback_id Callback ID for tracking/cancellation
 function ServerClass:connect_async(opts)
+  -- Allow passing a callback function directly as shorthand
+  if type(opts) == "function" then
+    opts = { on_complete = opts }
+  end
   opts = opts or {}
   local Connection = require('nvim-ssns.connection')
 
