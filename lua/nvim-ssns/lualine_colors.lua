@@ -200,44 +200,49 @@ function M.show_color_picker_menu(name, is_server, current_color, inherited_tree
   local cb = menu_float:get_content_builder()
 
   -- Header
-  cb:line("")
-  cb:styled("  " .. type_str:gsub("^%l", string.upper) .. ": ", "NvimFloatLabel")
-  cb:styled(name, "NvimFloatTitle")
-  cb:line("")
-  cb:line("")
+  cb:blank()
+  cb:spans({
+    { text = "  " .. type_str:gsub("^%l", string.upper) .. ": ", hl_group = "NvimFloatLabel" },
+    { text = name, hl_group = "NvimFloatTitle" },
+  })
+  cb:blank()
 
   -- Presets
   cb:styled("  Color Presets:", "NvimFloatTitle")
-  cb:line("")
 
   for _, preset in ipairs(COLOR_PRESETS) do
     -- Create highlight for this preset's color swatch
     local hl_name = "SSNSColorPreset" .. preset.key
     vim.api.nvim_set_hl(0, hl_name, { fg = preset.color.fg, bg = preset.color.bg, bold = preset.color.gui == "bold" })
 
-    cb:text("  ")
-    cb:styled(preset.key, "NvimFloatKeyHint")
-    cb:text(". ")
-    cb:styled("  ", hl_name) -- Color swatch
-    cb:text(" " .. preset.label)
-    cb:line("")
+    cb:spans({
+      { text = "  " },
+      { text = preset.key, hl_group = "NvimFloatKeyHint" },
+      { text = ". " },
+      { text = "  ", hl_group = hl_name },
+      { text = " " .. preset.label },
+    })
   end
 
-  cb:line("")
-  cb:text("  ")
-  cb:styled("c", "NvimFloatKeyHint")
-  cb:text(". Custom (color picker)")
-  cb:line("")
-  cb:text("  ")
-  cb:styled("r", "NvimFloatKeyHint")
-  cb:text(". Remove color (use default)")
-  cb:line("")
+  cb:blank()
+  cb:spans({
+    { text = "  " },
+    { text = "c", hl_group = "NvimFloatKeyHint" },
+    { text = ". Custom (color picker)" },
+  })
+  cb:spans({
+    { text = "  " },
+    { text = "r", hl_group = "NvimFloatKeyHint" },
+    { text = ". Remove color (use default)" },
+  })
 
   -- Footer
-  cb:line("")
-  cb:styled("  Press key to select, ", "NvimFloatHint")
-  cb:styled("Esc", "NvimFloatKeyHint")
-  cb:styled(" to cancel", "NvimFloatHint")
+  cb:blank()
+  cb:spans({
+    { text = "  Press key to select, ", hl_group = "NvimFloatHint" },
+    { text = "Esc", hl_group = "NvimFloatKeyHint" },
+    { text = " to cancel", hl_group = "NvimFloatHint" },
+  })
 
   menu_float:render()
 
