@@ -161,6 +161,25 @@ function TreeFeatures.open_filter(UiTree)
     return
   end
 
+  -- Track tree state before opening filter (for restore after close)
+  local tree_was_open = Buffer.is_open()
+  local tree_was_float = Buffer.is_float()
+
+  -- Close floating tree before opening filter form
+  Buffer.close_if_float()
+
+  -- Helper to restore tree after filter closes
+  local function restore_tree()
+    if tree_was_float and tree_was_open then
+      vim.schedule(function()
+        if not Buffer.is_open() then
+          Buffer.open("float")
+          UiTree.render()
+        end
+      end)
+    end
+  end
+
   -- Open filter input UI
   local UiFilterInput = require('nvim-ssns.ui.dialogs.filter_input')
   local UiFilters = require('nvim-ssns.ui.core.filters')
@@ -169,8 +188,11 @@ function TreeFeatures.open_filter(UiTree)
   UiFilterInput.show_input(obj, current_filters, function(filter_state)
     -- Apply filters
     UiFilters.set(obj, filter_state)
-    -- Re-render tree
-    UiTree.render()
+    -- Restore and re-render tree
+    restore_tree()
+  end, function()
+    -- Cancel: just restore tree
+    restore_tree()
   end)
 end
 

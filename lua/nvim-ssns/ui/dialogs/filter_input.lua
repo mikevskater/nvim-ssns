@@ -22,7 +22,8 @@ local OBJECT_TYPES = {
 ---@param group BaseDbObject The group to filter
 ---@param current_filters table? Current filter state
 ---@param callback function Callback function(filters: table)
-function UiFilterInput.show_input(group, current_filters, callback)
+---@param on_cancel function? Optional callback when form is cancelled
+function UiFilterInput.show_input(group, current_filters, callback, on_cancel)
   current_filters = current_filters or {}
 
   -- Determine if this is a schema node (needs object type filters)
@@ -133,6 +134,9 @@ function UiFilterInput.show_input(group, current_filters, callback)
     end,
     on_cancel = function()
       state = nil
+      if on_cancel then
+        on_cancel()
+      end
     end,
   })
 
@@ -147,4 +151,6 @@ end
 function UiFilterInput.is_open()
   return state ~= nil
 end
+
+return UiFilterInput
 
