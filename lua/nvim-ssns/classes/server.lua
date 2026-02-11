@@ -120,9 +120,26 @@ function ServerClass:connect()
   self.connection_state = ConnectionState.CONNECTED
   self.last_connected_at = os.time()
 
-  -- Eagerly load metadata for completion if enabled
+  -- Try loading from hierarchy cache for instant tree population
   local Config = require('nvim-ssns.config')
   local config = Config.get()
+  local cache_config = config.cache or {}
+
+  if cache_config.persist_hierarchy ~= false then
+    local ok_hc, HierarchyCache = pcall(require, 'nvim-ssns.hierarchy_cache')
+    if ok_hc then
+      local Connections = require('nvim-ssns.connections')
+      local conn_key = Connections.generate_connection_key(self.connection_config)
+      local cached = HierarchyCache.load_sync(conn_key)
+      if cached and not HierarchyCache.is_stale(cached) then
+        HierarchyCache.hydrate(self, cached)
+        HierarchyCache.schedule_background_refresh(self)
+        return true, nil
+      end
+    end
+  end
+
+  -- Eagerly load metadata for completion if enabled
   if config.completion and config.completion.eager_load then
     -- Load databases in background to avoid blocking
     vim.schedule(function()
@@ -269,12 +286,26 @@ function ServerClass:load()
   end
 
   self.is_loaded = true
+
+  -- Schedule hierarchy cache save
+  local ok_hc, HierarchyCache = pcall(require, 'nvim-ssns.hierarchy_cache')
+  if ok_hc then
+    HierarchyCache.schedule_save(self)
+  end
+
   return true
 end
 
 ---Reload databases from server
 ---@return boolean success
 function ServerClass:reload()
+  -- Invalidate hierarchy cache
+  local ok_hc, HierarchyCache = pcall(require, 'nvim-ssns.hierarchy_cache')
+  if ok_hc then
+    local Connections = require('nvim-ssns.connections')
+    HierarchyCache.invalidate(Connections.generate_connection_key(self.connection_config))
+  end
+
   -- Invalidate query cache for this server's connection
   local Connection = require('nvim-ssns.connection')
   Connection.invalidate_cache(self.connection_config)
@@ -600,6 +631,12 @@ function ServerClass:load_async(opts)
       end
 
       server_self.is_loaded = true
+
+      -- Schedule hierarchy cache save
+      local ok_hc, HierarchyCache = pcall(require, 'nvim-ssns.hierarchy_cache')
+      if ok_hc then
+        HierarchyCache.schedule_save(server_self)
+      end
 
       if opts.on_complete then
         opts.on_complete(true, nil)

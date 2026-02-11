@@ -78,6 +78,14 @@ function Ssns.setup(user_config)
   local QueryCache = require('nvim-ssns.query_cache')
   QueryCache.setup(Config.get())
 
+  -- Setup hierarchy cache (registers VimLeavePre for pending saves)
+  if Config.get().cache and Config.get().cache.persist_hierarchy ~= false then
+    local ok_hc, HierarchyCache = pcall(require, 'nvim-ssns.hierarchy_cache')
+    if ok_hc then
+      HierarchyCache.setup()
+    end
+  end
+
   -- Load servers from configuration
   local Cache = require('nvim-ssns.cache')
   local Connections = require('nvim-ssns.connections')

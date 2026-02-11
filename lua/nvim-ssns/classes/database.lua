@@ -69,6 +69,13 @@ function DbClass:load()
   end
 
   self.is_loaded = true
+
+  -- Schedule hierarchy cache save for parent server
+  local ok_hc, HierarchyCache = pcall(require, 'nvim-ssns.hierarchy_cache')
+  if ok_hc then
+    HierarchyCache.schedule_save(self:get_server())
+  end
+
   return true
 end
 

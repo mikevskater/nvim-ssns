@@ -64,6 +64,9 @@
 ---@field enabled boolean Enable query result caching (default: true)
 ---@field persist_metadata boolean Persist metadata queries to disk for cross-session caching (default: true)
 ---@field metadata_disk_ttl number Time to live in seconds for disk-cached metadata (default: 86400 = 24h)
+---@field persist_hierarchy boolean Cache object hierarchy to disk for instant tree on reconnect (default: true)
+---@field hierarchy_ttl number Time to live in seconds for hierarchy cache (default: 86400 = 24h)
+---@field hierarchy_background_refresh boolean Silently refresh after loading from cache (default: true)
 
 ---@class QueryConfig
 ---@field default_limit number Default LIMIT for SELECT queries (0 = no limit)
@@ -639,6 +642,9 @@ local default_config = {
     enabled = true,  -- Enable query result caching
     persist_metadata = true,  -- Persist metadata queries to disk for cross-session caching
     metadata_disk_ttl = 86400,  -- 24 hours disk TTL for metadata queries
+    persist_hierarchy = true,  -- Cache object hierarchy to disk for instant tree on reconnect
+    hierarchy_ttl = 86400,  -- 24 hours hierarchy cache TTL
+    hierarchy_background_refresh = true,  -- Silently refresh after loading from cache
   },
 
   query = {

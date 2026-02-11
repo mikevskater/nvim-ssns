@@ -247,6 +247,17 @@ function Cache.refresh_all()
   local QueryCache = require('nvim-ssns.query_cache')
   QueryCache.clear_all()
 
+  -- Invalidate hierarchy cache for all servers
+  local ok_hc, HierarchyCache = pcall(require, 'nvim-ssns.hierarchy_cache')
+  if ok_hc then
+    local Connections = require('nvim-ssns.connections')
+    for _, server in ipairs(Cache.servers) do
+      if server.connection_config then
+        HierarchyCache.invalidate(Connections.generate_connection_key(server.connection_config))
+      end
+    end
+  end
+
   for _, server in ipairs(Cache.servers) do
     server:reload()
   end
