@@ -256,7 +256,7 @@ function Engine.cancel_async_formatting()
   end
 
   -- Also cancel any child async operations
-  Tokenizer.cancel_chunked_tokenize()
+  Tokenizer.cancel_async_tokenize()
   Processor.cancel_async_processing()
   Passes.cancel_async()
 end
