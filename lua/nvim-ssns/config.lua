@@ -199,7 +199,7 @@
 ---@field filter string Open filter UI (default: "f")
 ---@field filter_clear string Clear all filters (default: "F")
 ---@field toggle_connection string Toggle server connection (default: "d")
----@field set_lualine_color string Set lualine color (default: "<Leader>c")
+---@field set_lualine_color string Set lualine color (default: "C")
 ---@field help string Show help (default: "?")
 ---@field new_query string New query buffer (default: "<C-n>")
 ---@field goto_first_child string Go to first child (default: "<C-[>")
@@ -932,7 +932,7 @@ local default_config = {
       filter = "f",          -- Open filter UI for group
       filter_clear = "F",    -- Clear all filters on group
       toggle_connection = "d", -- Toggle server connection
-      set_lualine_color = "<Leader>c", -- Set lualine color
+      set_lualine_color = "C", -- Set lualine color for server/database
       help = "?",            -- Show help
       new_query = "<C-n>",   -- New query buffer
       goto_first_child = "<C-[>", -- Go to first child

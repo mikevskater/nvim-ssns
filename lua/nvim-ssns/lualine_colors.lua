@@ -247,7 +247,7 @@ function M.show_color_picker_menu(name, is_server, current_color, inherited_tree
   menu_float:render()
 
   -- Setup keymaps
-  local bufnr = menu_float.buf
+  local bufnr = menu_float.bufnr
 
   -- Close handler
   local function close()

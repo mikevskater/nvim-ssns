@@ -453,7 +453,7 @@ function UiBuffer.setup_keymaps()
     },
     -- Set lualine color
     {
-      lhs = km.set_lualine_color or "<Leader>c",
+      lhs = km.set_lualine_color or "C",
       rhs = "<Cmd>lua require('nvim-ssns.ui.core.tree').set_lualine_color()<CR>",
       desc = "Set lualine color",
     },
