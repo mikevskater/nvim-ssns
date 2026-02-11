@@ -471,12 +471,12 @@ function UiBuffer.setup_keymaps()
     },
     -- Go to first/last child
     {
-      lhs = km.goto_first_child or "<C-[>",
+      lhs = km.goto_first_child or "[",
       rhs = "<Cmd>lua require('nvim-ssns.ui.core.tree').goto_first_child()<CR>",
       desc = "Go to first child in group",
     },
     {
-      lhs = km.goto_last_child or "<C-]>",
+      lhs = km.goto_last_child or "]",
       rhs = "<Cmd>lua require('nvim-ssns.ui.core.tree').goto_last_child()<CR>",
       desc = "Go to last child in group",
     },

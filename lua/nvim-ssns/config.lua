@@ -202,8 +202,8 @@
 ---@field set_lualine_color string Set lualine color (default: "C")
 ---@field help string Show help (default: "?")
 ---@field new_query string New query buffer (default: "<C-n>")
----@field goto_first_child string Go to first child (default: "<C-[>")
----@field goto_last_child string Go to last child (default: "<C-]>")
+---@field goto_first_child string Go to first child (default: "[")
+---@field goto_last_child string Go to last child (default: "]")
 ---@field toggle_group string Toggle parent group (default: "g")
 ---@field add_server string Open add server UI (default: "a")
 ---@field toggle_favorite string Toggle favorite (default: "*")
@@ -935,8 +935,8 @@ local default_config = {
       set_lualine_color = "C", -- Set lualine color for server/database
       help = "?",            -- Show help
       new_query = "<C-n>",   -- New query buffer
-      goto_first_child = "<C-[>", -- Go to first child
-      goto_last_child = "<C-]>",  -- Go to last child
+      goto_first_child = "[", -- Go to first child in group
+      goto_last_child = "]",  -- Go to last child in group
       toggle_group = "g",    -- Toggle parent group
       add_server = "a",      -- Open add server UI
       toggle_favorite = "*", -- Toggle favorite
