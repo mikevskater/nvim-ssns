@@ -60,21 +60,31 @@ function M.render_presets(state)
   return cb:build_lines(), cb:build_highlights()
 end
 
----Render the rules panel using ContentBuilder
+---Render the rules panel using embedded containers
 ---@param state RulesEditorState
----@return string[] lines, table[] highlights
-function M.render_rules(state)
+---@param multi_panel MultiPanelState? Multi-panel for re-rendering preview on change
+---@return ContentBuilder cb
+function M.render_rules(state, multi_panel)
   local cb = ContentBuilder.new()
 
   if not state then
-    return cb:build_lines(), cb:build_highlights()
+    return cb
   end
 
   cb:blank()
 
   local current_category = nil
 
-  for i, rule in ipairs(state.rule_definitions) do
+  -- Helper to re-render preview after a rule change
+  local function on_rule_changed()
+    state.is_dirty = true
+    if multi_panel and multi_panel:is_valid() then
+      multi_panel:render_panel("preview")
+      M.apply_preview_highlights(multi_panel)
+    end
+  end
+
+  for _, rule in ipairs(state.rule_definitions) do
     -- Add category header if new category
     if rule.category ~= current_category then
       if current_category ~= nil then
@@ -86,44 +96,58 @@ function M.render_rules(state)
     end
 
     local value = Helpers.get_config_value(state.current_config, rule.key)
-    local display_value = Helpers.format_value(rule, value)
-    local is_selected = (i == state.selected_rule_idx)
+    local container_key = "rule_" .. rule.key:gsub("%.", "_")
 
-    -- Format: "  ▸ Rule Name          [value]" or "    Rule Name          [value]"
-    local prefix = is_selected and " ▸ " or "   "
-    local name_width = 22
-    local padded_name = rule.name .. string.rep(" ", math.max(0, name_width - #rule.name))
-
-    if is_selected then
-      cb:spans({
-        { text = prefix, style = "emphasis" },
-        { text = padded_name, style = "highlight" },
-        { text = "[", style = "muted" },
-        { text = display_value, style = "string" },
-        { text = "]", style = "muted" },
+    if rule.type == "boolean" then
+      cb:embedded_dropdown(container_key, {
+        label = "   " .. rule.name,
+        options = {
+          { value = "true", label = "On" },
+          { value = "false", label = "Off" },
+        },
+        selected = value and "true" or "false",
+        width = 6,
+        on_change = function(_, v)
+          Helpers.set_config_value(state.current_config, rule.key, v == "true")
+          on_rule_changed()
+        end,
       })
-    else
-      -- Style value based on type
-      local value_style = "number"
-      if rule.type == "boolean" then
-        value_style = value and "success" or "error"
-      elseif rule.type == "enum" then
-        value_style = "keyword"
+    elseif rule.type == "number" then
+      cb:embedded_input(container_key, {
+        label = "   " .. rule.name,
+        value = tostring(value or 0),
+        width = 6,
+        on_change = function(_, v)
+          local num = tonumber(v)
+          if num then
+            if rule.min and num < rule.min then num = rule.min end
+            if rule.max and num > rule.max then num = rule.max end
+            Helpers.set_config_value(state.current_config, rule.key, num)
+            on_rule_changed()
+          end
+        end,
+      })
+    elseif rule.type == "enum" then
+      local enum_options = {}
+      for _, opt in ipairs(rule.options or {}) do
+        table.insert(enum_options, { value = opt, label = opt })
       end
-
-      cb:spans({
-        { text = prefix, style = "muted" },
-        { text = padded_name, style = "label" },
-        { text = "[", style = "muted" },
-        { text = display_value, style = value_style },
-        { text = "]", style = "muted" },
+      cb:embedded_dropdown(container_key, {
+        label = "   " .. rule.name,
+        options = enum_options,
+        selected = tostring(value or ""),
+        width = 15,
+        on_change = function(_, v)
+          Helpers.set_config_value(state.current_config, rule.key, v)
+          on_rule_changed()
+        end,
       })
     end
   end
 
   cb:blank()
 
-  return cb:build_lines(), cb:build_highlights()
+  return cb
 end
 
 ---Render the preview panel (raw SQL buffer - no ContentBuilder)

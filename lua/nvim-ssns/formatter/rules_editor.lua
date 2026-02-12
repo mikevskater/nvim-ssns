@@ -112,7 +112,7 @@ function RulesEditor.show()
           name = "rules",
           title = string.format("Settings [%s]", preset_name),
           ratio = 0.35,
-          on_render = function() return Render.render_rules(state) end,
+          on_render = function() return Render.render_rules(state, multi_panel) end,
           on_focus = function()
             if multi_panel and state then
               multi_panel:update_panel_title("presets", "Presets")
@@ -157,8 +157,8 @@ function RulesEditor.show()
       {
         header = "Rules Panel",
         keys = {
-          { key = "h/l", desc = "Change value" },
-          { key = "+/-", desc = "Increment/decrement" },
+          { key = "hjkl", desc = "Navigate between rules" },
+          { key = "Enter", desc = "Edit value / Open dropdown" },
           { key = "s", desc = "Save as preset" },
           { key = "R", desc = "Reset to defaults" },
         },
@@ -225,23 +225,13 @@ function RulesEditor._setup_keymaps()
     ["r"] = function() Actions.rename_preset(state, multi_panel) end,
   })
 
-  -- Rules panel keymaps
+  -- Rules panel keymaps (hjkl navigation handled by spatial navigation from embedded containers)
   multi_panel:set_panel_keymaps("rules", {
     [km.cancel or "<Esc>"] = function() RulesEditor.close() end,
     [km.close or "q"] = function() RulesEditor.close() end,
     ["a"] = function() Actions.apply(state, RulesEditor.close) end,
     [km.next_field or "<Tab>"] = function() multi_panel:focus_next_panel() end,
     [km.prev_field or "<S-Tab>"] = function() multi_panel:focus_prev_panel() end,
-    [km.nav_down or "j"] = function() Actions.navigate_rules(state, multi_panel, 1) end,
-    [km.nav_up or "k"] = function() Actions.navigate_rules(state, multi_panel, -1) end,
-    [km.nav_down_alt or "<Down>"] = function() Actions.navigate_rules(state, multi_panel, 1) end,
-    [km.nav_up_alt or "<Up>"] = function() Actions.navigate_rules(state, multi_panel, -1) end,
-    ["l"] = function() Actions.cycle_value(state, multi_panel, 1) end,
-    ["h"] = function() Actions.cycle_value(state, multi_panel, -1) end,
-    ["+"] = function() Actions.cycle_value(state, multi_panel, 1) end,
-    ["-"] = function() Actions.cycle_value(state, multi_panel, -1) end,
-    ["<Right>"] = function() Actions.cycle_value(state, multi_panel, 1) end,
-    ["<Left>"] = function() Actions.cycle_value(state, multi_panel, -1) end,
     ["s"] = function() Actions.save_preset(state, multi_panel) end,
     ["R"] = function() Actions.reset(state, multi_panel) end,
   })
