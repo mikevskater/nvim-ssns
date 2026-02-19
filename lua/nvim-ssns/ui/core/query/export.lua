@@ -66,6 +66,51 @@ local function get_temp_dir()
   return temp
 end
 
+---Show a file/directory path input dialog
+---@param title string Dialog title
+---@param label string Input label
+---@param default string Default value
+---@param on_submit fun(path: string) Callback with expanded path
+local function prompt_path(title, label, default, on_submit)
+  local UiFloat = require('nvim-float.window')
+  local ContentBuilder = require('nvim-float.content')
+  local cb = ContentBuilder.new()
+  cb:blank()
+
+  local dialog
+  local function do_submit()
+    local val = dialog:get_embedded_value("path")
+    dialog:close()
+    if val and val ~= "" then
+      on_submit(vim.fn.expand(val))
+    end
+  end
+
+  cb:embedded_input("path", {
+    label = "  " .. label,
+    value = default or "",
+    placeholder = "(enter path)",
+    width = 45,
+    on_submit = function() do_submit() end,
+  })
+  cb:blank()
+  cb:styled("  <Enter>=Confirm | <Esc>=Cancel", "NvimFloatHint")
+
+  dialog = UiFloat.create({
+    title = title,
+    width = 65,
+    height = 6,
+    center = true,
+    content_builder = cb,
+    zindex = UiFloat.ZINDEX.MODAL,
+    keymaps = {
+      ["<CR>"] = do_submit,
+      ["<Esc>"] = function() dialog:close() end,
+      ["q"] = function() dialog:close() end,
+    },
+  })
+end
+
 ---Get the query buffer number from current context
 ---@return number? query_bufnr The query buffer number or nil
 local function get_current_query_bufnr()

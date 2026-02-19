@@ -63,12 +63,13 @@ end
 ---Render the rules panel using embedded containers
 ---@param state RulesEditorState
 ---@param multi_panel MultiPanelState? Multi-panel for re-rendering preview on change
----@return ContentBuilder cb
+---@return string[] lines
+---@return table[] highlights
 function M.render_rules(state, multi_panel)
   local cb = ContentBuilder.new()
 
   if not state then
-    return cb
+    return cb:build_lines(), cb:build_highlights()
   end
 
   cb:blank()
@@ -147,7 +148,11 @@ function M.render_rules(state, multi_panel)
 
   cb:blank()
 
-  return cb
+  if multi_panel then
+    multi_panel:set_panel_content_builder("rules", cb)
+  end
+
+  return cb:build_lines(), cb:build_highlights()
 end
 
 ---Render the preview panel (raw SQL buffer - no ContentBuilder)

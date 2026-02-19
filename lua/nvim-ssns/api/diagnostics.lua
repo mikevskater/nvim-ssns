@@ -280,19 +280,13 @@ end
 ---Clear all usage weights
 function M.clear_usage_weights()
   local UsageTracker = require('nvim-ssns.completion.usage_tracker')
+  local UiFloat = require('nvim-float.window')
 
-  -- Confirm with user
-  local confirm = vim.fn.input("Clear ALL usage weights? This cannot be undone. (yes/no): ")
-  if confirm:lower() ~= "yes" then
-    vim.notify("Cancelled", vim.log.levels.INFO)
-    return
-  end
-
-  -- Clear all weights
-  UsageTracker.clear_weights()
-  UsageTracker.save_to_file()
-
-  vim.notify("Usage weights cleared", vim.log.levels.INFO)
+  UiFloat.confirm("Clear ALL usage weights? This cannot be undone.", function()
+    UsageTracker.clear_weights()
+    UsageTracker.save_to_file()
+    vim.notify("Usage weights cleared", vim.log.levels.INFO)
+  end)
 end
 
 ---Clear usage weights for current connection only
@@ -311,18 +305,13 @@ function M.clear_usage_weights_current()
   local Connections = require('nvim-ssns.connections')
   local connection_key = Connections.generate_connection_key(server.connection_config)
 
-  -- Confirm with user
-  local confirm = vim.fn.input(string.format("Clear weights for '%s'? (yes/no): ", server.name))
-  if confirm:lower() ~= "yes" then
-    vim.notify("Cancelled", vim.log.levels.INFO)
-    return
-  end
+  local UiFloat = require('nvim-float.window')
 
-  -- Clear weights for this connection
-  UsageTracker.clear_weights(connection_key)
-  UsageTracker.save_to_file()
-
-  vim.notify(string.format("Usage weights cleared for '%s'", server.name), vim.log.levels.INFO)
+  UiFloat.confirm(string.format("Clear weights for '%s'?", server.name), function()
+    UsageTracker.clear_weights(connection_key)
+    UsageTracker.save_to_file()
+    vim.notify(string.format("Usage weights cleared for '%s'", server.name), vim.log.levels.INFO)
+  end)
 end
 
 ---Export usage weights to a JSON file
@@ -343,33 +332,93 @@ function M.export_usage_weights(filepath)
   -- Expand path
   file_path = vim.fn.expand(file_path)
 
-  -- Check if file exists
-  if vim.fn.filereadable(file_path) == 1 then
-    local confirm = vim.fn.input(string.format("File '%s' exists. Overwrite? (yes/no): ", file_path))
-    if confirm:lower() ~= "yes" then
-      vim.notify("Cancelled", vim.log.levels.INFO)
-      return
+  ---@param fp string
+  local function write_export(fp)
+    local success, err = pcall(function()
+      local source = UsageTracker.persist_file
+      local content = vim.fn.readfile(source)
+      vim.fn.writefile(content, fp)
+    end)
+    if success then
+      vim.notify(string.format("Usage weights exported to '%s'", fp), vim.log.levels.INFO)
+    else
+      vim.notify(string.format("Export failed: %s", err), vim.log.levels.ERROR)
     end
   end
 
-  -- Export (copy current persistence file to target)
-  local success, err = pcall(function()
-    local source = UsageTracker.persist_file
-    local content = vim.fn.readfile(source)
-    vim.fn.writefile(content, file_path)
-  end)
-
-  if success then
-    vim.notify(string.format("Usage weights exported to '%s'", file_path), vim.log.levels.INFO)
-  else
-    vim.notify(string.format("Export failed: %s", err), vim.log.levels.ERROR)
+  -- Check if file exists
+  if vim.fn.filereadable(file_path) == 1 then
+    local UiFloat = require('nvim-float.window')
+    UiFloat.confirm(string.format("File '%s' exists. Overwrite?", file_path), function()
+      write_export(file_path)
+    end)
+    return
   end
+
+  write_export(file_path)
 end
 
 ---Import usage weights from a JSON file
 ---@param filepath string? Optional file path
 function M.import_usage_weights(filepath)
   local UsageTracker = require('nvim-ssns.completion.usage_tracker')
+  local UiFloat = require('nvim-float.window')
+
+  ---@param file_path string
+  ---@param merge boolean
+  local function do_import(file_path, merge)
+    local success, err = pcall(function()
+      if not merge then
+        UsageTracker.weights = { connections = {} }
+      end
+
+      local content = vim.fn.readfile(file_path)
+      local json_str = table.concat(content, "\n")
+      local imported_data = vim.json.decode(json_str)
+
+      if not imported_data or not imported_data.connections then
+        error("Invalid usage data format")
+      end
+
+      if merge then
+        for conn_key, conn_data in pairs(imported_data.connections) do
+          if not UsageTracker.weights.connections[conn_key] then
+            UsageTracker.weights.connections[conn_key] = conn_data
+          else
+            for type_key, type_data in pairs(conn_data) do
+              if not UsageTracker.weights.connections[conn_key][type_key] then
+                UsageTracker.weights.connections[conn_key][type_key] = type_data
+              else
+                for path, weight_data in pairs(type_data) do
+                  if UsageTracker.weights.connections[conn_key][type_key][path] then
+                    local existing = UsageTracker.weights.connections[conn_key][type_key][path]
+                    if type(existing) == "table" and existing.weight then
+                      existing.weight = existing.weight + (weight_data.weight or weight_data)
+                    else
+                      UsageTracker.weights.connections[conn_key][type_key][path] = (existing or 0) + (weight_data.weight or weight_data)
+                    end
+                  else
+                    UsageTracker.weights.connections[conn_key][type_key][path] = weight_data
+                  end
+                end
+              end
+            end
+          end
+        end
+      else
+        UsageTracker.weights = imported_data
+      end
+
+      UsageTracker.save_to_file()
+    end)
+
+    if success then
+      local mode_str = merge and "merged" or "replaced"
+      vim.notify(string.format("Usage weights %s from '%s'", mode_str, file_path), vim.log.levels.INFO)
+    else
+      vim.notify(string.format("Import failed: %s", err), vim.log.levels.ERROR)
+    end
+  end
 
   -- Get file path from args or prompt
   local file_path = filepath
@@ -390,74 +439,11 @@ function M.import_usage_weights(filepath)
     return
   end
 
-  -- Confirm merge or replace
-  local action = vim.fn.input("Import action: (m)erge or (r)eplace existing weights? (m/r): ")
-  if action:lower() ~= "m" and action:lower() ~= "r" then
-    vim.notify("Cancelled", vim.log.levels.INFO)
-    return
-  end
-
-  local merge = (action:lower() == "m")
-
-  -- Import
-  local success, err = pcall(function()
-    if not merge then
-      -- Replace: clear existing first
-      UsageTracker.weights = { connections = {} }
-    end
-
-    -- Read and decode file
-    local content = vim.fn.readfile(file_path)
-    local json_str = table.concat(content, "\n")
-    local imported_data = vim.json.decode(json_str)
-
-    if not imported_data or not imported_data.connections then
-      error("Invalid usage data format")
-    end
-
-    -- Merge imported data
-    if merge then
-      for conn_key, conn_data in pairs(imported_data.connections) do
-        if not UsageTracker.weights.connections[conn_key] then
-          UsageTracker.weights.connections[conn_key] = conn_data
-        else
-          -- Merge weights (add them together)
-          for type_key, type_data in pairs(conn_data) do
-            if not UsageTracker.weights.connections[conn_key][type_key] then
-              UsageTracker.weights.connections[conn_key][type_key] = type_data
-            else
-              for path, weight_data in pairs(type_data) do
-                if UsageTracker.weights.connections[conn_key][type_key][path] then
-                  -- Add weights together
-                  local existing = UsageTracker.weights.connections[conn_key][type_key][path]
-                  if type(existing) == "table" and existing.weight then
-                    existing.weight = existing.weight + (weight_data.weight or weight_data)
-                  else
-                    UsageTracker.weights.connections[conn_key][type_key][path] = (existing or 0) + (weight_data.weight or weight_data)
-                  end
-                else
-                  UsageTracker.weights.connections[conn_key][type_key][path] = weight_data
-                end
-              end
-            end
-          end
-        end
-      end
-    else
-      -- Replace
-      UsageTracker.weights = imported_data
-    end
-
-    -- Save to file
-    UsageTracker.save_to_file()
-  end)
-
-  if success then
-    local mode_str = merge and "merged" or "replaced"
-    vim.notify(string.format("Usage weights %s from '%s'", mode_str, file_path), vim.log.levels.INFO)
-  else
-    vim.notify(string.format("Import failed: %s", err), vim.log.levels.ERROR)
-  end
+  -- Choose merge or replace
+  UiFloat.select({ "Merge with existing", "Replace existing" }, function(idx)
+    if not idx then return end
+    do_import(file_path, idx == 1)
+  end, "Import action")
 end
 
 ---Toggle usage tracking on/off

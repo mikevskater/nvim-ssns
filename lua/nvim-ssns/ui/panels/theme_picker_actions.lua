@@ -53,7 +53,6 @@ function M.copy_theme(state, multi_panel, on_complete)
     height = 8,
     center = true,
     content_builder = true,
-    enable_inputs = true,
     zindex = UiFloat.ZINDEX.MODAL,
   })
 
@@ -62,17 +61,9 @@ function M.copy_theme(state, multi_panel, on_complete)
     cb:line("")
     cb:styled(string.format("  Copy theme '%s':", theme.display_name), "NvimFloatTitle")
     cb:line("")
-    cb:labeled_input("name", "  New name", {
-      value = default_name,
-      placeholder = "(enter theme name)",
-      width = 35,
-    })
-    cb:line("")
-    cb:styled("  <Enter>=Copy | <Esc>=Cancel", "NvimFloatHint")
-    copy_win:render()
 
     local function do_copy()
-      local new_name = copy_win:get_input_value("name")
+      local new_name = copy_win:get_embedded_value("name")
       copy_win:close()
 
       if not new_name or new_name == "" then return end
@@ -119,9 +110,18 @@ function M.copy_theme(state, multi_panel, on_complete)
       end
     end
 
-    vim.keymap.set("n", "<CR>", function()
-      copy_win:enter_input()
-    end, { buffer = copy_win.buf, nowait = true })
+    cb:embedded_input("name", {
+      label = "  New name",
+      value = default_name,
+      placeholder = "(enter theme name)",
+      width = 35,
+      on_submit = function() do_copy() end,
+    })
+    cb:line("")
+    cb:styled("  <Enter>=Copy | <Esc>=Cancel", "NvimFloatHint")
+    copy_win:render()
+
+    vim.keymap.set("n", "<CR>", do_copy, { buffer = copy_win.buf, nowait = true })
 
     vim.keymap.set("n", "<Esc>", function()
       copy_win:close()
@@ -130,8 +130,6 @@ function M.copy_theme(state, multi_panel, on_complete)
     vim.keymap.set("n", "q", function()
       copy_win:close()
     end, { buffer = copy_win.buf, nowait = true })
-
-    copy_win:on_input_submit(do_copy)
   end
 end
 
@@ -157,11 +155,9 @@ function M.delete_theme(state, multi_panel, on_complete)
     return
   end
 
-  vim.ui.select({ "Yes", "No" }, {
-    prompt = string.format("Delete theme '%s'?", theme.display_name),
-  }, function(choice)
-    if choice ~= "Yes" then return end
+  local UiFloat = require('nvim-float.window')
 
+  UiFloat.confirm(string.format("Delete theme '%s'?", theme.display_name), function()
     local ok, err = ThemeManager.delete(theme.name)
     if ok then
       ThemeManager.clear_cache()
@@ -228,7 +224,6 @@ function M.rename_theme(state, multi_panel, on_complete)
     height = 8,
     center = true,
     content_builder = true,
-    enable_inputs = true,
     zindex = UiFloat.ZINDEX.MODAL,
   })
 
@@ -237,17 +232,9 @@ function M.rename_theme(state, multi_panel, on_complete)
     cb:line("")
     cb:styled(string.format("  Rename theme '%s':", theme.display_name), "NvimFloatTitle")
     cb:line("")
-    cb:labeled_input("name", "  New name", {
-      value = theme.display_name,
-      placeholder = "(enter new name)",
-      width = 32,
-    })
-    cb:line("")
-    cb:styled("  <Enter>=Rename | <Esc>=Cancel", "NvimFloatHint")
-    rename_win:render()
 
     local function do_rename()
-      local new_name = rename_win:get_input_value("name")
+      local new_name = rename_win:get_embedded_value("name")
       rename_win:close()
 
       if not new_name or new_name == "" then return end
@@ -293,9 +280,18 @@ function M.rename_theme(state, multi_panel, on_complete)
       end
     end
 
-    vim.keymap.set("n", "<CR>", function()
-      rename_win:enter_input()
-    end, { buffer = rename_win.buf, nowait = true })
+    cb:embedded_input("name", {
+      label = "  New name",
+      value = theme.display_name,
+      placeholder = "(enter new name)",
+      width = 32,
+      on_submit = function() do_rename() end,
+    })
+    cb:line("")
+    cb:styled("  <Enter>=Rename | <Esc>=Cancel", "NvimFloatHint")
+    rename_win:render()
+
+    vim.keymap.set("n", "<CR>", do_rename, { buffer = rename_win.buf, nowait = true })
 
     vim.keymap.set("n", "<Esc>", function()
       rename_win:close()
@@ -304,8 +300,6 @@ function M.rename_theme(state, multi_panel, on_complete)
     vim.keymap.set("n", "q", function()
       rename_win:close()
     end, { buffer = rename_win.buf, nowait = true })
-
-    rename_win:on_input_submit(do_rename)
   end
 end
 
@@ -333,7 +327,6 @@ function M.save_theme(colors, source_theme, multi_panel, on_complete)
     height = 8,
     center = true,
     content_builder = true,
-    enable_inputs = true,
     zindex = UiFloat.ZINDEX.MODAL,
   })
 
@@ -342,17 +335,9 @@ function M.save_theme(colors, source_theme, multi_panel, on_complete)
     cb:line("")
     cb:styled("  Save current colors as theme:", "NvimFloatTitle")
     cb:line("")
-    cb:labeled_input("name", "  Name", {
-      value = default_name,
-      placeholder = "(enter theme name)",
-      width = 35,
-    })
-    cb:line("")
-    cb:styled("  <Enter>=Save | <Esc>=Cancel", "NvimFloatHint")
-    save_win:render()
 
     local function do_save()
-      local name = save_win:get_input_value("name")
+      local name = save_win:get_embedded_value("name")
       save_win:close()
 
       if not name or name == "" then return end
@@ -378,9 +363,18 @@ function M.save_theme(colors, source_theme, multi_panel, on_complete)
       end
     end
 
-    vim.keymap.set("n", "<CR>", function()
-      save_win:enter_input()
-    end, { buffer = save_win.buf, nowait = true })
+    cb:embedded_input("name", {
+      label = "  Name",
+      value = default_name,
+      placeholder = "(enter theme name)",
+      width = 35,
+      on_submit = function() do_save() end,
+    })
+    cb:line("")
+    cb:styled("  <Enter>=Save | <Esc>=Cancel", "NvimFloatHint")
+    save_win:render()
+
+    vim.keymap.set("n", "<CR>", do_save, { buffer = save_win.buf, nowait = true })
 
     vim.keymap.set("n", "<Esc>", function()
       save_win:close()
@@ -389,8 +383,6 @@ function M.save_theme(colors, source_theme, multi_panel, on_complete)
     vim.keymap.set("n", "q", function()
       save_win:close()
     end, { buffer = save_win.buf, nowait = true })
-
-    save_win:on_input_submit(do_save)
   end
 end
 

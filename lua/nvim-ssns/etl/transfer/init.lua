@@ -10,17 +10,17 @@ local adapters = {}
 local function get_adapter(db_type)
   if not adapters[db_type] then
     local adapter_map = {
-      sqlserver = "ssns.etl.transfer.adapters.sqlserver",
-      postgres = "ssns.etl.transfer.adapters.postgres",
-      postgresql = "ssns.etl.transfer.adapters.postgres",
-      mysql = "ssns.etl.transfer.adapters.mysql",
-      sqlite = "ssns.etl.transfer.adapters.sqlite",
+      sqlserver = "nvim-ssns.etl.transfer.adapters.sqlserver",
+      postgres = "nvim-ssns.etl.transfer.adapters.postgres",
+      postgresql = "nvim-ssns.etl.transfer.adapters.postgres",
+      mysql = "nvim-ssns.etl.transfer.adapters.mysql",
+      sqlite = "nvim-ssns.etl.transfer.adapters.sqlite",
     }
 
     local module_name = adapter_map[db_type]
     if not module_name then
       -- Default to SQL Server
-      module_name = "ssns.etl.transfer.adapters.sqlserver"
+      module_name = "nvim-ssns.etl.transfer.adapters.sqlserver"
     end
 
     adapters[db_type] = require(module_name)

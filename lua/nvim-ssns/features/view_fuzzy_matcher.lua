@@ -46,7 +46,6 @@ function ViewFuzzyMatcher.view_matcher()
         height = 10,
         center = true,
         content_builder = true,
-        enable_inputs = true,
         zindex = UiFloat.ZINDEX.OVERLAY,
       })
 
@@ -55,15 +54,10 @@ function ViewFuzzyMatcher.view_matcher()
         tcb:line("")
         tcb:styled("  Compare two strings:", "NvimFloatTitle")
         tcb:blank()
-        tcb:labeled_input("  String 1: ", "str1", "", 35)
-        tcb:labeled_input("  String 2: ", "str2", "", 35)
-        tcb:blank()
-        tcb:styled("  <Enter>=Compare | Tab=Next | <Esc>=Cancel", "NvimFloatHint")
-        test_win:render()
 
         local function do_compare()
-          local s1 = test_win:get_input_value("str1")
-          local s2 = test_win:get_input_value("str2")
+          local s1 = test_win:get_embedded_value("str1")
+          local s2 = test_win:get_embedded_value("str2")
           test_win:close()
 
           if s1 and s1 ~= "" and s2 and s2 ~= "" then
@@ -74,9 +68,22 @@ function ViewFuzzyMatcher.view_matcher()
           end
         end
 
-        vim.keymap.set("n", "<CR>", function()
-          test_win:enter_input()
-        end, { buffer = test_win.buf, nowait = true })
+        tcb:embedded_input("str1", {
+          label = "  String 1: ",
+          value = "",
+          width = 35,
+        })
+        tcb:embedded_input("str2", {
+          label = "  String 2: ",
+          value = "",
+          width = 35,
+          on_submit = function() do_compare() end,
+        })
+        tcb:blank()
+        tcb:styled("  <Enter>=Compare | Tab=Next | <Esc>=Cancel", "NvimFloatHint")
+        test_win:render()
+
+        vim.keymap.set("n", "<CR>", do_compare, { buffer = test_win.buf, nowait = true })
 
         vim.keymap.set("n", "<Esc>", function()
           test_win:close()
@@ -85,8 +92,6 @@ function ViewFuzzyMatcher.view_matcher()
         vim.keymap.set("n", "q", function()
           test_win:close()
         end, { buffer = test_win.buf, nowait = true })
-
-        test_win:on_input_submit(do_compare)
       end
     end,
   })

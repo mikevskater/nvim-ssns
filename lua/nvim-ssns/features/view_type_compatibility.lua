@@ -46,7 +46,6 @@ function ViewTypeCompatibility.view_compatibility()
         height = 10,
         center = true,
         content_builder = true,
-        enable_inputs = true,
         zindex = UiFloat.ZINDEX.OVERLAY,
       })
 
@@ -55,15 +54,10 @@ function ViewTypeCompatibility.view_compatibility()
         tcb:line("")
         tcb:styled("  Compare two SQL types:", "NvimFloatTitle")
         tcb:blank()
-        tcb:labeled_input("  Type 1: ", "type1", "", 35)
-        tcb:labeled_input("  Type 2: ", "type2", "", 35)
-        tcb:blank()
-        tcb:styled("  <Enter>=Check | Tab=Next | <Esc>=Cancel", "NvimFloatHint")
-        test_win:render()
 
         local function do_check()
-          local t1 = test_win:get_input_value("type1")
-          local t2 = test_win:get_input_value("type2")
+          local t1 = test_win:get_embedded_value("type1")
+          local t2 = test_win:get_embedded_value("type2")
           test_win:close()
 
           if t1 and t1 ~= "" and t2 and t2 ~= "" then
@@ -77,9 +71,22 @@ function ViewTypeCompatibility.view_compatibility()
           end
         end
 
-        vim.keymap.set("n", "<CR>", function()
-          test_win:enter_input()
-        end, { buffer = test_win.buf, nowait = true })
+        tcb:embedded_input("type1", {
+          label = "  Type 1: ",
+          value = "",
+          width = 35,
+        })
+        tcb:embedded_input("type2", {
+          label = "  Type 2: ",
+          value = "",
+          width = 35,
+          on_submit = function() do_check() end,
+        })
+        tcb:blank()
+        tcb:styled("  <Enter>=Check | Tab=Next | <Esc>=Cancel", "NvimFloatHint")
+        test_win:render()
+
+        vim.keymap.set("n", "<CR>", do_check, { buffer = test_win.buf, nowait = true })
 
         vim.keymap.set("n", "<Esc>", function()
           test_win:close()
@@ -88,8 +95,6 @@ function ViewTypeCompatibility.view_compatibility()
         vim.keymap.set("n", "q", function()
           test_win:close()
         end, { buffer = test_win.buf, nowait = true })
-
-        test_win:on_input_submit(do_check)
       end
     end,
   })

@@ -33,30 +33,78 @@ end
 local function open_colorpicker(name, current_color, on_complete)
   local has_colorpicker, colorpicker = pcall(require, 'nvim-colorpicker')
   if not has_colorpicker then
-    -- Fallback to text input if colorpicker not available
+    -- Fallback to text input dialog if colorpicker not available
     vim.notify('SSNS: nvim-colorpicker not available. Using text input.', vim.log.levels.INFO)
-    local fg = vim.fn.input('Foreground color (hex, e.g., #ffffff): ')
-    if not is_valid_hex(fg) then
-      vim.notify('SSNS: Invalid foreground color. Must be hex format like #ffffff', vim.log.levels.ERROR)
-      on_complete(nil)
-      return
+
+    local UiFloat = require('nvim-float.window')
+    local ContentBuilder = require('nvim-float.content')
+
+    local cb = ContentBuilder.new()
+    cb:blank()
+    cb:styled("  Enter colors (hex format):", "NvimFloatTitle")
+    cb:blank()
+
+    local dialog
+    local function do_submit()
+      local fg = dialog:get_embedded_value("fg")
+      local bg = dialog:get_embedded_value("bg")
+      local gui = dialog:get_embedded_value("gui")
+      dialog:close()
+
+      if not is_valid_hex(fg) then
+        vim.notify('SSNS: Invalid foreground color. Must be hex format like #ffffff', vim.log.levels.ERROR)
+        on_complete(nil)
+        return
+      end
+
+      if not is_valid_hex(bg) then
+        vim.notify('SSNS: Invalid background color. Must be hex format like #ff0000', vim.log.levels.ERROR)
+        on_complete(nil)
+        return
+      end
+
+      local color = { fg = fg, bg = bg }
+      if gui and gui ~= '' then
+        color.gui = gui
+      end
+      on_complete(color)
     end
 
-    local bg = vim.fn.input('Background color (hex, e.g., #ff0000): ')
-    if not is_valid_hex(bg) then
-      vim.notify('SSNS: Invalid background color. Must be hex format like #ff0000', vim.log.levels.ERROR)
-      on_complete(nil)
-      return
-    end
+    cb:embedded_input("fg", {
+      label = "  Foreground",
+      value = current_color and current_color.fg or "#ffffff",
+      placeholder = "#ffffff",
+      width = 12,
+    })
+    cb:embedded_input("bg", {
+      label = "  Background",
+      value = current_color and current_color.bg or "#0066cc",
+      placeholder = "#ff0000",
+      width = 12,
+    })
+    cb:embedded_input("gui", {
+      label = "  Style",
+      value = current_color and current_color.gui or "",
+      placeholder = "bold/italic/underline",
+      width = 20,
+      on_submit = function() do_submit() end,
+    })
+    cb:blank()
+    cb:styled("  <Enter>=Apply | Tab=Next | <Esc>=Cancel", "NvimFloatHint")
 
-    local gui = vim.fn.input('Text style (bold/italic/underline, or leave empty): ')
-    vim.cmd('redraw!')
-
-    local color = { fg = fg, bg = bg }
-    if gui ~= '' then
-      color.gui = gui
-    end
-    on_complete(color)
+    dialog = UiFloat.create({
+      title = "Custom Color",
+      width = 50,
+      height = 10,
+      center = true,
+      content_builder = cb,
+      zindex = UiFloat.ZINDEX.MODAL,
+      keymaps = {
+        ["<CR>"] = do_submit,
+        ["<Esc>"] = function() dialog:close(); on_complete(nil) end,
+        ["q"] = function() dialog:close(); on_complete(nil) end,
+      },
+    })
     return
   end
 

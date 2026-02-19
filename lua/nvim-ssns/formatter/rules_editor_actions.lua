@@ -216,7 +216,6 @@ function M.save_preset(state, multi_panel)
     height = 8,
     center = true,
     content_builder = true,
-    enable_inputs = true,
     zindex = UiFloat.ZINDEX.MODAL,
   })
 
@@ -225,17 +224,9 @@ function M.save_preset(state, multi_panel)
     cb:line("")
     cb:styled("  Save current settings as preset:", "NvimFloatTitle")
     cb:line("")
-    cb:labeled_input("name", "  Name", {
-      value = default_name,
-      placeholder = "(enter preset name)",
-      width = 35,
-    })
-    cb:line("")
-    cb:styled("  <Enter>=Save | <Esc>=Cancel", "NvimFloatHint")
-    save_win:render()
 
     local function do_save()
-      local name = save_win:get_input_value("name")
+      local name = save_win:get_embedded_value("name")
       save_win:close()
 
       if not name or name == "" then return end
@@ -268,9 +259,18 @@ function M.save_preset(state, multi_panel)
       end
     end
 
-    vim.keymap.set("n", "<CR>", function()
-      save_win:enter_input()
-    end, { buffer = save_win.buf, nowait = true })
+    cb:embedded_input("name", {
+      label = "  Name",
+      value = default_name,
+      placeholder = "(enter preset name)",
+      width = 35,
+      on_submit = function() do_save() end,
+    })
+    cb:line("")
+    cb:styled("  <Enter>=Save | <Esc>=Cancel", "NvimFloatHint")
+    save_win:render()
+
+    vim.keymap.set("n", "<CR>", do_save, { buffer = save_win.buf, nowait = true })
 
     vim.keymap.set("n", "<Esc>", function()
       save_win:close()
@@ -279,8 +279,6 @@ function M.save_preset(state, multi_panel)
     vim.keymap.set("n", "q", function()
       save_win:close()
     end, { buffer = save_win.buf, nowait = true })
-
-    save_win:on_input_submit(do_save)
   end
 end
 
@@ -296,11 +294,9 @@ function M.delete_preset(state, multi_panel)
     return
   end
 
-  vim.ui.select({ "Yes", "No" }, {
-    prompt = string.format("Delete '%s'?", preset.name),
-  }, function(choice)
-    if choice ~= "Yes" then return end
+  local UiFloat = require('nvim-float.window')
 
+  UiFloat.confirm(string.format("Delete '%s'?", preset.name), function()
     local ok, err = Presets.delete(preset.file_name)
     if ok then
       Presets.clear_cache()
@@ -347,7 +343,6 @@ function M.rename_preset(state, multi_panel)
     height = 8,
     center = true,
     content_builder = true,
-    enable_inputs = true,
     zindex = UiFloat.ZINDEX.MODAL,
   })
 
@@ -356,17 +351,9 @@ function M.rename_preset(state, multi_panel)
     cb:line("")
     cb:line(string.format("  Rename preset '%s':", preset.name), "NvimFloatTitle")
     cb:line("")
-    cb:labeled_input("name", "  New name", {
-      value = preset.name,
-      placeholder = "(enter new name)",
-      width = 32,
-    })
-    cb:line("")
-    cb:styled("  <Enter>=Rename | <Esc>=Cancel", "NvimFloatHint")
-    rename_win:render()
 
     local function do_rename()
-      local new_name = rename_win:get_input_value("name")
+      local new_name = rename_win:get_embedded_value("name")
       rename_win:close()
 
       if not new_name or new_name == "" then return end
@@ -395,9 +382,18 @@ function M.rename_preset(state, multi_panel)
       end
     end
 
-    vim.keymap.set("n", "<CR>", function()
-      rename_win:enter_input()
-    end, { buffer = rename_win.buf, nowait = true })
+    cb:embedded_input("name", {
+      label = "  New name",
+      value = preset.name,
+      placeholder = "(enter new name)",
+      width = 32,
+      on_submit = function() do_rename() end,
+    })
+    cb:line("")
+    cb:styled("  <Enter>=Rename | <Esc>=Cancel", "NvimFloatHint")
+    rename_win:render()
+
+    vim.keymap.set("n", "<CR>", do_rename, { buffer = rename_win.buf, nowait = true })
 
     vim.keymap.set("n", "<Esc>", function()
       rename_win:close()
@@ -406,8 +402,6 @@ function M.rename_preset(state, multi_panel)
     vim.keymap.set("n", "q", function()
       rename_win:close()
     end, { buffer = rename_win.buf, nowait = true })
-
-    rename_win:on_input_submit(do_rename)
   end
 end
 

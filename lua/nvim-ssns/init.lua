@@ -562,11 +562,13 @@ function Ssns.new_query()
     table.insert(server_names, server.name)
   end
 
-  vim.ui.select(server_names, { prompt = "Select server:" }, function(choice, idx)
-    if choice then
+  local UiFloat = require('nvim-float.window')
+
+  UiFloat.select(server_names, function(idx)
+    if idx then
       Query.create_query_buffer(servers[idx], nil, nil)
     end
-  end)
+  end, "Select server")
 end
 
 ---Attach current buffer to a connection (flat picker)

@@ -236,33 +236,33 @@ function ViewDebugLog.view_log(filter)
         height = 7,
         center = true,
         content_builder = true,
-        enable_inputs = true,
         zindex = UiFloat.ZINDEX.OVERLAY,
       })
 
       if filter_win then
         local fcb = filter_win:get_content_builder()
         fcb:line("")
-        fcb:labeled_input("filter", "  Filter", {
-          value = current_filter or "",
-          placeholder = "(enter filter text)",
-          width = 35,
-        })
-        fcb:line("")
-        fcb:styled("  <Enter>=Apply | <Esc>=Cancel", "NvimFloatHint")
-        filter_win:render()
 
         local function apply_filter()
-          local input = filter_win:get_input_value("filter")
+          local input = filter_win:get_embedded_value("filter")
           filter_win:close()
           if input and input ~= "" then
             ViewDebugLog.view_log(input)
           end
         end
 
-        vim.keymap.set("n", "<CR>", function()
-          filter_win:enter_input()
-        end, { buffer = filter_win.buf, nowait = true })
+        fcb:embedded_input("filter", {
+          label = "  Filter",
+          value = current_filter or "",
+          placeholder = "(enter filter text)",
+          width = 35,
+          on_submit = function() apply_filter() end,
+        })
+        fcb:line("")
+        fcb:styled("  <Enter>=Apply | <Esc>=Cancel", "NvimFloatHint")
+        filter_win:render()
+
+        vim.keymap.set("n", "<CR>", apply_filter, { buffer = filter_win.buf, nowait = true })
 
         vim.keymap.set("n", "<Esc>", function()
           filter_win:close()
@@ -271,8 +271,6 @@ function ViewDebugLog.view_log(filter)
         vim.keymap.set("n", "q", function()
           filter_win:close()
         end, { buffer = filter_win.buf, nowait = true })
-
-        filter_win:on_input_submit(apply_filter)
       end
     end,
     ['C'] = function()
@@ -464,34 +462,35 @@ function ViewDebugLog._show_cached_log(filter)
         height = 7,
         center = true,
         content_builder = true,
-        enable_inputs = true,
         zindex = UiFloat.ZINDEX.OVERLAY,
       })
 
       if filter_win then
         local fcb = filter_win:get_content_builder()
         fcb:line("")
-        fcb:labeled_input("filter", "  Filter", {
-          value = current_filter or "",
-          placeholder = "(enter filter text)",
-          width = 35,
-        })
-        fcb:line("")
-        fcb:styled("  <Enter>=Apply | <Esc>=Cancel", "NvimFloatHint")
-        filter_win:render()
 
         local function apply_filter()
-          local input = filter_win:get_input_value("filter")
+          local input = filter_win:get_embedded_value("filter")
           filter_win:close()
           if input and input ~= "" then
             ViewDebugLog.view_log_async(input)
           end
         end
 
-        vim.keymap.set("n", "<CR>", function() filter_win:enter_input() end, { buffer = filter_win.buf, nowait = true })
+        fcb:embedded_input("filter", {
+          label = "  Filter",
+          value = current_filter or "",
+          placeholder = "(enter filter text)",
+          width = 35,
+          on_submit = function() apply_filter() end,
+        })
+        fcb:line("")
+        fcb:styled("  <Enter>=Apply | <Esc>=Cancel", "NvimFloatHint")
+        filter_win:render()
+
+        vim.keymap.set("n", "<CR>", apply_filter, { buffer = filter_win.buf, nowait = true })
         vim.keymap.set("n", "<Esc>", function() filter_win:close() end, { buffer = filter_win.buf, nowait = true })
         vim.keymap.set("n", "q", function() filter_win:close() end, { buffer = filter_win.buf, nowait = true })
-        filter_win:on_input_submit(apply_filter)
       end
     end,
     ['C'] = function()

@@ -1339,7 +1339,6 @@ local function export_history()
     height = 9,
     center = true,
     content_builder = true,
-    enable_inputs = true,
     zindex = UiFloat.ZINDEX.MODAL,
   })
 
@@ -1348,19 +1347,9 @@ local function export_history()
     cb:line("")
     cb:styled("  Export query history to file:", "NvimFloatTitle")
     cb:line("")
-    cb:labeled_input("filepath", "  File", {
-      value = default_path,
-      placeholder = "(enter path)",
-      width = 50,  -- Default width, expands for longer paths
-    })
-    cb:line("")
-    cb:styled("  Use .json extension for JSON format, otherwise plain text.", "Comment")
-    cb:line("")
-    cb:styled("  <Enter>=Export | <Esc>=Cancel", "NvimFloatHint")
-    export_win:render()
 
     local function do_export()
-      local filepath = export_win:get_input_value("filepath")
+      local filepath = export_win:get_embedded_value("filepath")
       export_win:close()
 
       if filepath and filepath ~= "" then
@@ -1371,9 +1360,20 @@ local function export_history()
       end
     end
 
-    vim.keymap.set("n", "<CR>", function()
-      export_win:enter_input()
-    end, { buffer = export_win.buf, nowait = true })
+    cb:embedded_input("filepath", {
+      label = "  File",
+      value = default_path,
+      placeholder = "(enter path)",
+      width = 50,
+      on_submit = function() do_export() end,
+    })
+    cb:line("")
+    cb:styled("  Use .json extension for JSON format, otherwise plain text.", "Comment")
+    cb:line("")
+    cb:styled("  <Enter>=Export | <Esc>=Cancel", "NvimFloatHint")
+    export_win:render()
+
+    vim.keymap.set("n", "<CR>", do_export, { buffer = export_win.buf, nowait = true })
 
     vim.keymap.set("n", "<Esc>", function()
       export_win:close()
@@ -1382,9 +1382,6 @@ local function export_history()
     vim.keymap.set("n", "q", function()
       export_win:close()
     end, { buffer = export_win.buf, nowait = true })
-
-    -- Submit binding when in input mode
-    export_win:on_input_submit(do_export)
   end
 end
 

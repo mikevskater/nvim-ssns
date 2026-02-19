@@ -412,6 +412,11 @@ function M.render_filters(state)
     cb:styled(" Select a server to search", "muted")
   end
 
+  -- Store cb for container creation by render_panel
+  if state.set_panel_content_builder then
+    state:set_panel_content_builder("filters", cb)
+  end
+
   return cb:build_lines(), cb:build_highlights()
 end
 
@@ -477,6 +482,11 @@ function M.render_settings(state)
     placeholder = "(none)",
     width = 40,
   })
+
+  -- Store cb for container creation by render_panel
+  if state.set_panel_content_builder then
+    state:set_panel_content_builder("settings", cb)
+  end
 
   return cb
 end

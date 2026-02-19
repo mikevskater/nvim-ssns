@@ -862,7 +862,16 @@ function TreeActions.create_group(UiTree)
     parent_path = obj._group_path
   end
 
-  vim.ui.input({ prompt = "Group name: " }, function(name)
+  local UiFloat = require('nvim-float.window')
+  local ContentBuilder = require('nvim-float.content')
+
+  local cb = ContentBuilder.new()
+  cb:blank()
+
+  local dialog
+  local function do_create()
+    local name = dialog:get_embedded_value("name")
+    dialog:close()
     if not name or name == "" then return end
 
     local ok, err = ServerGroups.create_group(parent_path, name)
@@ -875,7 +884,31 @@ function TreeActions.create_group(UiTree)
     else
       vim.notify("SSNS: " .. (err or "Failed to create group"), vim.log.levels.ERROR)
     end
-  end)
+  end
+
+  cb:embedded_input("name", {
+    label = "  Name",
+    value = "",
+    placeholder = "(enter group name)",
+    width = 30,
+    on_submit = function() do_create() end,
+  })
+  cb:blank()
+  cb:styled("  <Enter>=Create | <Esc>=Cancel", "NvimFloatHint")
+
+  dialog = UiFloat.create({
+    title = "Create Group",
+    width = 50,
+    height = 6,
+    center = true,
+    content_builder = cb,
+    zindex = UiFloat.ZINDEX.MODAL,
+    keymaps = {
+      ["<CR>"] = do_create,
+      ["<Esc>"] = function() dialog:close() end,
+      ["q"] = function() dialog:close() end,
+    },
+  })
 end
 
 ---Rename a server group (only works on server_group nodes)
@@ -892,7 +925,17 @@ function TreeActions.rename_group(UiTree)
   end
 
   local group_path = obj._group_path
-  vim.ui.input({ prompt = "New group name: ", default = obj.name }, function(new_name)
+
+  local UiFloat = require('nvim-float.window')
+  local ContentBuilder = require('nvim-float.content')
+
+  local cb = ContentBuilder.new()
+  cb:blank()
+
+  local dialog
+  local function do_rename()
+    local new_name = dialog:get_embedded_value("name")
+    dialog:close()
     if not new_name or new_name == "" or new_name == obj.name then return end
 
     local ok, err = ServerGroups.rename_group(group_path, new_name)
@@ -901,7 +944,31 @@ function TreeActions.rename_group(UiTree)
     else
       vim.notify("SSNS: " .. (err or "Failed to rename group"), vim.log.levels.ERROR)
     end
-  end)
+  end
+
+  cb:embedded_input("name", {
+    label = "  New name",
+    value = obj.name,
+    placeholder = "(enter new name)",
+    width = 30,
+    on_submit = function() do_rename() end,
+  })
+  cb:blank()
+  cb:styled("  <Enter>=Rename | <Esc>=Cancel", "NvimFloatHint")
+
+  dialog = UiFloat.create({
+    title = "Rename Group",
+    width = 50,
+    height = 6,
+    center = true,
+    content_builder = cb,
+    zindex = UiFloat.ZINDEX.MODAL,
+    keymaps = {
+      ["<CR>"] = do_rename,
+      ["<Esc>"] = function() dialog:close() end,
+      ["q"] = function() dialog:close() end,
+    },
+  })
 end
 
 ---Delete a server group (children adopted by parent)
@@ -974,8 +1041,10 @@ function TreeActions.move_to_group(UiTree)
     table.insert(labels, dest.label)
   end
 
-  vim.ui.select(labels, { prompt = "Move to:" }, function(choice, idx)
-    if not choice or not idx then return end
+  local UiFloat = require('nvim-float.window')
+
+  UiFloat.select(labels, function(idx)
+    if not idx then return end
 
     local dest = destinations[idx]
     local ok, err = move_fn(dest.path)
@@ -984,7 +1053,7 @@ function TreeActions.move_to_group(UiTree)
     else
       vim.notify("SSNS: " .. (err or "Failed to move"), vim.log.levels.ERROR)
     end
-  end)
+  end, "Move to")
 end
 
 ---Move item one level up to parent
@@ -1064,8 +1133,10 @@ function TreeActions.add_to_group(UiTree)
         table.insert(labels, label)
       end
 
-      vim.ui.select(labels, { prompt = "Add connection to group:" }, function(choice, idx)
-        if not choice or not idx then return end
+      local UiFloat = require('nvim-float.window')
+
+      UiFloat.select(labels, function(idx)
+        if not idx then return end
 
         local conn = available[idx]
 
@@ -1083,7 +1154,7 @@ function TreeActions.add_to_group(UiTree)
 
         UiTree.render()
         vim.notify(string.format("SSNS: Added '%s' to tree", conn.name), vim.log.levels.INFO)
-      end)
+      end, "Add connection to group")
     end)
   end)
 end
