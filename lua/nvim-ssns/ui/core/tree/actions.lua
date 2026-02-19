@@ -1159,14 +1159,106 @@ function TreeActions.add_to_group(UiTree)
   end)
 end
 
----Cycle sort mode
+---Get the sort context for an object (determines which group sort to toggle)
+---@param obj BaseDbObject
+---@return string level "root" or "group"
+---@return table? parent The persistent parent to store sort key on
+---@return string? sort_key The key to store sort direction
+---@return string? label Human-readable label for notification
+local function _get_sort_context(obj)
+  local ot = obj.object_type
+
+  -- Root level: servers and server groups
+  if ot == "server" or ot == "server_group" then
+    return "root"
+  end
+
+  -- Database: sort databases within the server's databases group
+  if ot == "database" then
+    return "group", obj:get_server(), "_ui_databases_group_sort", "Databases"
+  end
+
+  -- Group nodes at database level
+  if ot == "databases_group" then
+    return "group", obj.parent, "_ui_databases_group_sort", "Databases"
+  end
+  if ot == "tables_group" then
+    return "group", obj.parent, "_ui_tables_group_sort", "TABLES"
+  end
+  if ot == "views_group" then
+    return "group", obj.parent, "_ui_views_group_sort", "VIEWS"
+  end
+  if ot == "procedures_group" then
+    return "group", obj.parent, "_ui_procedures_group_sort", "PROCEDURES"
+  end
+  if ot == "scalar_functions_group" then
+    return "group", obj.parent, "_ui_scalar_functions_group_sort", "SCALAR FUNCTIONS"
+  end
+  if ot == "table_functions_group" then
+    return "group", obj.parent, "_ui_table_functions_group_sort", "TABLE FUNCTIONS"
+  end
+  if ot == "synonyms_group" then
+    return "group", obj.parent, "_ui_synonyms_group_sort", "SYNONYMS"
+  end
+  if ot == "schemas_group" then
+    return "group", obj.parent, "_ui_schemas_group_sort", "SCHEMAS"
+  end
+
+  -- Schema node: sort the schema's own children
+  if ot == "schema" or ot == "schema_view" then
+    return "group", obj, "_ui_schema_children_sort", obj.name
+  end
+
+  -- Individual objects bubble up to their database-level group sort key
+  if ot == "table" then
+    return "group", obj:get_database(), "_ui_tables_group_sort", "TABLES"
+  end
+  if ot == "view" then
+    return "group", obj:get_database(), "_ui_views_group_sort", "VIEWS"
+  end
+  if ot == "procedure" then
+    return "group", obj:get_database(), "_ui_procedures_group_sort", "PROCEDURES"
+  end
+  if ot == "function" then
+    if obj.is_table_valued and obj:is_table_valued() then
+      return "group", obj:get_database(), "_ui_table_functions_group_sort", "TABLE FUNCTIONS"
+    else
+      return "group", obj:get_database(), "_ui_scalar_functions_group_sort", "SCALAR FUNCTIONS"
+    end
+  end
+  if ot == "synonym" then
+    return "group", obj:get_database(), "_ui_synonyms_group_sort", "SYNONYMS"
+  end
+
+  -- Fallback (functions_group parent container, system groups, etc.)
+  return "root"
+end
+
+---Cycle sort mode (context-aware)
 ---@param UiTree table The main UiTree module
 function TreeActions.cycle_sort(UiTree)
-  local ServerGroups = require('nvim-ssns.server_groups')
-  local new_mode = ServerGroups.cycle_sort()
+  local Buffer = require('nvim-ssns.ui.core.buffer')
+  local line_number = Buffer.get_current_line()
+  local obj = UiTree.line_map[line_number]
+  if not obj then return end
 
-  local labels = { alpha = "Alphabetical", last_connection = "Last Connected", custom = "Custom" }
-  vim.notify("SSNS: Sort mode: " .. (labels[new_mode] or new_mode), vim.log.levels.INFO)
+  local level, parent, sort_key, label = _get_sort_context(obj)
+
+  if level == "root" then
+    -- Root-level: delegate to ServerGroups cycling (Custom → Alphabetical → Last Connected)
+    local ServerGroups = require('nvim-ssns.server_groups')
+    local new_mode = ServerGroups.cycle_sort()
+    local labels = { alpha = "Alphabetical", last_connection = "Last Connected", custom = "Custom" }
+    vim.notify("SSNS: Sort mode: " .. (labels[new_mode] or new_mode), vim.log.levels.INFO)
+  elseif level == "group" and parent and sort_key then
+    -- Group-level: toggle between asc and desc
+    local current = parent[sort_key] or "asc"
+    local new_dir = current == "asc" and "desc" or "asc"
+    parent[sort_key] = new_dir
+    local dir_label = new_dir == "asc" and "A-Z" or "Z-A"
+    vim.notify(string.format("SSNS: %s sort: %s", label, dir_label), vim.log.levels.INFO)
+  end
+
   UiTree.render()
 end
 

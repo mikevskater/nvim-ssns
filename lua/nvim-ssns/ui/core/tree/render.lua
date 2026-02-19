@@ -5,6 +5,36 @@ local TreeRender = {}
 
 local ContentBuilder = require('nvim-float.content')
 
+---Sort comparator: by schema_name then name (for tables, views, procs, etc.)
+---@param a BaseDbObject
+---@param b BaseDbObject
+---@param descending boolean?
+---@return boolean
+local function compare_by_schema_name(a, b, descending)
+  local a_schema = (a.schema_name or ""):lower()
+  local b_schema = (b.schema_name or ""):lower()
+  if a_schema ~= b_schema then
+    if descending then return a_schema > b_schema end
+    return a_schema < b_schema
+  end
+  local a_name = (a.name or ""):lower()
+  local b_name = (b.name or ""):lower()
+  if descending then return a_name > b_name end
+  return a_name < b_name
+end
+
+---Sort comparator: by name only (for databases, schemas)
+---@param a BaseDbObject
+---@param b BaseDbObject
+---@param descending boolean?
+---@return boolean
+local function compare_by_name(a, b, descending)
+  local a_name = (a.name or ""):lower()
+  local b_name = (b.name or ""):lower()
+  if descending then return a_name > b_name end
+  return a_name < b_name
+end
+
 ---Create an ephemeral UI group for display (not stored in data model)
 ---@param parent BaseDbObject Parent object
 ---@param name string Base name for the group (e.g., "TABLES")
@@ -907,8 +937,16 @@ function TreeRender.render_schema(UiTree, schema, cb, indent_level)
       cb:line("")  -- Empty line - spinner overlays this
     elseif schema._sorted_objects then
       -- Have cached sorted objects - render them
-      for _, obj in ipairs(filtered_objects) do
-        TreeRender.render_object(UiTree, obj, cb, indent_level + 1)
+      -- Check sort direction (async sort always produces ascending order)
+      local sort_dir = schema["_ui_schema_children_sort"] or "asc"
+      if sort_dir == "desc" then
+        for i = #filtered_objects, 1, -1 do
+          TreeRender.render_object(UiTree, filtered_objects[i], cb, indent_level + 1)
+        end
+      else
+        for _, obj in ipairs(filtered_objects) do
+          TreeRender.render_object(UiTree, obj, cb, indent_level + 1)
+        end
       end
     else
       -- Need to start async sort
@@ -931,102 +969,6 @@ function TreeRender.render_schema(UiTree, schema, cb, indent_level)
           })
         end
       end, 10)  -- Small delay to ensure buffer is written
-    end
-  end
-end
-
----Render an object group (TABLES, VIEWS, etc.)
----@param UiTree table The main UiTree module
----@param group BaseDbObject
----@param cb ContentBuilder
----@param indent_level number
-function TreeRender.render_object_group(UiTree, group, cb, indent_level)
-  local UiFilters = require('nvim-ssns.ui.core.filters')
-  local indent = string.rep("  ", indent_level)
-  local icon = group.ui_state.expanded and "▾ " or "▸ "
-
-  -- Get children - they should already be loaded by toggle_node if expanded
-  -- Re-fetch from parent to get latest data with skip_load to avoid re-querying
-  if group.ui_state.expanded and group.parent and group.parent.object_type == "database" then
-    local db = group.parent
-    local adapter = db:get_adapter()
-
-    -- Update group children with latest data from database (skip_load prevents re-querying)
-    if group.object_type == "tables_group" then
-      group.children = db:get_tables(nil, { skip_load = true })
-    elseif group.object_type == "views_group" and adapter.features.views then
-      group.children = db:get_views(nil, { skip_load = true })
-    elseif group.object_type == "procedures_group" and adapter.features.procedures then
-      group.children = db:get_procedures(nil, { skip_load = true })
-    elseif group.object_type == "functions_group" and adapter.features.functions then
-      -- Special handling for FUNCTIONS group with sub-groups
-      local all_functions = db:get_functions(nil, { skip_load = true })
-      local scalar_functions = {}
-      local table_functions = {}
-      for _, func in ipairs(all_functions) do
-        if func:is_table_valued() then
-          table.insert(table_functions, func)
-        else
-          table.insert(scalar_functions, func)
-        end
-      end
-      -- Update sub-groups
-      for _, child in ipairs(group.children) do
-        if child.object_type == "scalar_functions_group" then
-          child.children = scalar_functions
-        elseif child.object_type == "table_functions_group" then
-          child.children = table_functions
-        end
-      end
-    elseif group.object_type == "synonyms_group" and adapter.features.synonyms then
-      group.children = db:get_synonyms(nil, { skip_load = true })
-    end
-  end
-
-  -- Get all children
-  local all_children = group:has_children() and group:get_children() or {}
-
-  -- Apply filters if any
-  local filters = UiFilters.get(group)
-  local filtered_children, total_count, filter_error = UiFilters.apply(all_children, filters)
-  local filtered_count = #filtered_children
-
-  -- Show filter error if any
-  if filter_error then
-    vim.notify(string.format("SSNS: Filter error on %s: %s", group.name, filter_error), vim.log.levels.WARN)
-  end
-
-  -- Group line with count display and element tracking
-  -- Strip any existing count from name (in case it's already there)
-  local base_name = group.name:gsub("%s*%([%d/]+%)$", "")
-  local count_display = UiFilters.get_count_display(group, filtered_count, total_count)
-  cb:spans({
-    { text = indent },
-    { text = icon .. base_name .. " " .. count_display,
-      style = "SsnsGroup",
-      track = {
-        name = "group_" .. group.object_type,
-        type = group.object_type,
-        data = { object = group },
-        row_based = true,
-      },
-    },
-  })
-
-  -- If expanded, render filtered children
-  if group.ui_state.expanded and #filtered_children > 0 then
-    -- Sort by schema name then object name (case-insensitive)
-    table.sort(filtered_children, function(a, b)
-      local a_schema = (a.schema_name or ""):lower()
-      local b_schema = (b.schema_name or ""):lower()
-      if a_schema ~= b_schema then
-        return a_schema < b_schema
-      end
-      return (a.name or ""):lower() < (b.name or ""):lower()
-    end)
-
-    for _, child in ipairs(filtered_children) do
-      TreeRender.render_object(UiTree, child, cb, indent_level + 1)
     end
   end
 end
@@ -1203,7 +1145,36 @@ function TreeRender.render_object(UiTree, obj, cb, indent_level)
             vim.notify(string.format("SSNS: Filter error on %s: %s", obj.name, filter_error), vim.log.levels.WARN)
           end
 
-          -- Render filtered children
+          -- Sort filtered children: ephemeral sub-groups stay first, rest get sorted
+          local sub_groups = {}
+          local sortable = {}
+          for _, child in ipairs(filtered_children) do
+            if child._is_ephemeral then
+              table.insert(sub_groups, child)
+            else
+              table.insert(sortable, child)
+            end
+          end
+
+          -- Read sort direction from persistent parent (defaults to ascending)
+          local sort_dir = obj.parent and obj.parent["_ui_" .. obj.object_type .. "_sort"] or "asc"
+          local descending = sort_dir == "desc"
+
+          -- Sort using appropriate comparator
+          if #sortable > 0 then
+            if sortable[1].schema_name then
+              table.sort(sortable, function(a, b) return compare_by_schema_name(a, b, descending) end)
+            else
+              table.sort(sortable, function(a, b) return compare_by_name(a, b, descending) end)
+            end
+          end
+
+          -- Reconstruct: sub-groups first, then sorted children
+          filtered_children = {}
+          for _, sg in ipairs(sub_groups) do table.insert(filtered_children, sg) end
+          for _, ch in ipairs(sortable) do table.insert(filtered_children, ch) end
+
+          -- Render filtered and sorted children
           for _, child in ipairs(filtered_children) do
             -- Delegate to specialized renderers for complex objects
             if child.object_type == "database" then

@@ -82,14 +82,6 @@ function UiTree.render_schema(schema, lines, indent_level)
   TreeRender.render_schema(UiTree, schema, lines, indent_level)
 end
 
----Render an object group
----@param group BaseDbObject
----@param lines string[]
----@param indent_level number
-function UiTree.render_object_group(group, lines, indent_level)
-  TreeRender.render_object_group(UiTree, group, lines, indent_level)
-end
-
 ---Render a database object
 ---@param obj BaseDbObject
 ---@param lines string[]
