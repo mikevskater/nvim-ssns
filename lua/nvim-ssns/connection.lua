@@ -160,6 +160,7 @@ function Connection.execute(connection_config, query, opts)
     success = true,
     resultSets = raw_result.resultSets or raw_result["resultSets"] or {},
     metadata = raw_result.metadata or {},
+    messages = raw_result.messages or (raw_result.metadata and raw_result.metadata.messages) or nil,
     error = nil
   }
 

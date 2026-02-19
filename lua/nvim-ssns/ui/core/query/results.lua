@@ -408,6 +408,15 @@ function QueryResults.format_results_styled(resultSets, sql, execution_time_ms, 
   if #resultSets == 0 then
     local showed_message = false
 
+    -- Show PRINT/RAISERROR messages (trailing messages when no result sets)
+    if query_metadata and query_metadata.messages and #query_metadata.messages > 0 then
+      for _, msg in ipairs(query_metadata.messages) do
+        builder:styled("  " .. msg, "muted")
+        showed_message = true
+      end
+      builder:blank()
+    end
+
     if query_metadata and query_metadata.rowsAffected then
       local rows_affected = query_metadata.rowsAffected
 
@@ -560,6 +569,14 @@ function QueryResults.format_results_styled(resultSets, sql, execution_time_ms, 
       builder:blank()
     end
 
+    -- Render SQL Server PRINT/RAISERROR messages that arrived before this result set
+    if resultSet.messages and #resultSet.messages > 0 then
+      for _, msg in ipairs(resultSet.messages) do
+        builder:styled("  " .. msg, "muted")
+      end
+      builder:blank()
+    end
+
     -- Block error entry (from ETL execution) — render inline and skip table
     if resultSet.block_error then
       local err = resultSet.block_error
@@ -641,6 +658,14 @@ function QueryResults.format_results_styled(resultSets, sql, execution_time_ms, 
           end
         end
       end
+    end
+  end
+
+  -- Show trailing PRINT/RAISERROR messages (after all result sets)
+  if query_metadata and query_metadata.messages and #query_metadata.messages > 0 then
+    builder:blank()
+    for _, msg in ipairs(query_metadata.messages) do
+      builder:styled("  " .. msg, "muted")
     end
   end
 

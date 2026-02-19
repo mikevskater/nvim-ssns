@@ -308,6 +308,19 @@ class SqlServerDriver extends BaseDriver {
       let hasError = false;
       let errorInfo = null;
 
+      // Track PRINT/RAISERROR messages in order with result sets
+      let pendingMessages = [];
+
+      // Capture PRINT/RAISERROR output via info event
+      const infoHandler = (msg) => {
+        if (msg && msg.message) {
+          pendingMessages.push(msg.message);
+        } else if (typeof msg === 'string') {
+          pendingMessages.push(msg);
+        }
+      };
+      this.connection.on('info', infoHandler);
+
       // Use queryRaw for multi-result set support
       this.connection.queryRaw(query, (err, results, more) => {
         // Check for errors
@@ -317,6 +330,7 @@ class SqlServerDriver extends BaseDriver {
 
           // If error, don't wait for more results - resolve immediately
           if (!more) {
+            this.connection.removeListener('info', infoHandler);
             const endTime = Date.now();
             const executionTime = endTime - startTime;
 
@@ -324,7 +338,8 @@ class SqlServerDriver extends BaseDriver {
               resultSets: [],
               metadata: {
                 executionTime: executionTime,
-                rowsAffected: []
+                rowsAffected: [],
+                messages: pendingMessages
               },
               error: {
                 message: err.message || 'Unknown error',
@@ -389,15 +404,21 @@ class SqlServerDriver extends BaseDriver {
             return rowObj;
           });
 
+          // Attach pending PRINT messages that arrived before this result set
+          const messages = pendingMessages.length > 0 ? pendingMessages : undefined;
+          pendingMessages = [];
+
           allResultSets.push({
             columns: columns,
             rows: rowObjects,
-            rowCount: rowObjects.length
+            rowCount: rowObjects.length,
+            messages: messages
           });
         }
 
         // Check if this is the last result set
         if (!more) {
+          this.connection.removeListener('info', infoHandler);
           const endTime = Date.now();
           const executionTime = endTime - startTime;
 
@@ -405,7 +426,8 @@ class SqlServerDriver extends BaseDriver {
             resultSets: allResultSets,
             metadata: {
               executionTime: executionTime,
-              rowsAffected: allResultSets.map(rs => rs.rowCount)
+              rowsAffected: allResultSets.map(rs => rs.rowCount),
+              messages: pendingMessages.length > 0 ? pendingMessages : undefined
             },
             error: null
           });
@@ -419,8 +441,28 @@ class SqlServerDriver extends BaseDriver {
    */
   async executeWithTedious(query, startTime) {
     try {
+      // Track PRINT/RAISERROR messages interleaved with result sets
+      let pendingMessages = [];
+      const resultSetMessages = []; // messages[i] = messages before result set i
+
+      // Create request and attach info listener before executing
+      const request = this.pool.request();
+
+      // Capture PRINT/RAISERROR output via info event
+      request.on('info', (msg) => {
+        if (msg && msg.message) {
+          pendingMessages.push(msg.message);
+        }
+      });
+
+      // Track result set boundaries to associate messages
+      request.on('recordset', () => {
+        resultSetMessages.push(pendingMessages.length > 0 ? pendingMessages : undefined);
+        pendingMessages = [];
+      });
+
       // Execute query
-      const result = await this.pool.request().query(query);
+      const result = await request.query(query);
 
       const endTime = Date.now();
       const executionTime = endTime - startTime;
@@ -431,6 +473,7 @@ class SqlServerDriver extends BaseDriver {
         : [result.recordset];
 
       // Format result sets with column metadata
+      let rsIndex = 0;
       const formattedResultSets = resultSets
         .filter(rs => rs !== undefined) // Filter out undefined result sets
         .map(rs => {
@@ -498,10 +541,15 @@ class SqlServerDriver extends BaseDriver {
             return rowObj;
           });
 
+          // Attach pending PRINT messages that arrived before this result set
+          const messages = resultSetMessages[rsIndex];
+          rsIndex++;
+
           return {
             columns: columns,
             rows: rowObjects,
-            rowCount: rowObjects.length
+            rowCount: rowObjects.length,
+            messages: messages
           };
         });
 
@@ -509,7 +557,8 @@ class SqlServerDriver extends BaseDriver {
         resultSets: formattedResultSets,
         metadata: {
           executionTime: executionTime,
-          rowsAffected: result.rowsAffected || []
+          rowsAffected: result.rowsAffected || [],
+          messages: pendingMessages.length > 0 ? pendingMessages : undefined
         },
         error: null
       };
