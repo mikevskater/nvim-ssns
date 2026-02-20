@@ -319,10 +319,8 @@ class SqlServerDriver extends BaseDriver {
           pendingMessages.push(msg);
         }
       };
-      this.connection.on('info', infoHandler);
-
-      // Use queryRaw for multi-result set support
-      this.connection.queryRaw(query, (err, results, more) => {
+      // queryRaw() returns a StreamEvents (EventEmitter) that emits 'info' for PRINT/RAISERROR
+      const q = this.connection.queryRaw(query, (err, results, more) => {
         // Check for errors
         if (err) {
           hasError = true;
@@ -330,7 +328,7 @@ class SqlServerDriver extends BaseDriver {
 
           // If error, don't wait for more results - resolve immediately
           if (!more) {
-            this.connection.removeListener('info', infoHandler);
+            q.removeListener('info', infoHandler);
             const endTime = Date.now();
             const executionTime = endTime - startTime;
 
@@ -418,7 +416,7 @@ class SqlServerDriver extends BaseDriver {
 
         // Check if this is the last result set
         if (!more) {
-          this.connection.removeListener('info', infoHandler);
+          q.removeListener('info', infoHandler);
           const endTime = Date.now();
           const executionTime = endTime - startTime;
 
@@ -433,6 +431,7 @@ class SqlServerDriver extends BaseDriver {
           });
         }
       });
+      q.on('info', infoHandler);
     });
   }
 
@@ -692,11 +691,19 @@ class SqlServerDriver extends BaseDriver {
         `;
 
         ssnsLog(`[sqlserver] getMetadata() running query: ${query}`);
-        const result = await this.pool.request().query(query);
-        ssnsLog(`[sqlserver] getMetadata() query result: ${JSON.stringify(result.recordset)}`);
+
+        // Use execute() which handles both Windows auth (msnodesqlv8) and SQL auth (tedious)
+        const result = await this.execute(query);
+        ssnsLog(`[sqlserver] getMetadata() query result: ${JSON.stringify(result)}`);
+
+        // Extract rows from the first result set
+        const rows = result.resultSets && result.resultSets[0] ? result.resultSets[0].rows : [];
+        if (result.error) {
+          throw new Error(result.error.message || 'Query failed');
+        }
 
         return {
-          columns: result.recordset.map(row => ({
+          columns: rows.map(row => ({
             name: row.name,
             type: row.type,
             maxLength: row.maxLength,
