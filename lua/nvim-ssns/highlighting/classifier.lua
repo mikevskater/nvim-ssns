@@ -556,6 +556,12 @@ function Classifier._classify_multipart(parts, chunk, connection, config, keywor
   -- Build results from resolved types
   for i, part in ipairs(parts) do
     local semantic_type = resolved_types[i] or "unresolved"
+
+    -- When no connection, assume unresolved identifiers are tables (validate only when connected)
+    if not connection and semantic_type == "unresolved" then
+      semantic_type = "table"
+    end
+
     local highlight_group = nil
 
     -- Map semantic type to highlight group based on config

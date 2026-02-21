@@ -403,6 +403,9 @@ local BASIC_HIGHLIGHT_MAP = {
   global_variable = "SsnsKeywordGlobalVariable",
   system_procedure = "SsnsKeywordSystemProcedure",
   temp_table = "SsnsTempTable",
+  -- Identifiers default to table color; semantic pass overwrites with correct type
+  identifier = "SsnsTable",
+  bracket_id = "SsnsTable",
 }
 
 ---Apply basic keyword/token highlighting to a buffer without any database lookups
@@ -452,6 +455,10 @@ function SemanticHighlighter.apply_basic_highlighting(bufnr)
       highlight_group = BASIC_HIGHLIGHT_MAP.system_procedure
     elseif token.type == "temp_table" then
       highlight_group = BASIC_HIGHLIGHT_MAP.temp_table
+    elseif token.type == "identifier" then
+      highlight_group = BASIC_HIGHLIGHT_MAP.identifier
+    elseif token.type == "bracket_id" then
+      highlight_group = BASIC_HIGHLIGHT_MAP.bracket_id
     end
 
     if highlight_group then
