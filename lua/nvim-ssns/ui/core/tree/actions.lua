@@ -9,8 +9,8 @@ function TreeActions.toggle_node(UiTree)
   local Buffer = require('nvim-ssns.ui.core.buffer')
   local line_number = Buffer.get_current_line()
 
-  -- Get object at current line
-  local obj = UiTree.line_map[line_number]
+  -- Get object at current line (prefer ContentBuilder registry over line_map)
+  local obj = UiTree.get_object_at_line(line_number)
   if not obj then
     return
   end
@@ -537,7 +537,7 @@ function TreeActions.refresh_node(UiTree)
   local line_number = Buffer.get_current_line()
 
   -- Get object at current line
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
   if not obj then
     return
   end
@@ -578,11 +578,18 @@ end
 ---@param UiTree table The main UiTree module
 function TreeActions.refresh_all(UiTree)
   local Cache = require('nvim-ssns').get_cache()
+  local TreeNavigation = require('nvim-ssns.ui.core.tree.navigation')
+
+  -- Save cursor position before refresh
+  TreeNavigation.save_cursor_position(UiTree)
+
   Cache.refresh_all()
   vim.notify("Refreshed all servers", vim.log.levels.INFO)
 
-  -- Re-render tree
-  UiTree.render()
+  -- Re-render tree after event loop processes the synchronous reloads
+  vim.schedule(function()
+    UiTree.render()
+  end)
 end
 
 ---Toggle connection for server/database at current cursor
@@ -592,7 +599,7 @@ function TreeActions.toggle_connection(UiTree)
   local line_number = Buffer.get_current_line()
 
   -- Get object at current line
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
   if not obj then
     return
   end
@@ -627,7 +634,7 @@ function TreeActions.toggle_favorite(UiTree)
   local line_number = Buffer.get_current_line()
 
   -- Get object at current line
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
   if not obj then
     return
   end
@@ -666,7 +673,7 @@ function TreeActions.set_lualine_color(UiTree)
   local line_number = Buffer.get_current_line()
 
   -- Get object at current line
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
   if not obj then
     return
   end
@@ -738,7 +745,7 @@ function TreeActions.handle_mouse_click(UiTree, double_click)
   end
 
   local line_num = mouse.line
-  local obj = UiTree.line_map[line_num]
+  local obj = UiTree.get_object_at_line(line_num)
 
   if not obj then
     return
@@ -831,7 +838,7 @@ end
 local function get_group_context(UiTree)
   local Buffer = require('nvim-ssns.ui.core.buffer')
   local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
   if not obj then return nil, nil end
 
   if obj.object_type == "server_group" then
@@ -917,7 +924,7 @@ function TreeActions.rename_group(UiTree)
   local ServerGroups = require('nvim-ssns.server_groups')
   local Buffer = require('nvim-ssns.ui.core.buffer')
   local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
 
   if not obj or obj.object_type ~= "server_group" then
     vim.notify("SSNS: Cursor must be on a server group to rename", vim.log.levels.WARN)
@@ -977,7 +984,7 @@ function TreeActions.delete_group(UiTree)
   local ServerGroups = require('nvim-ssns.server_groups')
   local Buffer = require('nvim-ssns.ui.core.buffer')
   local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
 
   if not obj or obj.object_type ~= "server_group" then
     vim.notify("SSNS: Cursor must be on a server group to delete", vim.log.levels.WARN)
@@ -1006,7 +1013,7 @@ function TreeActions.move_to_group(UiTree)
   local ServerGroups = require('nvim-ssns.server_groups')
   local Buffer = require('nvim-ssns.ui.core.buffer')
   local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
 
   if not obj then return end
 
@@ -1062,7 +1069,7 @@ function TreeActions.move_to_parent(UiTree)
   local ServerGroups = require('nvim-ssns.server_groups')
   local Buffer = require('nvim-ssns.ui.core.buffer')
   local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
 
   if not obj then return end
 
@@ -1095,7 +1102,7 @@ function TreeActions.add_to_group(UiTree)
   local Cache = require('nvim-ssns.cache')
   local Buffer = require('nvim-ssns.ui.core.buffer')
   local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
 
   -- Determine target group
   local target_group_path = nil
@@ -1239,7 +1246,7 @@ end
 function TreeActions.cycle_sort(UiTree)
   local Buffer = require('nvim-ssns.ui.core.buffer')
   local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
   if not obj then return end
 
   local level, parent, sort_key, label = _get_sort_context(obj)
@@ -1268,7 +1275,7 @@ function TreeActions.reorder_up(UiTree)
   local ServerGroups = require('nvim-ssns.server_groups')
   local Buffer = require('nvim-ssns.ui.core.buffer')
   local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
 
   if not obj then return end
 
@@ -1291,7 +1298,7 @@ function TreeActions.reorder_down(UiTree)
   local ServerGroups = require('nvim-ssns.server_groups')
   local Buffer = require('nvim-ssns.ui.core.buffer')
   local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
 
   if not obj then return end
 
