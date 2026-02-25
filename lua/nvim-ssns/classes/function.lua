@@ -227,12 +227,7 @@ function FunctionClass:load_definition()
   -- Navigate to database based on server type:
   -- Schema-based (SQL Server, PostgreSQL): Function -> Schema -> Database
   -- Non-schema (MySQL, SQLite): Function -> Database
-  local db
-  if adapter.features.schemas then
-    db = self.parent.parent  -- Function -> Schema -> Database
-  else
-    db = self.parent  -- Function -> Database
-  end
+  local db = self:get_database()
 
   -- Get definition query from adapter
   local query = adapter:get_definition_query(db.db_name, self.schema_name, self.function_name, "FUNCTION")
@@ -317,7 +312,7 @@ end
 function FunctionClass:get_qualified_name()
   local adapter = self:get_adapter()
   return adapter:get_qualified_name(
-    self.parent.parent.db_name,
+    self:get_database().db_name,
     self.schema_name,
     self.function_name
   )

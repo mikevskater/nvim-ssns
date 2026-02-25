@@ -140,12 +140,7 @@ function ProcedureClass:load_definition()
   -- Navigate to database based on server type:
   -- Schema-based (SQL Server, PostgreSQL): Procedure -> Schema -> Database
   -- Non-schema (MySQL, SQLite): Procedure -> Database
-  local db
-  if adapter.features.schemas then
-    db = self.parent.parent  -- Procedure -> Schema -> Database
-  else
-    db = self.parent  -- Procedure -> Database
-  end
+  local db = self:get_database()
 
   -- Get definition query from adapter
   local query = adapter:get_definition_query(db.db_name, self.schema_name, self.procedure_name, "PROCEDURE")
@@ -217,7 +212,7 @@ end
 function ProcedureClass:get_qualified_name()
   local adapter = self:get_adapter()
   return adapter:get_qualified_name(
-    self.parent.parent.db_name,
+    self:get_database().db_name,
     self.schema_name,
     self.procedure_name
   )

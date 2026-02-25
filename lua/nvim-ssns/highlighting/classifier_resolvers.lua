@@ -776,7 +776,7 @@ function M.resolve_multipart_from_cache(names, sql_context, connection, resoluti
   -- ============================================================================
   local db = Loaders.find_database(name1, connection)
   if db then
-    return M.resolve_as_database_qualified(names, db)
+    return M.resolve_as_database_qualified(names, db, resolution_context)
   end
 
   -- ============================================================================
@@ -966,8 +966,9 @@ end
 ---Helper: Resolve identifier as database-qualified (database.schema.object or database.object)
 ---@param names string[] Array of identifier names
 ---@param db DbClass The database object
+---@param resolution_context table? Resolution context with clause info for heuristic fallback
 ---@return string[] types Array of semantic types
-function M.resolve_as_database_qualified(names, db)
+function M.resolve_as_database_qualified(names, db, resolution_context)
   local types = {}
   types[1] = "database"
 
@@ -975,6 +976,19 @@ function M.resolve_as_database_qualified(names, db)
 
   if #names == 1 then
     return types
+  end
+
+  -- Helper: infer object type from clause context
+  local function heuristic_object_type()
+    if resolution_context and resolution_context.clause then
+      local clause = resolution_context.clause
+      if clause == "from" or clause == "join" then
+        return "table"
+      elseif clause == "exec" then
+        return "procedure"
+      end
+    end
+    return "unresolved"
   end
 
   if Loaders.db_uses_schemas(db) then
@@ -998,16 +1012,21 @@ function M.resolve_as_database_qualified(names, db)
             end
           end
         else
-          types[3] = "unresolved"
+          -- Object not found (schema objects may not be loaded yet) - use clause heuristics
+          types[3] = heuristic_object_type()
           for i = 4, #names do
-            types[i] = "unresolved"
+            types[i] = "column"
           end
         end
       end
     else
-      types[2] = "unresolved"
-      for i = 3, #names do
-        types[i] = "unresolved"
+      -- Schema not found (schemas may not be loaded yet) - use clause heuristics
+      types[2] = "schema"
+      if #names >= 3 then
+        types[3] = heuristic_object_type()
+        for i = 4, #names do
+          types[i] = "column"
+        end
       end
     end
   else
@@ -1025,9 +1044,10 @@ function M.resolve_as_database_qualified(names, db)
         end
       end
     else
-      types[2] = "unresolved"
+      -- Object not found (db objects may not be loaded yet) - use clause heuristics
+      types[2] = heuristic_object_type()
       for i = 3, #names do
-        types[i] = "unresolved"
+        types[i] = "column"
       end
     end
   end

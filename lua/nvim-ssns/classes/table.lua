@@ -474,7 +474,7 @@ end
 function TableClass:get_qualified_name()
   local adapter = self:get_adapter()
   return adapter:get_qualified_name(
-    self.parent.parent.db_name,
+    self:get_database().db_name,
     self.schema_name,
     self.table_name
   )
@@ -492,12 +492,7 @@ function TableClass:load_definition()
   -- Navigate to database based on server type:
   -- Schema-based (SQL Server, PostgreSQL): Table -> Schema -> Database
   -- Non-schema (MySQL, SQLite): Table -> Database
-  local db
-  if adapter.features.schemas then
-    db = self.parent.parent  -- Table -> Schema -> Database
-  else
-    db = self.parent  -- Table -> Database
-  end
+  local db = self:get_database()
 
   -- Validate we have a database
   if not db or not db.db_name then

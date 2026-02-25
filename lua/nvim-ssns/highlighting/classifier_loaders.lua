@@ -94,11 +94,19 @@ function M.ensure_schemas_loaded(db)
   if not db._schemas_loading_scheduled then
     db._schemas_loading_scheduled = true
     vim.schedule(function()
-      -- Use the database's internal method if available
-      if db._ensure_schemas_loaded then
-        db:_ensure_schemas_loaded()
-      else
-        db:get_schemas()
+      -- Use pcall to prevent silent failures from creating infinite retry loops
+      local ok, err = pcall(function()
+        if db._ensure_schemas_loaded then
+          db:_ensure_schemas_loaded()
+        else
+          db:get_schemas()
+        end
+      end)
+      if not ok then
+        -- Set empty schemas to prevent infinite retries on persistent errors
+        db.schemas = db.schemas or {}
+        local Debug = require('nvim-ssns.debug')
+        Debug.log("[LOADER] Failed to load schemas for " .. (db.db_name or db.name or "?") .. ": " .. tostring(err))
       end
       db._schemas_loading_scheduled = false
       -- Re-trigger semantic highlighting after load completes
@@ -170,7 +178,20 @@ function M.ensure_schema_objects_loaded(schema)
   if schema.load and not schema._loading_scheduled then
     schema._loading_scheduled = true
     vim.schedule(function()
-      schema:load()
+      local ok, err = pcall(function()
+        schema:load()
+      end)
+      if not ok then
+        -- Mark as loaded with empty children to prevent infinite retries
+        schema.is_loaded = true
+        schema.tables = schema.tables or {}
+        schema.views = schema.views or {}
+        schema.procedures = schema.procedures or {}
+        schema.functions = schema.functions or {}
+        schema.synonyms = schema.synonyms or {}
+        local Debug = require('nvim-ssns.debug')
+        Debug.log("[LOADER] Failed to load schema " .. (schema.schema_name or schema.name or "?") .. ": " .. tostring(err))
+      end
       schema._loading_scheduled = false
       -- Re-trigger semantic highlighting after load completes
       M.trigger_rehighlight()

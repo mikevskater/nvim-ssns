@@ -134,7 +134,7 @@ function TreeFeatures.open_filter(UiTree)
     return
   end
 
-  local obj = UiTree.line_map[line]
+  local obj = UiTree.get_object_at_line(line)
   if not obj then
     vim.notify("SSNS: No object at current line", vim.log.levels.WARN)
     return
@@ -210,7 +210,7 @@ function TreeFeatures.clear_filter(UiTree)
     return
   end
 
-  local obj = UiTree.line_map[line]
+  local obj = UiTree.get_object_at_line(line)
   if not obj then
     vim.notify("SSNS: No object at current line", vim.log.levels.WARN)
     return
@@ -255,7 +255,7 @@ function TreeFeatures.new_query_from_context(UiTree)
   local Cache = require('nvim-ssns.cache')
 
   local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
 
   local server, database
 
@@ -298,7 +298,7 @@ function TreeFeatures.show_history_from_context(UiTree)
   local UiHistory = require('nvim-ssns.ui.panels.history')
 
   local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
 
   -- Close floating tree before opening history panel
   Buffer.close_if_float()
@@ -330,7 +330,7 @@ function TreeFeatures.view_definition(UiTree)
   local Async = require('nvim-ssns.async')
 
   local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
 
   if not obj then
     vim.notify("SSNS: No object under cursor", vim.log.levels.WARN)
@@ -495,7 +495,7 @@ function TreeFeatures.view_metadata(UiTree)
   local Spinner = require('nvim-ssns.async.spinner')
 
   local line_number = Buffer.get_current_line()
-  local obj = UiTree.line_map[line_number]
+  local obj = UiTree.get_object_at_line(line_number)
 
   if not obj then
     vim.notify("SSNS: No object under cursor", vim.log.levels.WARN)
