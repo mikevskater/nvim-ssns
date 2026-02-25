@@ -13,19 +13,19 @@ function TreeFeatures.show_dependencies(obj)
   local database, schema_name, object_name
 
   if obj.object_type == "table" or obj.object_type == "view" then
-    database = obj.parent  -- Table/View -> Database
+    database = obj:get_database()
     schema_name = obj.schema_name
     object_name = obj.table_name or obj.view_name
   elseif obj.object_type == "synonym" then
-    database = obj.parent  -- Synonym -> Database
+    database = obj:get_database()
     schema_name = obj.schema_name
     object_name = obj.synonym_name
   elseif obj.object_type == "procedure" then
-    database = obj.parent  -- Procedure -> Database
+    database = obj:get_database()
     schema_name = obj.schema_name
     object_name = obj.procedure_name
   elseif obj.object_type == "function" then
-    database = obj.parent  -- Function -> Database
+    database = obj:get_database()
     schema_name = obj.schema_name
     object_name = obj.function_name
   else

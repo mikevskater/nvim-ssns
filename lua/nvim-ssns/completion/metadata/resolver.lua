@@ -220,8 +220,18 @@ function Resolver.get_columns(table_obj, connection)
     local obj_name = table_obj.name or table_obj.table_name or table_obj.view_name
     local obj_schema = table_obj.schema or table_obj.schema_name
 
+    -- Derive database-specific connection config for cross-DB support
+    local target_db = table_obj.get_database and table_obj:get_database()
+    local rpc_config = connection.connection_config
+    if target_db and target_db.db_name and connection.server then
+      local db_config = connection.server:get_connection_config_for_database(target_db.db_name)
+      if db_config then
+        rpc_config = db_config
+      end
+    end
+
     -- Try SSNSGetMetadata RPC (pass JSON-encoded config)
-    local config_json = vim.fn.json_encode(connection.connection_config)
+    local config_json = vim.fn.json_encode(rpc_config)
     local rpc_success, metadata = pcall(function()
       return vim.fn.SSNSGetMetadata({
         config_json,
@@ -914,18 +924,27 @@ function Resolver.get_columns_async(table_obj, connection, opts)
     debug_log("[RESOLVER ASYNC] get_columns_async: Using RPC async")
 
     local adapter = connection.server:get_adapter()
-    local database = connection.database
+    local database = (table_obj.get_database and table_obj:get_database()) or connection.database
     local obj_name = table_obj.name or table_obj.table_name or table_obj.view_name
     local obj_schema = table_obj.schema or table_obj.schema_name
 
     if adapter and adapter.get_columns_query and database then
       local query = adapter:get_columns_query(database.db_name, obj_schema, obj_name)
 
+      -- Derive database-specific connection config for cross-DB support
+      local rpc_config = connection.connection_config
+      if database ~= connection.database and database.db_name and connection.server then
+        local db_config = connection.server:get_connection_config_for_database(database.db_name)
+        if db_config then
+          rpc_config = db_config
+        end
+      end
+
       local AsyncRPC = require('nvim-ssns.async.rpc')
 
       -- Check if async RPC is available
       if AsyncRPC.is_available() then
-        AsyncRPC.execute_async(connection.connection_config, query, {
+        AsyncRPC.execute_async(rpc_config, query, {
           timeout_ms = opts.timeout_ms or 5000,
           on_complete = function(results, err)
             if err then
