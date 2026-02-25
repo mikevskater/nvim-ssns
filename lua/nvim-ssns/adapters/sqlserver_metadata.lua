@@ -96,7 +96,7 @@ INNER JOIN sys.types t WITH (NOWAIT) ON c.user_type_id = t.user_type_id
 INNER JOIN sys.objects o WITH (NOWAIT) ON c.object_id = o.object_id
 INNER JOIN sys.schemas s WITH (NOWAIT) ON o.schema_id = s.schema_id
 WHERE o.type IN ('U', 'V')  -- U = User Table, V = View
-  AND o.is_ms_shipped = 0
+  AND (o.is_ms_shipped = 0 OR s.name = 'sys')
 
 UNION ALL
 
@@ -113,7 +113,7 @@ INNER JOIN sys.types t WITH (NOWAIT) ON c.user_type_id = t.user_type_id
 INNER JOIN sys.objects o WITH (NOWAIT) ON c.object_id = o.object_id
 INNER JOIN sys.schemas s WITH (NOWAIT) ON o.schema_id = s.schema_id
 WHERE o.type IN ('IF', 'TF')  -- IF = Inline TVF, TF = Multi-Statement TVF
-  AND o.is_ms_shipped = 0
+  AND (o.is_ms_shipped = 0 OR s.name = 'sys')
 
 --ORDER BY schema_name, table_name, sort_order;
 ]], database_name)
@@ -181,7 +181,7 @@ INNER JOIN sys.types t WITH (NOWAIT) ON p.user_type_id = t.user_type_id
 INNER JOIN sys.objects o WITH (NOWAIT) ON p.object_id = o.object_id
 INNER JOIN sys.schemas s WITH (NOWAIT) ON o.schema_id = s.schema_id
 WHERE o.type IN ('P', 'FN', 'IF', 'TF')  -- P = Procedure, FN/IF/TF = Functions
-  AND o.is_ms_shipped = 0
+  AND (o.is_ms_shipped = 0 OR s.name = 'sys')
 ORDER BY s.name, o.name, p.parameter_id;
 ]], database_name)
 end
@@ -460,7 +460,7 @@ FROM sys.sql_modules m WITH (NOWAIT)
 JOIN sys.objects o WITH (NOWAIT) ON m.[object_id] = o.[object_id]
 JOIN sys.schemas s WITH (NOWAIT) ON o.[schema_id] = s.[schema_id]
 WHERE o.[type] IN ('V', 'P', 'FN', 'IF', 'TF')
-    AND o.is_ms_shipped = 0
+    AND (o.is_ms_shipped = 0 OR s.name = 'sys')
     %s
 ORDER BY s.name, o.name;
 ]], database_name, schema_filter)
@@ -524,7 +524,7 @@ SELECT
     + N')' AS definition
 FROM sys.tables t WITH (NOWAIT)
 JOIN sys.schemas s WITH (NOWAIT) ON t.[schema_id] = s.[schema_id]
-WHERE t.is_ms_shipped = 0
+WHERE (t.is_ms_shipped = 0 OR s.name = 'sys')
     %s
 ORDER BY s.name, t.name;
 ]], database_name, schema_filter)
