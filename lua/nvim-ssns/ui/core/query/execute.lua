@@ -351,7 +351,7 @@ function QueryExecute.execute_query(bufnr, visual)
 
       -- Display detailed error with structured information
       -- Pass selection_start_line offset for error line adjustment
-      QueryExecute.display_error(error_obj, sql, bufnr, selection_start_line)
+      QueryExecute.display_error(error_obj, sql, bufnr, selection_start_line, results_bufnr)
       return
     end
 
@@ -514,7 +514,8 @@ end
 ---@param sql string The SQL that was executed
 ---@param query_bufnr number The query buffer number
 ---@param selection_start_line number? The 1-based line where the selection started (for offset adjustment)
-function QueryExecute.display_error(error, sql, query_bufnr, selection_start_line)
+---@param results_bufnr number? Pre-created results buffer to reuse (avoids creating a second buffer)
+function QueryExecute.display_error(error, sql, query_bufnr, selection_start_line, results_bufnr)
   -- Default to line 1 if not provided (no offset)
   selection_start_line = selection_start_line or 1
 
@@ -568,35 +569,38 @@ function QueryExecute.display_error(error, sql, query_bufnr, selection_start_lin
   end
 
   -- Display detailed error in results window
-  -- Use bufnr() which handles unlisted/hidden buffers better
+  -- Prefer the pre-created results buffer if provided (avoids creating a duplicate)
   local result_buf = nil
-  local existing_bufnr = vim.fn.bufnr("SSNS Results")
-  if existing_bufnr ~= -1 and vim.api.nvim_buf_is_valid(existing_bufnr) then
-    result_buf = existing_bufnr
+  if results_bufnr and vim.api.nvim_buf_is_valid(results_bufnr) then
+    result_buf = results_bufnr
   else
-    -- Fallback: iterate through all buffers
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) then
-        local buf_name = vim.api.nvim_buf_get_name(buf)
-        if buf_name:match("SSNS Results") then
-          result_buf = buf
-          break
+    -- Fallback for external callers that don't provide results_bufnr
+    local existing_bufnr = vim.fn.bufnr("SSNS Results")
+    if existing_bufnr ~= -1 and vim.api.nvim_buf_is_valid(existing_bufnr) then
+      result_buf = existing_bufnr
+    else
+      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_valid(buf) then
+          local buf_name = vim.api.nvim_buf_get_name(buf)
+          if buf_name:match("SSNS Results") then
+            result_buf = buf
+            break
+          end
         end
       end
     end
-  end
 
-  -- Create new buffer if not found
-  if not result_buf then
-    -- First, wipe any stale buffer with this name to avoid E95 error
-    local stale_bufnr = vim.fn.bufnr("SSNS Results")
-    if stale_bufnr ~= -1 then
-      pcall(vim.api.nvim_buf_delete, stale_bufnr, { force = true })
+    -- Create new buffer if not found
+    if not result_buf then
+      local stale_bufnr = vim.fn.bufnr("SSNS Results")
+      if stale_bufnr ~= -1 then
+        pcall(vim.api.nvim_buf_delete, stale_bufnr, { force = true })
+      end
+
+      result_buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_name(result_buf, "SSNS Results")
+      vim.api.nvim_buf_set_option(result_buf, 'buftype', 'nofile')
     end
-
-    result_buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_name(result_buf, "SSNS Results")
-    vim.api.nvim_buf_set_option(result_buf, 'buftype', 'nofile')
   end
 
   -- Format error message for results window
