@@ -164,7 +164,7 @@ function ThreadedHighlighting.update(bufnr, on_complete)
           if line >= 0 and line < #lines then
             local line_len = #lines[line + 1]
             if col_start >= 0 and col_end <= line_len then
-              vim.api.nvim_buf_add_highlight(bufnr, ns_id, item.highlight_group, line, col_start, col_end)
+              vim.api.nvim_buf_set_extmark(bufnr, ns_id, line, col_start, { end_col = col_end, hl_group = item.highlight_group, priority = 200 })
             end
           end
         end

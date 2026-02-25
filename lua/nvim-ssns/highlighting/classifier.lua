@@ -638,6 +638,7 @@ function Classifier._build_context(chunk, line, col)
     ctes = {},
     temp_tables = {},
     tables = {},
+    column_aliases = {},
   }
 
   if not chunk then
@@ -721,6 +722,15 @@ function Classifier._build_context(chunk, line, col)
       if subquery.alias then
         -- Subquery aliases map to a placeholder indicating it's a derived table
         context.aliases[subquery.alias:lower()] = "(subquery)"
+      end
+    end
+  end
+
+  -- Extract column aliases from SELECT list
+  if chunk.columns then
+    for _, col_info in ipairs(chunk.columns) do
+      if col_info.name and not col_info.is_star then
+        context.column_aliases[col_info.name:lower()] = col_info
       end
     end
   end

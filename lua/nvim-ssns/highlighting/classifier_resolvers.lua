@@ -721,6 +721,12 @@ function M.resolve_multipart_from_cache(names, sql_context, connection, resoluti
     return types
   end
 
+  -- Check if identifier is a column alias from SELECT list
+  if #names == 1 and sql_context.column_aliases and sql_context.column_aliases[name1_lower] then
+    types[1] = "column"
+    return types
+  end
+
   -- Get the buffer's connected database for context
   local connected_db = connection and connection.database
   local uses_schemas = connected_db and Loaders.db_uses_schemas(connected_db)
