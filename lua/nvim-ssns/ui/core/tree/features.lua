@@ -165,6 +165,10 @@ function TreeFeatures.open_filter(UiTree)
   local tree_was_open = Buffer.is_open()
   local tree_was_float = Buffer.is_float()
 
+  -- Save cursor position before closing so restore_tree() can return to it
+  local TreeNavigation = require('nvim-ssns.ui.core.tree.navigation')
+  TreeNavigation.save_cursor_position(UiTree)
+
   -- Close floating tree before opening filter form
   Buffer.close_if_float()
 
