@@ -557,11 +557,6 @@ function Classifier._classify_multipart(parts, chunk, connection, config, keywor
   for i, part in ipairs(parts) do
     local semantic_type = resolved_types[i] or "unresolved"
 
-    -- When no connection, assume unresolved identifiers are tables (validate only when connected)
-    if not connection and semantic_type == "unresolved" then
-      semantic_type = "table"
-    end
-
     local highlight_group = nil
 
     -- Map semantic type to highlight group based on config
@@ -587,8 +582,12 @@ function Classifier._classify_multipart(parts, chunk, connection, config, keywor
       highlight_group = HIGHLIGHT_MAP["function"]
     elseif semantic_type == "synonym" then
       highlight_group = HIGHLIGHT_MAP.synonym
-    elseif semantic_type == "unresolved" and config.highlight_unresolved then
-      highlight_group = HIGHLIGHT_MAP.unresolved
+    elseif semantic_type == "unresolved" then
+      if config.highlight_unresolved then
+        highlight_group = HIGHLIGHT_MAP.unresolved
+      else
+        highlight_group = HIGHLIGHT_MAP.table
+      end
     end
 
     table.insert(results, {

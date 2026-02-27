@@ -403,9 +403,6 @@ local BASIC_HIGHLIGHT_MAP = {
   global_variable = "SsnsKeywordGlobalVariable",
   system_procedure = "SsnsKeywordSystemProcedure",
   temp_table = "SsnsTempTable",
-  -- Identifiers default to table color; semantic pass overwrites with correct type
-  identifier = "SsnsTable",
-  bracket_id = "SsnsTable",
 }
 
 ---Apply basic keyword/token highlighting to a buffer without any database lookups
@@ -422,12 +419,24 @@ function SemanticHighlighter.apply_basic_highlighting(bufnr)
   -- Clear basic highlights only (semantic namespace untouched)
   vim.api.nvim_buf_clear_namespace(bufnr, basic_ns_id, 0, -1)
 
-  -- Get buffer content and tokenize
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local text = table.concat(lines, '\n')
+  -- Try to use cached tokens first (avoids redundant tokenization)
+  local tokens
+  local ok_cache, StatementCache = pcall(require, 'nvim-ssns.completion.statement_cache')
+  if ok_cache then
+    local cache = StatementCache.get_cache(bufnr)
+    if cache and cache.tokens and #cache.tokens > 0 then
+      tokens = cache.tokens
+    end
+  end
 
-  local Tokenizer = require('nvim-ssns.completion.tokenizer')
-  local tokens = Tokenizer.tokenize(text)
+  -- Fallback to fresh tokenization only if no cache available
+  if not tokens then
+    local Tokenizer = require('nvim-ssns.completion.tokenizer')
+    local text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), '\n')
+    tokens = Tokenizer.tokenize(text)
+  end
+
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
   -- Apply highlights based purely on token type (no classifier/database)
   for _, token in ipairs(tokens) do
@@ -455,10 +464,6 @@ function SemanticHighlighter.apply_basic_highlighting(bufnr)
       highlight_group = BASIC_HIGHLIGHT_MAP.system_procedure
     elseif token.type == "temp_table" then
       highlight_group = BASIC_HIGHLIGHT_MAP.temp_table
-    elseif token.type == "identifier" then
-      highlight_group = BASIC_HIGHLIGHT_MAP.identifier
-    elseif token.type == "bracket_id" then
-      highlight_group = BASIC_HIGHLIGHT_MAP.bracket_id
     end
 
     if highlight_group then

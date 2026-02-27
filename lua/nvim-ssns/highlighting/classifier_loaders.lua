@@ -63,17 +63,15 @@ function M.find_database(name, connection)
   return nil, nil
 end
 
----Trigger a re-highlight of the current buffer
----Called after background loads complete
+---Trigger a re-highlight of all attached buffers
+---Called after background loads complete (schemas, objects, columns)
 function M.trigger_rehighlight()
-  -- Use vim.schedule to ensure this runs after current highlight cycle
   vim.schedule(function()
     local semantic = require('nvim-ssns.highlighting.semantic')
-    -- Get current buffer
-    local bufnr = vim.api.nvim_get_current_buf()
-    -- Check if this buffer has semantic highlighting enabled
-    if semantic.is_attached(bufnr) then
-      semantic.update(bufnr)
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_valid(bufnr) and semantic.is_attached(bufnr) then
+        semantic.update_threaded(bufnr)
+      end
     end
   end)
 end
