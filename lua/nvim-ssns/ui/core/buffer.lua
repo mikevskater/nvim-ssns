@@ -846,7 +846,7 @@ end
 
 ---Apply highlights to buffer from ContentBuilder highlight data
 ---@param highlights table[] Array of { line, col_start, col_end, hl_group }
----@param opts { batch_size: number?, on_complete: function? }? Options for async application
+---@param opts { on_complete: function? }? Options
 function UiBuffer.apply_highlights(highlights, opts)
   if not UiBuffer.exists() then
     if opts and opts.on_complete then opts.on_complete() end
@@ -864,64 +864,22 @@ function UiBuffer.apply_highlights(highlights, opts)
     return
   end
 
-  local batch_size = opts.batch_size or 100
-  local on_complete = opts.on_complete
-
-  -- For small highlight counts, apply synchronously
-  if #highlights <= batch_size then
-    for _, hl in ipairs(highlights) do
-      if hl.line and hl.col_start and hl.col_end and hl.hl_group then
-        pcall(vim.api.nvim_buf_add_highlight,
-          UiBuffer.bufnr,
-          ns_id,
-          hl.hl_group,
-          hl.line,  -- 0-indexed
-          hl.col_start,
-          hl.col_end
-        )
-      end
-    end
-    if on_complete then on_complete() end
-    return
-  end
-
-  -- For large highlight counts, apply in chunks asynchronously
-  local current_idx = 1
-  local total = #highlights
-
-  local function apply_chunk()
-    if not UiBuffer.exists() then
-      if on_complete then on_complete() end
-      return
-    end
-
-    local chunk_end = math.min(current_idx + batch_size - 1, total)
-
-    for i = current_idx, chunk_end do
-      local hl = highlights[i]
-      if hl.line and hl.col_start and hl.col_end and hl.hl_group then
-        pcall(vim.api.nvim_buf_add_highlight,
-          UiBuffer.bufnr,
-          ns_id,
-          hl.hl_group,
-          hl.line,  -- 0-indexed
-          hl.col_start,
-          hl.col_end
-        )
-      end
-    end
-
-    current_idx = chunk_end + 1
-
-    if current_idx <= total then
-      vim.schedule(apply_chunk)
-    else
-      if on_complete then on_complete() end
+  -- Apply all highlights synchronously to prevent flash between clear and apply.
+  -- Extmark operations are O(1) each — even 5000+ highlights complete in <10ms.
+  for _, hl in ipairs(highlights) do
+    if hl.line and hl.col_start and hl.col_end and hl.hl_group then
+      pcall(vim.api.nvim_buf_add_highlight,
+        UiBuffer.bufnr,
+        ns_id,
+        hl.hl_group,
+        hl.line,  -- 0-indexed
+        hl.col_start,
+        hl.col_end
+      )
     end
   end
 
-  -- Start applying chunks
-  apply_chunk()
+  if opts.on_complete then opts.on_complete() end
 end
 
 ---Auto-expand tree window width to fit content if enabled

@@ -419,24 +419,24 @@ function SemanticHighlighter.apply_basic_highlighting(bufnr)
   -- Clear basic highlights only (semantic namespace untouched)
   vim.api.nvim_buf_clear_namespace(bufnr, basic_ns_id, 0, -1)
 
-  -- Try to use cached tokens first (avoids redundant tokenization)
+  -- Get buffer content and tokenize
+  -- Use get_or_build_cache when available (returns cached tokens if tick matches, rebuilds otherwise)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local tokens
   local ok_cache, StatementCache = pcall(require, 'nvim-ssns.completion.statement_cache')
   if ok_cache then
-    local cache = StatementCache.get_cache(bufnr)
+    local cache = StatementCache.get_or_build_cache(bufnr)
     if cache and cache.tokens and #cache.tokens > 0 then
       tokens = cache.tokens
     end
   end
 
-  -- Fallback to fresh tokenization only if no cache available
+  -- Fallback to fresh tokenization if cache unavailable (non-SQL buffers, first load)
   if not tokens then
     local Tokenizer = require('nvim-ssns.completion.tokenizer')
-    local text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), '\n')
+    local text = table.concat(lines, '\n')
     tokens = Tokenizer.tokenize(text)
   end
-
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
   -- Apply highlights based purely on token type (no classifier/database)
   for _, token in ipairs(tokens) do

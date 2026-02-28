@@ -588,7 +588,6 @@ function TreeRender.render(UiTree, opts)
       on_complete = function()
         -- Apply highlights from ContentBuilder
         Buffer.apply_highlights(highlights, {
-          batch_size = 100,
           on_complete = function()
             -- Restore cursor position after rendering complete
             if saved_object and Buffer.is_open() then

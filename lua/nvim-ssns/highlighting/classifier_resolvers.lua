@@ -918,12 +918,28 @@ function M.resolve_multipart_from_cache(names, sql_context, connection, resoluti
 
   -- ============================================================================
   -- Step 10: Clause-based heuristics for unloaded objects
-  -- When we can't verify, use clause position as hint
+  -- When we can't verify, use clause position as hint.
+  -- Also serves as the primary inference for disconnected buffers where
+  -- Steps 4-9 are skipped (no DB data available).
   -- ============================================================================
-  if #names >= 2 and resolution_context.clause then
+  if resolution_context.clause then
     local clause = resolution_context.clause
 
-    if #names == 2 then
+    if #names == 1 then
+      -- Single-part: infer type purely from clause position
+      if clause == "from" or clause == "join" or clause == "into" then
+        types[1] = "table"
+        return types
+      elseif clause == "select" or clause == "where" or clause == "on"
+          or clause == "group_by" or clause == "having" or clause == "order_by"
+          or clause == "set" or clause == "insert_columns" then
+        types[1] = "column"
+        return types
+      elseif clause == "exec" then
+        types[1] = "procedure"
+        return types
+      end
+    elseif #names == 2 then
       if clause == "from" or clause == "join" then
         -- In FROM/JOIN: likely schema.table
         types[1] = "schema"
