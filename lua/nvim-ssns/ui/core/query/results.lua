@@ -167,6 +167,11 @@ function QueryResults.format_single_result_set_styled(result_set, columns_metada
   if columns_metadata and type(columns_metadata) == "table" then
     -- Get columns from metadata
     for col_name, col_info in pairs(columns_metadata) do
+      -- Skip non-table entries (e.g. rowCount, fieldCount from DDL OkPacket results)
+      if type(col_info) ~= "table" then
+        goto continue_column
+      end
+
       -- Include all columns, even those with nil/empty names
       local actual_key = col_name
       local display_name = col_name
@@ -180,6 +185,8 @@ function QueryResults.format_single_result_set_styled(result_set, columns_metada
       table.insert(columns, { key = actual_key, display = display_name, index = col_info.index or 0 })
       column_types[actual_key] = col_info.type or "unknown"
       has_columns = true
+
+      ::continue_column::
     end
 
     if has_columns then

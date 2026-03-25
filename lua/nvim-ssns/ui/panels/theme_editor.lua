@@ -327,6 +327,14 @@ local function edit_color()
 
       if multi_panel then
         multi_panel:update_panel_title("colors", get_colors_title(state) .. " *")
+        multi_panel:focus_panel("colors")
+      end
+    end,
+
+    -- User cancelled - refocus theme editor
+    on_cancel = function()
+      if multi_panel then
+        multi_panel:focus_panel("colors")
       end
     end,
   })
@@ -340,12 +348,7 @@ end
 local function apply_and_close()
   if not state then return end
 
-  local theme = state.available_themes[state.selected_theme_idx]
-  if theme then
-    ThemeManager.set_theme(theme.name, true)
-  end
-
-  -- If dirty, save to user theme
+  -- Save dirty colors BEFORE set_theme so it loads the updated version
   if state.is_dirty then
     local current = state.available_themes[state.selected_theme_idx]
     if current and current.is_user then
@@ -359,6 +362,12 @@ local function apply_and_close()
         end
       end
     end
+  end
+
+  -- Now set_theme will load the freshly saved colors (cache was cleared by save)
+  local theme = state.available_themes[state.selected_theme_idx]
+  if theme then
+    ThemeManager.set_theme(theme.name, true)
   end
 
   ThemeEditor.close()
@@ -631,8 +640,10 @@ function ThemeEditor.show()
     },
     on_close = function()
       Render.clear_swatch_highlights()
-      -- Note: Don't nil out state here - let cancel() handle confirmation first
-      -- The actual cleanup happens in ThemeEditor.close()
+      -- Clean up module-level references so stale state doesn't leak
+      -- (e.g., when closed via WinClosed rather than cancel/apply)
+      multi_panel = nil
+      state = nil
     end,
   })
 
