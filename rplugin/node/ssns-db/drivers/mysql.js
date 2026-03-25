@@ -128,17 +128,23 @@ class MySQLDriver extends BaseDriver {
       let resultSets = [];
 
       // Check if this is a multi-statement result
-      if (Array.isArray(rows) && rows.length > 0 && Array.isArray(rows[0])) {
-        // Multiple result sets
+      // With multipleStatements: true, mysql2 may wrap results in arrays even for
+      // single statements. We detect multi-statement by checking if rows[0] is an
+      // array (SELECT) or has affectedRows (DDL/DML OkPacket).
+      const isMultiStatement = Array.isArray(rows) && rows.length > 0 &&
+        (Array.isArray(rows[0]) || (rows[0] !== null && typeof rows[0] === 'object' && 'affectedRows' in rows[0]));
+
+      if (isMultiStatement) {
+        // Multiple result sets (or wrapped single DDL/DML)
         for (let i = 0; i < rows.length; i++) {
           const rowSet = rows[i];
-          const fieldSet = fields[i];
+          const fieldSet = Array.isArray(fields) ? fields[i] : undefined;
 
           if (Array.isArray(rowSet)) {
             // SELECT result
             resultSets.push(this.formatResultSet(rowSet, fieldSet));
           } else {
-            // INSERT/UPDATE/DELETE result (ResultSetHeader)
+            // INSERT/UPDATE/DELETE/DDL result (ResultSetHeader/OkPacket)
             resultSets.push({
               columns: {},
               rows: [],
@@ -149,10 +155,19 @@ class MySQLDriver extends BaseDriver {
       } else {
         // Single result set
         if (Array.isArray(rows)) {
-          // SELECT result
-          resultSets.push(this.formatResultSet(rows, fields));
+          // SELECT result — verify first element isn't an OkPacket
+          if (rows.length > 0 && rows[0] !== null && typeof rows[0] === 'object' && 'affectedRows' in rows[0]) {
+            // Misidentified: rows contains OkPackets, not data rows
+            resultSets.push({
+              columns: {},
+              rows: [],
+              rowCount: rows[0].affectedRows || 0
+            });
+          } else {
+            resultSets.push(this.formatResultSet(rows, fields));
+          }
         } else {
-          // INSERT/UPDATE/DELETE result
+          // INSERT/UPDATE/DELETE/DDL result
           resultSets.push({
             columns: {},
             rows: [],
