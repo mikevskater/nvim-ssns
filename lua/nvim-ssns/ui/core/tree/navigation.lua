@@ -389,7 +389,16 @@ function TreeNavigation.save_cursor_position(UiTree)
   end
 
   local line = Buffer.get_current_line()
-  local obj = UiTree.line_map[line]
+
+  -- Use CB registry (primary), fallback to line_map
+  local obj
+  if UiTree.content_builder then
+    local element = UiTree.content_builder:get_element_at(line - 1, 0)
+    obj = element and element.data and element.data.object
+  end
+  if not obj then
+    obj = UiTree.line_map[line]
+  end
 
   if obj then
     local cursor = vim.api.nvim_win_get_cursor(Buffer.winid)

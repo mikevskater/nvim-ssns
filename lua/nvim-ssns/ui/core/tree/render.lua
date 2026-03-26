@@ -625,23 +625,29 @@ function TreeRender.render(UiTree, opts)
   local saved_column = nil
 
   if Buffer.is_open() then
-    saved_line = Buffer.get_current_line()
-    -- Get saved object from content_builder if available, fallback to line_map
-    if UiTree.content_builder then
-      -- ContentBuilder uses 0-indexed rows
-      local element = UiTree.content_builder:get_element_at(saved_line - 1, 0)
-      saved_object = element and element.data and element.data.object
-    else
-      saved_object = UiTree.line_map[saved_line]
-    end
-    if saved_object then
-      local cursor = vim.api.nvim_win_get_cursor(Buffer.winid)
-      saved_column = cursor[2]
+    -- Check if the buffer actually has rendered content (not freshly reopened/empty)
+    local line_count = vim.api.nvim_buf_line_count(Buffer.bufnr)
+    local has_content = line_count > 1 or (line_count == 1 and vim.api.nvim_buf_get_lines(Buffer.bufnr, 0, 1, false)[1] ~= "")
+
+    if has_content then
+      saved_line = Buffer.get_current_line()
+      -- Get saved object from content_builder if available, fallback to line_map
+      if UiTree.content_builder then
+        -- ContentBuilder uses 0-indexed rows
+        local element = UiTree.content_builder:get_element_at(saved_line - 1, 0)
+        saved_object = element and element.data and element.data.object
+      else
+        saved_object = UiTree.line_map[saved_line]
+      end
+      if saved_object then
+        local cursor = vim.api.nvim_win_get_cursor(Buffer.winid)
+        saved_column = cursor[2]
+      end
     end
   end
 
-  -- Fallback to last saved cursor state (e.g., buffer just reopened with no content yet)
-  if not saved_object and UiTree.last_cursor_state.object then
+  -- Fallback to last saved cursor state (e.g., buffer just reopened or live lookup failed)
+  if not saved_object and UiTree.last_cursor_state and UiTree.last_cursor_state.object then
     saved_object = UiTree.last_cursor_state.object
     saved_line = UiTree.last_cursor_state.line
     saved_column = UiTree.last_cursor_state.column
