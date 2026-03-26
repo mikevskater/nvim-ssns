@@ -758,28 +758,9 @@ function QueryResults.display_results(result, sql, execution_time_ms, query_bufn
   -- Store cell maps for visual selection support
   UiQuery.buffer_results[query_bufnr].cell_maps = cell_maps
 
-  -- Create namespace for result highlights
+  -- Render styled content to buffer (diff-based: only updates changed lines/highlights)
   local ns_id = vim.api.nvim_create_namespace("ssns_results")
-
-  -- Clear any existing highlights in this namespace
-  vim.api.nvim_buf_clear_namespace(result_buf, ns_id, 0, -1)
-
-  -- Get chunked render threshold from config (reuse UI threshold)
-  local Config = require('nvim-ssns.config')
-  local ui_config = Config.get_ui()
-  local threshold = ui_config.chunked_render_threshold or 200
-
-  -- Check estimated line count (fast approximation from builder)
-  local estimated_lines = #builder:build_lines()
-
-  -- Render styled content to buffer (use chunked rendering for large results)
-  if estimated_lines > threshold then
-    builder:render_to_buffer_chunked(result_buf, ns_id, {
-      chunk_size = 100,
-    })
-  else
-    builder:render_to_buffer(result_buf, ns_id)
-  end
+  builder:render_to_buffer(result_buf, ns_id)
 
   -- Check if buffer is already visible in a window
   local result_win = nil
@@ -1159,11 +1140,12 @@ function QueryResults.show_cancelled(results_bufnr, execution_time_ms)
     return
   end
 
-  local lines = {
-    "",
-    "  === QUERY CANCELLED ===",
-    "",
-  }
+  local ContentBuilder = require('nvim-float.content')
+  local cb = ContentBuilder.new()
+
+  cb:blank()
+  cb:styled("  === QUERY CANCELLED ===", "WarningMsg")
+  cb:blank()
 
   if execution_time_ms then
     local time_str
@@ -1172,22 +1154,16 @@ function QueryResults.show_cancelled(results_bufnr, execution_time_ms)
     else
       time_str = string.format("%.2f seconds", execution_time_ms / 1000)
     end
-    table.insert(lines, string.format("  Cancelled after: %s", time_str))
-    table.insert(lines, "")
+    cb:styled(string.format("  Cancelled after: %s", time_str), "muted")
+    cb:blank()
   end
 
-  table.insert(lines, "  Query execution was cancelled by user.")
-  table.insert(lines, "")
-  table.insert(lines, "  =========================")
+  cb:styled("  Query execution was cancelled by user.", "muted")
+  cb:blank()
+  cb:styled("  =========================", "muted")
 
-  vim.api.nvim_buf_set_option(results_bufnr, 'modifiable', true)
-  vim.api.nvim_buf_set_lines(results_bufnr, 0, -1, false, lines)
-  vim.api.nvim_buf_set_option(results_bufnr, 'modifiable', false)
-
-  -- Add highlight for cancelled message
   local ns_id = vim.api.nvim_create_namespace('ssns_results_cancelled')
-  vim.api.nvim_buf_clear_namespace(results_bufnr, ns_id, 0, -1)
-  vim.api.nvim_buf_add_highlight(results_bufnr, ns_id, 'WarningMsg', 1, 0, -1)
+  cb:render_to_buffer(results_bufnr, ns_id)
 end
 
 ---Initialize the results module with parent reference

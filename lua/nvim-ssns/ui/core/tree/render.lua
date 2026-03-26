@@ -5,6 +5,24 @@ local TreeRender = {}
 
 local ContentBuilder = require('nvim-float.content')
 
+---Build a unique tracking key for an object by walking its parent chain
+---@param obj BaseDbObject
+---@return string key Unique hierarchical key for element registry
+local function tracking_key(obj)
+  local parts = {}
+  local current = obj
+  while current do
+    parts[#parts + 1] = (current.object_type or "") .. ":" .. (current.name or current.db_name or "")
+    current = current.parent
+  end
+  -- Reverse so root is first (server:myserver/database:master/tables_group:TABLES)
+  local n = #parts
+  for i = 1, math.floor(n / 2) do
+    parts[i], parts[n - i + 1] = parts[n - i + 1], parts[i]
+  end
+  return table.concat(parts, "/")
+end
+
 ---Memoized indent strings by level
 ---@type table<number, string>
 local _indent = setmetatable({}, {
@@ -509,7 +527,7 @@ function TreeRender.get_object_style(object_type)
     parameter = "SsnsParameter",
     -- Actions
     action = "SsnsAction",
-    add_server_action = "SsnsAction",
+    add_server_action = "SsnsAddServerAction",
     -- Server groups (organizational folders)
     server_group = "SsnsServerGroup",
     -- Groups
@@ -620,8 +638,10 @@ function TreeRender.render(UiTree, opts)
       local cursor = vim.api.nvim_win_get_cursor(Buffer.winid)
       saved_column = cursor[2]
     end
-  else
-    -- Restoring from closed state - use last saved state
+  end
+
+  -- Fallback to last saved cursor state (e.g., buffer just reopened with no content yet)
+  if not saved_object and UiTree.last_cursor_state.object then
     saved_object = UiTree.last_cursor_state.object
     saved_line = UiTree.last_cursor_state.line
     saved_column = UiTree.last_cursor_state.column
@@ -761,7 +781,7 @@ function TreeRender.render_server(UiTree, server, cb, indent_level, icons)
     { text = expand_icon .. " " .. server_icon .. " " .. server.name .. favorite_icon .. " " .. status,
       style = server_style,
       track = {
-        name = "server_" .. server.name,
+        name = tracking_key(server),
         type = "server",
         data = { object = server },
         row_based = true,
@@ -815,7 +835,7 @@ function TreeRender.render_database(UiTree, db, cb, indent_level, icons)
     { text = expand_icon .. " " .. db_icon .. " " .. db.name .. " " .. status,
       style = TreeRender.get_object_style("database"),
       track = {
-        name = "database_" .. db.name,
+        name = tracking_key(db),
         type = "database",
         data = { object = db },
         row_based = true,
@@ -950,7 +970,7 @@ function TreeRender.render_schema(UiTree, schema, cb, indent_level, icons)
     { text = expand_icon .. " " .. schema_icon .. " " .. schema.name .. count_display,
       style = TreeRender.get_object_style("schema"),
       track = {
-        name = "schema_" .. schema.name,
+        name = tracking_key(schema),
         type = "schema",
         data = { object = schema },
         row_based = true,
@@ -1021,7 +1041,7 @@ function TreeRender.render_object(UiTree, obj, cb, indent_level, icons)
       { text = indent .. "  " },
       { text = action_icon .. " " .. obj.name, style = "SsnsAction",
         track = {
-          name = "action_" .. obj.name,
+          name = tracking_key(obj),
           type = "action",
           data = { object = obj },
           row_based = true,
@@ -1083,7 +1103,7 @@ function TreeRender.render_object(UiTree, obj, cb, indent_level, icons)
     { text = expand_icon .. " " .. obj_icon .. " " .. display_name,
       style = style,
       track = {
-        name = obj.object_type .. "_" .. (obj.name or ""),
+        name = tracking_key(obj),
         type = obj.object_type,
         data = { object = obj },
         row_based = true,
@@ -1222,7 +1242,7 @@ function TreeRender.render_aligned_group(UiTree, group, cb, indent_level, icons)
       { text = display_text,
         style = style,
         track = {
-          name = child.object_type .. "_" .. (child.name or ""),
+          name = tracking_key(child),
           type = child.object_type,
           data = { object = child },
           row_based = true,

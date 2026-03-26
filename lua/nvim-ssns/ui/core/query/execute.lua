@@ -603,32 +603,31 @@ function QueryExecute.display_error(error, sql, query_bufnr, selection_start_lin
     end
   end
 
-  -- Format error message for results window
-  local lines = {
-    "=== SQL ERROR ===",
-    "",
-    "Message: " .. clean_message,
-  }
+  -- Format error message for results window using ContentBuilder
+  local ContentBuilder = require('nvim-float.content')
+  local cb = ContentBuilder.new()
+
+  cb:styled("=== SQL ERROR ===", "ErrorMsg")
+  cb:blank()
+  cb:styled("Message: " .. clean_message, "ErrorMsg")
 
   if error.code and error.code ~= vim.NIL then
-    table.insert(lines, "Error Code: " .. tostring(error.code))
+    cb:line("Error Code: " .. tostring(error.code))
   end
 
   if error.lineNumber and error.lineNumber ~= vim.NIL then
-    table.insert(lines, "Line Number: " .. tostring(error.lineNumber))
+    cb:line("Line Number: " .. tostring(error.lineNumber))
   end
 
   if error.procName and error.procName ~= vim.NIL then
-    table.insert(lines, "Procedure: " .. tostring(error.procName))
+    cb:line("Procedure: " .. tostring(error.procName))
   end
 
-  table.insert(lines, "")
-  table.insert(lines, "=================")
+  cb:blank()
+  cb:styled("=================", "muted")
 
-  -- Set lines in buffer
-  vim.api.nvim_buf_set_option(result_buf, 'modifiable', true)
-  vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, lines)
-  vim.api.nvim_buf_set_option(result_buf, 'modifiable', false)
+  local ns_id = vim.api.nvim_create_namespace("ssns_results_error")
+  cb:render_to_buffer(result_buf, ns_id)
 
   -- Show results window
   local result_win = nil

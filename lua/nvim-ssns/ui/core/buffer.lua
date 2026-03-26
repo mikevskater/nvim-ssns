@@ -835,6 +835,7 @@ function UiBuffer.show_help()
 end
 
 ---Write lines to buffer
+---@deprecated Use ContentBuilder:render_to_buffer() instead for diff-based rendering
 ---@param lines string[] Array of lines to write
 function UiBuffer.set_lines(lines)
   if not UiBuffer.exists() then
@@ -855,6 +856,7 @@ function UiBuffer.set_lines(lines)
 end
 
 ---Apply highlights to buffer from ContentBuilder highlight data
+---@deprecated Use ContentBuilder:render_to_buffer() instead for diff-based rendering
 ---@param highlights table[] Array of { line, col_start, col_end, hl_group }
 ---@param opts { on_complete: function? }? Options
 function UiBuffer.apply_highlights(highlights, opts)
@@ -1055,6 +1057,7 @@ UiBuffer._chunked_write_state = nil
 
 ---Write lines to buffer in chunks to avoid blocking UI
 ---For large line counts (>200), this writes in chunks with vim.schedule() between each
+---@deprecated Use ContentBuilder:render_to_buffer() instead for diff-based rendering
 ---@param lines string[] Array of lines to write
 ---@param opts ChunkedWriteOpts? Options for chunked writing
 function UiBuffer.set_lines_chunked(lines, opts)
