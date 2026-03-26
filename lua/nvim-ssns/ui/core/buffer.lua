@@ -21,6 +21,10 @@ UiBuffer._float_augroup = nil
 ---Buffer name
 UiBuffer.name = "SSNS"
 
+---Tree highlight namespace ID (stable across renders)
+---@type number
+UiBuffer.tree_ns_id = vim.api.nvim_create_namespace("ssns_tree_hl")
+
 ---Check if SSNS buffer exists
 ---@return boolean
 function UiBuffer.exists()
@@ -36,6 +40,12 @@ end
 ---Create the SSNS buffer
 ---@return number bufnr The buffer number
 function UiBuffer.create()
+  -- Clear diff render cache for old buffer before creating new one
+  if UiBuffer.bufnr then
+    local ContentBuilder = require('nvim-float.content')
+    ContentBuilder.clear_render_cache(UiBuffer.bufnr)
+  end
+
   -- Create a new buffer
   -- First, wipe any stale buffer with EXACT name "SSNS" to avoid E95 error
   -- Use bufnr("^SSNS$") for exact match to avoid matching files with SSNS in path

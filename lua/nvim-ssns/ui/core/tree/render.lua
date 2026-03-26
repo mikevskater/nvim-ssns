@@ -5,6 +5,150 @@ local TreeRender = {}
 
 local ContentBuilder = require('nvim-float.content')
 
+---Memoized indent strings by level
+---@type table<number, string>
+local _indent = setmetatable({}, {
+  __index = function(t, level)
+    t[level] = string.rep("  ", level)
+    return t[level]
+  end,
+})
+
+---Object types that are expandable in the tree (have or can have children)
+---@type table<string, boolean>
+local EXPANDABLE_TYPES = {
+  database = true, table = true, view = true, procedure = true,
+  ["function"] = true, synonym = true, server_group = true,
+  databases_group = true, tables_group = true, views_group = true,
+  procedures_group = true, functions_group = true, synonyms_group = true,
+  sequences_group = true, scalar_functions_group = true, table_functions_group = true,
+  schemas_group = true, system_databases_group = true, system_schemas_group = true,
+  schema_view = true, column_group = true, index_group = true,
+  key_group = true, parameter_group = true, actions_group = true,
+}
+
+---Object types that are filterable/sortable group containers
+---@type table<string, boolean>
+local OBJECT_GROUP_TYPES = {
+  databases_group = true, tables_group = true, views_group = true,
+  procedures_group = true, functions_group = true, scalar_functions_group = true,
+  table_functions_group = true, synonyms_group = true, sequences_group = true,
+  system_databases_group = true, system_schemas_group = true,
+}
+
+---Object types that are schema nodes
+---@type table<string, boolean>
+local SCHEMA_NODE_TYPES = {
+  schema = true, schema_view = true,
+}
+
+---Server database-type to icon key and highlight style mapping
+---@type table<string, { icon_key: string, style: string }>
+local SERVER_TYPE_CONFIG = {
+  sqlserver  = { icon_key = "server_sqlserver", style = "SsnsServerSqlServer" },
+  postgres   = { icon_key = "server_postgres",  style = "SsnsServerPostgres" },
+  postgresql = { icon_key = "server_postgres",  style = "SsnsServerPostgres" },
+  mysql      = { icon_key = "server_mysql",     style = "SsnsServerMysql" },
+  sqlite     = { icon_key = "server_sqlite",    style = "SsnsServerSqlite" },
+  bigquery   = { icon_key = "server_bigquery",  style = "SsnsServerBigQuery" },
+}
+
+---Resolve server icon and style based on database type
+---@param db_type string Database type (e.g., "sqlserver", "postgres")
+---@param icons table Icon configuration
+---@return string icon, string style
+local function resolve_server_icon(db_type, icons)
+  local config = SERVER_TYPE_CONFIG[db_type]
+  if config then
+    return icons[config.icon_key] or icons.server or "", config.style
+  end
+  return icons.server or "", "SsnsServer"
+end
+
+---Dispatch a child to its specialized renderer
+---@param UiTree table The main UiTree module
+---@param child BaseDbObject Child object to render
+---@param cb ContentBuilder
+---@param indent_level number
+---@param icons table Icon configuration
+local function render_child(UiTree, child, cb, indent_level, icons)
+  if child.object_type == "database" then
+    TreeRender.render_database(UiTree, child, cb, indent_level, icons)
+  elseif child.object_type == "schema" then
+    TreeRender.render_schema(UiTree, child, cb, indent_level, icons)
+  else
+    TreeRender.render_object(UiTree, child, cb, indent_level, icons)
+  end
+end
+
+---Render error or loading status messages for an expanded node
+---@param cb ContentBuilder
+---@param indent string Current indentation
+---@param child_indent string Additional indent for child content
+---@param ui_state table Object's ui_state
+---@param name string Display name for loading message
+---@param icons table Icon configuration
+---@return boolean rendered True if error/loading was rendered (caller should skip normal children)
+local function render_status_messages(cb, indent, child_indent, ui_state, name, icons)
+  if ui_state.error then
+    local error_icon = icons.error or "✗"
+    cb:spans({{ text = indent .. child_indent .. error_icon .. " Error: " .. ui_state.error, style = "SsnsStatusError" }})
+    return true
+  elseif ui_state.loading then
+    cb:spans({{ text = indent .. child_indent .. "Loading " .. (name or "objects") .. "...", style = "SsnsStatusConnecting" }})
+    return true
+  end
+  return false
+end
+
+---Get the expand/collapse icon for a tree node
+---@param expanded boolean Whether the node is expanded
+---@param icons table Icon configuration
+---@return string
+local function make_expand_icon(expanded, icons)
+  return expanded and (icons.expanded or "▾") or (icons.collapsed or "▸")
+end
+
+---Split items into system and user groups, returning children with SYSTEM sub-group first
+---@param items BaseDbObject[] All items to split
+---@param system_names string[] Names considered "system"
+---@param get_name fun(item: BaseDbObject): string Function to get the comparable name from an item
+---@param parent BaseDbObject Parent object for the system sub-group
+---@param system_group_name string Display name for system group (e.g., "SYSTEM")
+---@param system_group_type string Object type for system group (e.g., "system_databases_group")
+---@return BaseDbObject[] children System sub-group (if any) + user items
+---@return number total_count Total count of all items
+local function split_system_user(items, system_names, get_name, parent, system_group_name, system_group_type)
+  local system_items = {}
+  local user_items = {}
+  for _, item in ipairs(items) do
+    local item_name = get_name(item):lower()
+    local is_system = false
+    for _, sys_name in ipairs(system_names) do
+      if item_name == sys_name:lower() then
+        is_system = true
+        break
+      end
+    end
+    if is_system then
+      table.insert(system_items, item)
+    else
+      table.insert(user_items, item)
+    end
+  end
+
+  local children = {}
+  if #system_items > 0 then
+    local system_group = TreeRender.create_ui_group(parent, system_group_name, system_group_type, system_items)
+    table.insert(children, system_group)
+  end
+  for _, item in ipairs(user_items) do
+    table.insert(children, item)
+  end
+
+  return children, #items
+end
+
 ---Sort comparator: by schema_name then name (for tables, views, procs, etc.)
 ---@param a BaseDbObject
 ---@param b BaseDbObject
@@ -133,15 +277,13 @@ end
 ---@param cb ContentBuilder
 ---@param indent_level number
 ---@param group_path string Dot-separated path
-function TreeRender.render_server_group(UiTree, group_data, cb, indent_level, group_path)
-  local Config = require('nvim-ssns.config')
+function TreeRender.render_server_group(UiTree, group_data, cb, indent_level, group_path, icons)
   local Cache = require('nvim-ssns.cache')
   local ServerGroups = require('nvim-ssns.server_groups')
-  local icons = Config.get_ui().icons
 
-  local indent = string.rep("  ", indent_level)
+  local indent = _indent[indent_level]
   local is_expanded = ServerGroups.is_expanded(group_path)
-  local expand_icon = is_expanded and (icons.expanded or "\u{f078}") or (icons.collapsed or "\u{f054}")
+  local expand_icon = make_expand_icon(is_expanded, icons)
   local group_icon = icons.server_group or icons.schema or "\u{f07b}"
 
   -- Create ephemeral group object for element tracking
@@ -154,7 +296,7 @@ function TreeRender.render_server_group(UiTree, group_data, cb, indent_level, gr
   cb:spans({
     { text = indent },
     { text = expand_icon .. " " .. group_icon .. " " .. group_data.name .. " " .. count_display,
-      style = "SsnsServerGroup",
+      style = TreeRender.get_object_style("server_group"),
       track = {
         name = "server_group_" .. group_path,
         type = "server_group",
@@ -170,7 +312,7 @@ function TreeRender.render_server_group(UiTree, group_data, cb, indent_level, gr
     local sorted_subs = ServerGroups.get_group_subgroups_sorted(group_data)
     for _, sub in ipairs(sorted_subs) do
       local sub_path = group_path .. "." .. sub.name
-      TreeRender.render_server_group(UiTree, sub, cb, indent_level + 1, sub_path)
+      TreeRender.render_server_group(UiTree, sub, cb, indent_level + 1, sub_path, icons)
     end
 
     -- Servers (sorted)
@@ -178,7 +320,7 @@ function TreeRender.render_server_group(UiTree, group_data, cb, indent_level, gr
     for _, server_name in ipairs(sorted_servers) do
       local server = Cache.find_server(server_name)
       if server then
-        TreeRender.render_server(UiTree, server, cb, indent_level + 1)
+        TreeRender.render_server(UiTree, server, cb, indent_level + 1, icons)
       end
     end
   end
@@ -546,19 +688,15 @@ function TreeRender.render(UiTree, opts)
 
     for _, item in ipairs(ordered_items) do
       if item.type == "group" then
-        TreeRender.render_server_group(UiTree, item.group_data, cb, 1, item.path)
+        TreeRender.render_server_group(UiTree, item.group_data, cb, 1, item.path, icons)
       else
         local server = Cache.find_server(item.name)
         if server then
-          TreeRender.render_server(UiTree, server, cb, 1)
+          TreeRender.render_server(UiTree, server, cb, 1, icons)
         end
       end
     end
   end
-
-  -- Build lines and highlights from ContentBuilder
-  local lines = cb:build_lines()
-  local highlights = cb:build_highlights()
 
   -- Store ContentBuilder for element lookup
   UiTree.content_builder = cb
@@ -576,44 +714,20 @@ function TreeRender.render(UiTree, opts)
     end
   end
 
-  -- Get chunked render threshold from config
-  local ui_config = Config.get_ui()
-  local threshold = ui_config.chunked_render_threshold or 200
+  -- Render to buffer using CB's diff-based pipeline
+  local lines = cb:render_to_buffer(Buffer.bufnr, Buffer.tree_ns_id)
 
-  -- Use chunked rendering for large trees to avoid blocking UI
-  if #lines > threshold then
-    -- Chunked write with highlights applied after
-    Buffer.set_lines_chunked(lines, {
-      chunk_size = 100,
-      on_complete = function()
-        -- Apply highlights from ContentBuilder
-        Buffer.apply_highlights(highlights, {
-          on_complete = function()
-            -- Restore cursor position after rendering complete
-            if saved_object and Buffer.is_open() then
-              UiTree.restore_cursor_to_object(saved_object, saved_column)
-            end
-            -- Call external completion callback after all rendering is done
-            if opts and opts.on_complete then
-              opts.on_complete()
-            end
-          end,
-        })
-      end,
-    })
-  else
-    -- Sync rendering for small trees
-    Buffer.set_lines(lines)
-    Buffer.apply_highlights(highlights)
+  -- Auto-expand tree width to fit content
+  Buffer.auto_expand_width(lines)
 
-    -- Restore cursor position if we have a saved object
-    if saved_object and Buffer.is_open() then
-      UiTree.restore_cursor_to_object(saved_object, saved_column)
-    end
-    -- Call external completion callback after sync rendering is done
-    if opts and opts.on_complete then
-      opts.on_complete()
-    end
+  -- Restore cursor position
+  if saved_object and Buffer.is_open() then
+    UiTree.restore_cursor_to_object(saved_object, saved_column)
+  end
+
+  -- Completion callback
+  if opts and opts.on_complete then
+    opts.on_complete()
   end
 end
 
@@ -622,34 +736,15 @@ end
 ---@param server ServerClass
 ---@param cb ContentBuilder
 ---@param indent_level number
-function TreeRender.render_server(UiTree, server, cb, indent_level)
-  local Config = require('nvim-ssns.config')
+function TreeRender.render_server(UiTree, server, cb, indent_level, icons)
   local Connections = require('nvim-ssns.connections')
-  local icons = Config.get_ui().icons
 
-  local indent = string.rep("  ", indent_level)
-  local expand_icon = server.ui_state.expanded and (icons.expanded or "▾") or (icons.collapsed or "▸")
+  local indent = _indent[indent_level]
+  local expand_icon = make_expand_icon(server.ui_state.expanded, icons)
 
   -- Get database-type specific server icon and highlight
-  local server_icon = icons.server or ""
-  local server_style = "SsnsServer"
   local db_type = server:get_db_type()
-  if db_type == "sqlserver" then
-    server_icon = icons.server_sqlserver or icons.server or ""
-    server_style = "SsnsServerSqlServer"
-  elseif db_type == "postgres" or db_type == "postgresql" then
-    server_icon = icons.server_postgres or icons.server or ""
-    server_style = "SsnsServerPostgres"
-  elseif db_type == "mysql" then
-    server_icon = icons.server_mysql or icons.server or ""
-    server_style = "SsnsServerMysql"
-  elseif db_type == "sqlite" then
-    server_icon = icons.server_sqlite or icons.server or ""
-    server_style = "SsnsServerSqlite"
-  elseif db_type == "bigquery" then
-    server_icon = icons.server_bigquery or icons.server or ""
-    server_style = "SsnsServerBigQuery"
-  end
+  local server_icon, server_style = resolve_server_icon(db_type, icons)
 
   local status = server:get_status_icon()
 
@@ -676,53 +771,24 @@ function TreeRender.render_server(UiTree, server, cb, indent_level)
 
   -- If expanded, render children (Databases group, etc.)
   if server.ui_state.expanded then
-    if server.ui_state.error then
-      -- Show error message
-      local error_icon = icons.error or "✗"
-      cb:spans({{ text = indent .. "    " .. error_icon .. " Error: " .. server.ui_state.error, style = "SsnsStatusError" }})
-    elseif server.ui_state.loading then
-      -- Show loading indicator with server name
-      cb:spans({{ text = indent .. "    Loading " .. (server.name or "server") .. "...", style = "SsnsStatusConnecting" }})
+    if render_status_messages(cb, indent, "    ", server.ui_state, server.name or "server", icons) then
+      -- Error or loading rendered
     elseif server.is_loaded then
       -- Get databases using typed array accessor
       local all_databases = server:get_databases()
       if #all_databases > 0 then
-        -- Get system database names from config
-        local filter_config = Config.get_filters()
-        local system_db_names = filter_config and filter_config.system_databases or {}
-
         -- Split into system and user databases
-        local system_databases = {}
-        local user_databases = {}
-        for _, db in ipairs(all_databases) do
-          local is_system = false
-          for _, sys_name in ipairs(system_db_names) do
-            if db.db_name:lower() == sys_name:lower() then
-              is_system = true
-              break
-            end
-          end
-          if is_system then
-            table.insert(system_databases, db)
-          else
-            table.insert(user_databases, db)
-          end
-        end
-
-        -- Build children: SYSTEM sub-group first (if any), then user databases
-        local children = {}
-        if #system_databases > 0 then
-          local system_group = TreeRender.create_ui_group(server, "SYSTEM", "system_databases_group", system_databases)
-          table.insert(children, system_group)
-        end
-        for _, db in ipairs(user_databases) do
-          table.insert(children, db)
-        end
+        local filter_config = require('nvim-ssns.config').get_filters()
+        local system_db_names = filter_config and filter_config.system_databases or {}
+        local children, total = split_system_user(
+          all_databases, system_db_names, function(db) return db.db_name end,
+          server, "SYSTEM", "system_databases_group"
+        )
 
         -- Create parent Databases group with SYSTEM sub-group + user databases as children
         local databases_group = TreeRender.create_ui_group(server, "Databases", "databases_group", children)
-        databases_group._total_items = #all_databases
-        TreeRender.render_object(UiTree, databases_group, cb, indent_level + 1)
+        databases_group._total_items = total
+        TreeRender.render_object(UiTree, databases_group, cb, indent_level + 1, icons)
       end
     elseif server:is_connected() and not server.is_loaded then
       -- Show loading indicator (fallback if loading flag not set)
@@ -736,12 +802,10 @@ end
 ---@param db DbClass
 ---@param cb ContentBuilder
 ---@param indent_level number
-function TreeRender.render_database(UiTree, db, cb, indent_level)
-  local Config = require('nvim-ssns.config')
-  local icons = Config.get_ui().icons
+function TreeRender.render_database(UiTree, db, cb, indent_level, icons)
 
-  local indent = string.rep("  ", indent_level)
-  local expand_icon = db.ui_state.expanded and (icons.expanded or "▾") or (icons.collapsed or "▸")
+  local indent = _indent[indent_level]
+  local expand_icon = make_expand_icon(db.ui_state.expanded, icons)
   local db_icon = icons.database or ""
   local status = db:get_status_icon()
 
@@ -749,7 +813,7 @@ function TreeRender.render_database(UiTree, db, cb, indent_level)
   cb:spans({
     { text = indent },
     { text = expand_icon .. " " .. db_icon .. " " .. db.name .. " " .. status,
-      style = "SsnsDatabase",
+      style = TreeRender.get_object_style("database"),
       track = {
         name = "database_" .. db.name,
         type = "database",
@@ -761,13 +825,8 @@ function TreeRender.render_database(UiTree, db, cb, indent_level)
 
   -- If expanded, render object type groups (TABLES, VIEWS, etc.)
   if db.ui_state.expanded then
-    if db.ui_state.error then
-      -- Show error message
-      local error_icon = icons.error or "✗"
-      cb:spans({{ text = indent .. "    " .. error_icon .. " Error: " .. db.ui_state.error, style = "SsnsStatusError" }})
-    elseif db.ui_state.loading then
-      -- Show loading indicator with database name
-      cb:spans({{ text = indent .. "    Loading " .. (db.db_name or "database") .. "...", style = "SsnsStatusConnecting" }})
+    if render_status_messages(cb, indent, "    ", db.ui_state, db.db_name or "database", icons) then
+      -- Error or loading rendered
     elseif db.is_loaded then
       -- Render object groups at database level (aggregating from schemas if needed)
       -- This works for both schema-based (SQL Server, PostgreSQL) and non-schema (MySQL) servers
@@ -777,20 +836,20 @@ function TreeRender.render_database(UiTree, db, cb, indent_level)
       -- Always show even if empty (with count of 0)
       local tables = db:get_tables(nil, { skip_load = true })
       local tables_group = TreeRender.create_ui_group(db, "TABLES", "tables_group", tables)
-      TreeRender.render_object(UiTree, tables_group, cb, indent_level + 1)
+      TreeRender.render_object(UiTree, tables_group, cb, indent_level + 1, icons)
 
       -- VIEWS group - always show if feature supported
       if adapter.features and adapter.features.views then
         local views = db:get_views(nil, { skip_load = true })
         local views_group = TreeRender.create_ui_group(db, "VIEWS", "views_group", views)
-        TreeRender.render_object(UiTree, views_group, cb, indent_level + 1)
+        TreeRender.render_object(UiTree, views_group, cb, indent_level + 1, icons)
       end
 
       -- PROCEDURES group - always show if feature supported
       if adapter.features and adapter.features.procedures then
         local procedures = db:get_procedures(nil, { skip_load = true })
         local procedures_group = TreeRender.create_ui_group(db, "PROCEDURES", "procedures_group", procedures)
-        TreeRender.render_object(UiTree, procedures_group, cb, indent_level + 1)
+        TreeRender.render_object(UiTree, procedures_group, cb, indent_level + 1, icons)
       end
 
       -- FUNCTIONS group - always show if feature supported
@@ -817,14 +876,14 @@ function TreeRender.render_database(UiTree, db, cb, indent_level)
         local functions_group = TreeRender.create_ui_group(db, "FUNCTIONS", "functions_group", { scalar_group, table_group })
         -- Store total function count for display (not sub-group count)
         functions_group._total_items = #all_functions
-        TreeRender.render_object(UiTree, functions_group, cb, indent_level + 1)
+        TreeRender.render_object(UiTree, functions_group, cb, indent_level + 1, icons)
       end
 
       -- SYNONYMS group (typically SQL Server only) - always show if feature supported
       if adapter.features and adapter.features.synonyms then
         local synonyms = db:get_synonyms(nil, { skip_load = true })
         local synonyms_group = TreeRender.create_ui_group(db, "SYNONYMS", "synonyms_group", synonyms)
-        TreeRender.render_object(UiTree, synonyms_group, cb, indent_level + 1)
+        TreeRender.render_object(UiTree, synonyms_group, cb, indent_level + 1, icons)
       end
 
       -- SCHEMAS group (for schema-based servers like SQL Server, PostgreSQL)
@@ -833,42 +892,18 @@ function TreeRender.render_database(UiTree, db, cb, indent_level)
       if adapter.features and adapter.features.schemas then
         local all_schemas = db:get_schemas()
 
-        -- Get system schema names from config
-        local filter_config = Config.get_filters()
-        local system_schema_names = filter_config and filter_config.system_schemas or {}
-
         -- Split into system and user schemas
-        local system_schemas = {}
-        local user_schemas = {}
-        for _, schema in ipairs(all_schemas) do
-          local is_system = false
-          for _, sys_name in ipairs(system_schema_names) do
-            if schema.name:lower() == sys_name:lower() then
-              is_system = true
-              break
-            end
-          end
-          if is_system then
-            table.insert(system_schemas, schema)
-          else
-            table.insert(user_schemas, schema)
-          end
-        end
-
-        -- Build children: SYSTEM sub-group first (if any), then user schemas
-        local children = {}
-        if #system_schemas > 0 then
-          local system_group = TreeRender.create_ui_group(db, "SYSTEM", "system_schemas_group", system_schemas)
-          table.insert(children, system_group)
-        end
-        for _, schema in ipairs(user_schemas) do
-          table.insert(children, schema)
-        end
+        local filter_config = require('nvim-ssns.config').get_filters()
+        local system_schema_names = filter_config and filter_config.system_schemas or {}
+        local children, total = split_system_user(
+          all_schemas, system_schema_names, function(s) return s.name end,
+          db, "SYSTEM", "system_schemas_group"
+        )
 
         -- Create parent SCHEMAS group with SYSTEM sub-group + user schemas as children
         local schemas_group = TreeRender.create_ui_group(db, "SCHEMAS", "schemas_group", children)
-        schemas_group._total_items = #all_schemas
-        TreeRender.render_object(UiTree, schemas_group, cb, indent_level + 1)
+        schemas_group._total_items = total
+        TreeRender.render_object(UiTree, schemas_group, cb, indent_level + 1, icons)
       end
     else
       -- Show loading indicator with database name (fallback)
@@ -883,14 +918,12 @@ end
 ---@param schema SchemaClass
 ---@param cb ContentBuilder
 ---@param indent_level number
-function TreeRender.render_schema(UiTree, schema, cb, indent_level)
-  local Config = require('nvim-ssns.config')
+function TreeRender.render_schema(UiTree, schema, cb, indent_level, icons)
   local UiFilters = require('nvim-ssns.ui.core.filters')
   local Buffer = require('nvim-ssns.ui.core.buffer')
-  local icons = Config.get_ui().icons
 
-  local indent = string.rep("  ", indent_level)
-  local expand_icon = schema.ui_state.expanded and (icons.expanded or "▾") or (icons.collapsed or "▸")
+  local indent = _indent[indent_level]
+  local expand_icon = make_expand_icon(schema.ui_state.expanded, icons)
   local schema_icon = icons.schema or ""
 
   -- Calculate count display (fast - just collecting, no sorting needed)
@@ -915,7 +948,7 @@ function TreeRender.render_schema(UiTree, schema, cb, indent_level)
   cb:spans({
     { text = indent },
     { text = expand_icon .. " " .. schema_icon .. " " .. schema.name .. count_display,
-      style = "SsnsSchema",
+      style = TreeRender.get_object_style("schema"),
       track = {
         name = "schema_" .. schema.name,
         type = "schema",
@@ -940,11 +973,11 @@ function TreeRender.render_schema(UiTree, schema, cb, indent_level)
       local sort_dir = schema["_ui_schema_children_sort"] or "asc"
       if sort_dir == "desc" then
         for i = #filtered_objects, 1, -1 do
-          TreeRender.render_object(UiTree, filtered_objects[i], cb, indent_level + 1)
+          TreeRender.render_object(UiTree, filtered_objects[i], cb, indent_level + 1, icons)
         end
       else
         for _, obj in ipairs(filtered_objects) do
-          TreeRender.render_object(UiTree, obj, cb, indent_level + 1)
+          TreeRender.render_object(UiTree, obj, cb, indent_level + 1, icons)
         end
       end
     else
@@ -977,10 +1010,8 @@ end
 ---@param obj BaseDbObject
 ---@param cb ContentBuilder
 ---@param indent_level number
-function TreeRender.render_object(UiTree, obj, cb, indent_level)
-  local Config = require('nvim-ssns.config')
-  local icons = Config.get_ui().icons
-  local indent = string.rep("  ", indent_level)
+function TreeRender.render_object(UiTree, obj, cb, indent_level, icons)
+  local indent = _indent[indent_level]
 
   -- Check if this is an action or detail node
   if obj.object_type == "action" then
@@ -1005,59 +1036,21 @@ function TreeRender.render_object(UiTree, obj, cb, indent_level)
   -- Groups are expandable
   -- Or if already loaded and has children
   local has_children = obj:has_children()
-    or obj.object_type == "database"
-    or obj.object_type == "table"
-    or obj.object_type == "view"
-    or obj.object_type == "procedure"
-    or obj.object_type == "function"
-    or obj.object_type == "synonym"
-    or obj.object_type == "server_group"
-    or obj.object_type == "databases_group"
-    or obj.object_type == "tables_group"
-    or obj.object_type == "views_group"
-    or obj.object_type == "procedures_group"
-    or obj.object_type == "functions_group"
-    or obj.object_type == "scalar_functions_group"
-    or obj.object_type == "table_functions_group"
-    or obj.object_type == "synonyms_group"
-    or obj.object_type == "schemas_group"
-    or obj.object_type == "system_databases_group"
-    or obj.object_type == "system_schemas_group"
-    or obj.object_type == "schema_view"
-    or obj.object_type == "column_group"
-    or obj.object_type == "index_group"
-    or obj.object_type == "key_group"
-    or obj.object_type == "parameter_group"
-    or obj.object_type == "actions_group"
-    -- Object references show expand arrow if their referenced object can have children
+    or EXPANDABLE_TYPES[obj.object_type]
     or (obj.object_type == "object_reference" and obj.referenced_object
-        and (obj.referenced_object.object_type == "table"
-             or obj.referenced_object.object_type == "view"
-             or obj.referenced_object.object_type == "procedure"
-             or obj.referenced_object.object_type == "function"
-             or obj.referenced_object.object_type == "synonym"))
+        and EXPANDABLE_TYPES[obj.referenced_object.object_type])
 
   local expand_icon = ""
   if has_children then
-    expand_icon = obj.ui_state.expanded and (icons.expanded or "▾") or (icons.collapsed or "▸")
+    expand_icon = make_expand_icon(obj.ui_state.expanded, icons)
   end
 
   -- Get object-type specific icon
   local obj_icon = TreeRender.get_object_icon(obj.object_type, icons, obj)
 
   -- Check if this is a schema node or object group
-  local is_schema_node = obj.object_type == "schema" or obj.object_type == "schema_view"
-  local is_object_group = obj.object_type == "databases_group" or
-                          obj.object_type == "tables_group" or
-                          obj.object_type == "views_group" or
-                          obj.object_type == "procedures_group" or
-                          obj.object_type == "functions_group" or
-                          obj.object_type == "scalar_functions_group" or
-                          obj.object_type == "table_functions_group" or
-                          obj.object_type == "synonyms_group" or
-                          obj.object_type == "sequences_group" or
-                          obj.object_type == "system_databases_group" or
-                          obj.object_type == "system_schemas_group"
+  local is_schema_node = SCHEMA_NODE_TYPES[obj.object_type]
+  local is_object_group = OBJECT_GROUP_TYPES[obj.object_type]
 
   -- For groups and schemas, use name directly and add count
   -- For other objects, use get_display_name if available
@@ -1100,13 +1093,8 @@ function TreeRender.render_object(UiTree, obj, cb, indent_level)
 
   -- If expanded, render children
   if obj.ui_state.expanded then
-    if obj.ui_state.error then
-      -- Show error message
-      local error_icon = icons.error or "✗"
-      cb:spans({{ text = indent .. "  " .. error_icon .. " Error: " .. obj.ui_state.error, style = "SsnsStatusError" }})
-    elseif obj.ui_state.loading then
-      -- Show loading indicator with object name
-      cb:spans({{ text = indent .. "  Loading " .. (obj.name or "objects") .. "...", style = "SsnsStatusConnecting" }})
+    if render_status_messages(cb, indent, "  ", obj.ui_state, obj.name or "objects", icons) then
+      -- Error or loading rendered
     else
       -- Check if this is a structural group that needs alignment
       if obj.object_type == "column_group" or obj.object_type == "index_group" or
@@ -1115,26 +1103,13 @@ function TreeRender.render_object(UiTree, obj, cb, indent_level)
         if not obj.is_loaded and obj.load then
           obj:load()
         end
-        TreeRender.render_aligned_group(UiTree, obj, cb, indent_level + 1)
+        TreeRender.render_aligned_group(UiTree, obj, cb, indent_level + 1, icons)
       elseif obj:has_children() then
         -- Regular children rendering (only if has children)
         local all_children = obj:get_children()
 
         -- Apply filtering for schema nodes or object groups
-        local is_schema_node_inner = obj.object_type == "schema" or obj.object_type == "schema_view"
-        local is_object_group_inner = obj.object_type == "databases_group" or
-                                obj.object_type == "tables_group" or
-                                obj.object_type == "views_group" or
-                                obj.object_type == "procedures_group" or
-                                obj.object_type == "functions_group" or
-                                obj.object_type == "scalar_functions_group" or
-                                obj.object_type == "table_functions_group" or
-                                obj.object_type == "synonyms_group" or
-                                obj.object_type == "sequences_group" or
-                                obj.object_type == "system_databases_group" or
-                                obj.object_type == "system_schemas_group"
-
-        if is_schema_node_inner or is_object_group_inner then
+        if is_schema_node or is_object_group then
           local UiFilters = require('nvim-ssns.ui.core.filters')
           local filters = UiFilters.get(obj)
           local filtered_children, total_count, filter_error = UiFilters.apply(all_children, filters)
@@ -1175,26 +1150,12 @@ function TreeRender.render_object(UiTree, obj, cb, indent_level)
 
           -- Render filtered and sorted children
           for _, child in ipairs(filtered_children) do
-            -- Delegate to specialized renderers for complex objects
-            if child.object_type == "database" then
-              TreeRender.render_database(UiTree, child, cb, indent_level + 1)
-            elseif child.object_type == "schema" then
-              TreeRender.render_schema(UiTree, child, cb, indent_level + 1)
-            else
-              TreeRender.render_object(UiTree, child, cb, indent_level + 1)
-            end
+            render_child(UiTree, child, cb, indent_level + 1, icons)
           end
         else
           -- Regular rendering without filters
           for _, child in ipairs(all_children) do
-            -- Delegate to specialized renderers for complex objects
-            if child.object_type == "database" then
-              TreeRender.render_database(UiTree, child, cb, indent_level + 1)
-            elseif child.object_type == "schema" then
-              TreeRender.render_schema(UiTree, child, cb, indent_level + 1)
-            else
-              TreeRender.render_object(UiTree, child, cb, indent_level + 1)
-            end
+            render_child(UiTree, child, cb, indent_level + 1, icons)
           end
         end
       end
@@ -1207,8 +1168,8 @@ end
 ---@param group BaseDbObject
 ---@param cb ContentBuilder
 ---@param indent_level number
-function TreeRender.render_aligned_group(UiTree, group, cb, indent_level)
-  local indent = string.rep("  ", indent_level)
+function TreeRender.render_aligned_group(UiTree, group, cb, indent_level, icons)
+  local indent = _indent[indent_level]
   local children = group:get_children()
 
   if #children == 0 then
@@ -1239,10 +1200,6 @@ function TreeRender.render_aligned_group(UiTree, group, cb, indent_level)
       end
     end
   end
-
-  -- Get config for icons
-  local Config = require('nvim-ssns.config')
-  local icons = Config.get_ui().icons
 
   -- Second pass: Render with aligned columns using ContentBuilder
   for i, row in ipairs(formatted_rows) do
