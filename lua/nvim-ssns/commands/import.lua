@@ -1,494 +1,640 @@
 ---@class SsnsImportCommands
----Import wizard for Excel files into database tables
+---Import wizard and preview for Excel files using nvim-float TUI
 local M = {}
 
----@class ImportWizardState
----@field filepath string? Excel file path
----@field sheet_name string? Selected sheet
----@field sheet_info table? Sheet metadata from xlsx.info()
----@field preview_data XlsxReadResult? Preview result from xlsx_reader
----@field columns table[]? Column definitions with mapping
----@field server_name string? Target server nickname
----@field database_name string? Target database
----@field table_name string? Target table name
----@field mode string? Import mode: "create_insert"|"insert"|"truncate_insert"
+local UiFloat = require('nvim-float.window')
+local ContentBuilder = require('nvim-float.content')
 
----Show an error notification
----@param msg string
+---@class ImportState
+---@field filepath string?
+---@field sheet_name string?
+---@field sheet_options {value:string,label:string}[]
+---@field preview_data XlsxReadResult?
+---@field columns table[]?
+---@field server_name string?
+---@field server_options {value:string,label:string}[]
+---@field database_name string?
+---@field database_options {value:string,label:string}[]
+---@field table_name string?
+---@field mode string?
+---@field headers string
+
+-- ============================================================================
+-- Utilities
+-- ============================================================================
+
+---@type FloatWindow?
+local current_float = nil
+
 local function notify_error(msg)
   vim.notify("[SSNS Import] " .. msg, vim.log.levels.ERROR)
 end
 
----Show an info notification
----@param msg string
 local function notify_info(msg)
   vim.notify("[SSNS Import] " .. msg, vim.log.levels.INFO)
 end
 
----Check if nvim-xlsx is available
----@return boolean
 local function has_xlsx()
-  local ok = pcall(require, "nvim-xlsx")
-  return ok
+  return pcall(require, "nvim-xlsx")
 end
 
----Step 1: Prompt for Excel file path
----@param state ImportWizardState
----@param callback fun(state: ImportWizardState)
-local function step_select_file(state, callback)
-  local default = state.filepath or ""
-  vim.ui.input({
-    prompt = "Excel file path: ",
-    default = default,
-    completion = "file",
-  }, function(input)
-    if not input or input == "" then
-      notify_info("Import cancelled.")
-      return
-    end
+-- ============================================================================
+-- OS File Picker (Windows: PowerShell OpenFileDialog)
+-- ============================================================================
 
-    -- Expand ~ and environment variables
-    local filepath = vim.fn.expand(input)
+---Open native OS file picker asynchronously
+---@param callback fun(filepath: string?)
+local function open_file_picker(callback)
+  local ps_script = table.concat({
+    'Add-Type -AssemblyName System.Windows.Forms;',
+    '$d = New-Object System.Windows.Forms.OpenFileDialog;',
+    "$d.Title = 'Select file to import';",
+    "$d.Filter = 'Excel Files (*.xlsx)|*.xlsx|CSV Files (*.csv)|*.csv|All Files (*.*)|*.*';",
+    'if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.FileName }',
+  }, ' ')
 
-    -- Validate file exists
-    if vim.fn.filereadable(filepath) == 0 then
-      notify_error("File not found: " .. filepath)
-      return
-    end
+  local stdout_chunks = {}
+  local stdout = vim.uv.new_pipe()
 
-    -- Validate extension
-    if not filepath:match("%.xlsx$") then
-      notify_error("Only .xlsx files are supported.")
-      return
-    end
-
-    state.filepath = filepath
-    callback(state)
+  local handle
+  handle = vim.uv.spawn('powershell', {
+    args = { '-NoProfile', '-Command', ps_script },
+    stdio = { nil, stdout, nil },
+  }, function(code)
+    stdout:close()
+    handle:close()
+    vim.schedule(function()
+      if code == 0 then
+        local path = table.concat(stdout_chunks):gsub('%s+$', '')
+        callback(path ~= '' and path or nil)
+      else
+        callback(nil)
+      end
+    end)
   end)
+
+  if stdout then
+    stdout:read_start(function(_, data)
+      if data then table.insert(stdout_chunks, data) end
+    end)
+  end
 end
 
----Step 2: Select sheet from the workbook
----@param state ImportWizardState
----@param callback fun(state: ImportWizardState)
-local function step_select_sheet(state, callback)
+-- ============================================================================
+-- State Management
+-- ============================================================================
+
+---Sync embedded container values back into state
+---@param state ImportState
+local function sync_state(state)
+  if not current_float then return end
+  local values = current_float:get_all_embedded_values()
+  if values.filepath then state.filepath = values.filepath end
+  if values.table_name then state.table_name = values.table_name end
+  if values.sheet then state.sheet_name = values.sheet end
+  if values.server then state.server_name = values.server end
+  if values.database then state.database_name = values.database end
+  if values.mode then state.mode = values.mode end
+  if values.headers then state.headers = values.headers end
+end
+
+---Build server options from cache
+---@return {value:string,label:string}[]
+local function build_server_options()
+  local Cache = require("nvim-ssns.cache")
+  local servers = Cache.get_all_servers()
+  local options = {}
+  if servers then
+    for _, server in ipairs(servers) do
+      table.insert(options, { value = server.name, label = server.name })
+    end
+  end
+  return options
+end
+
+---Build database options for a server
+---@param server_name string?
+---@return {value:string,label:string}[]
+local function build_database_options(server_name)
+  if not server_name then return {} end
+  local Cache = require("nvim-ssns.cache")
+  local server = Cache.find_server(server_name)
+  if not server then return {} end
+
+  local databases = server:get_databases()
+  local options = {}
+  if databases then
+    for _, db in ipairs(databases) do
+      table.insert(options, { value = db.name, label = db.name })
+    end
+  end
+  return options
+end
+
+---Load sheet info from Excel file and populate state
+---@param state ImportState
+local function load_sheets(state)
+  state.sheet_options = {}
+  state.preview_data = nil
+  state.columns = nil
+
+  if not state.filepath or state.filepath == "" then return end
+
+  local filepath = vim.fn.expand(state.filepath)
+  if vim.fn.filereadable(filepath) == 0 then return end
+
   local XlsxReader = require("nvim-ssns.etl.xlsx_reader")
-  local info, err = XlsxReader.info(state.filepath)
-  if not info then
-    notify_error("Failed to read Excel file: " .. (err or "unknown error"))
-    return
-  end
+  local ok, info = pcall(XlsxReader.info, filepath)
+  if not ok or not info then return end
 
-  state.sheet_info = info
-
-  if info.sheet_count == 1 then
-    -- Only one sheet, auto-select
-    state.sheet_name = info.sheets[1].name
-    callback(state)
-    return
-  end
-
-  -- Build display items
-  local items = {}
   for _, sheet in ipairs(info.sheets) do
-    table.insert(items, string.format("%s (%s)", sheet.name, sheet.dimension or "empty"))
-  end
-
-  vim.ui.select(items, {
-    prompt = "Select sheet:",
-    format_item = function(item) return item end,
-  }, function(choice, idx)
-    if not choice then
-      notify_info("Import cancelled.")
-      return
-    end
-    state.sheet_name = info.sheets[idx].name
-    callback(state)
-  end)
-end
-
----Step 3: Preview data and show column info
----@param state ImportWizardState
----@param callback fun(state: ImportWizardState)
-local function step_preview(state, callback)
-  local XlsxReader = require("nvim-ssns.etl.xlsx_reader")
-
-  -- Read first 20 rows for preview
-  local ok, result = pcall(XlsxReader.read, state.filepath, {
-    sheet = state.sheet_name,
-    headers = true,
-    max_rows = 20,
-  })
-
-  if not ok then
-    notify_error("Failed to read sheet: " .. tostring(result))
-    return
-  end
-
-  state.preview_data = result
-  state.columns = result.columns
-
-  -- Show preview in floating window
-  local ContentBuilder = require("nvim-float.content")
-  local cb = ContentBuilder.new()
-
-  cb:header("Excel Import Preview")
-  cb:separator("─", 70)
-  cb:spans({
-    { text = "  File: ", style = "muted" },
-    { text = vim.fn.fnamemodify(state.filepath, ":t"), style = "string" },
-  })
-  cb:spans({
-    { text = "  Sheet: ", style = "muted" },
-    { text = state.sheet_name, style = "string" },
-  })
-  cb:spans({
-    { text = "  Rows: ", style = "muted" },
-    { text = tostring(result.row_count) .. (result.row_count >= 20 and "+" or ""), style = "number" },
-    { text = "  Columns: ", style = "muted" },
-    { text = tostring(#result.columns), style = "number" },
-  })
-  cb:blank()
-
-  -- Column table
-  cb:section("Columns")
-  cb:separator("─", 70)
-  cb:spans({
-    { text = "  " .. string.format("%-4s %-30s %-10s", "#", "Name", "Type"), style = "keyword" },
-  })
-  cb:separator("─", 70)
-
-  for _, col in ipairs(result.columns) do
-    cb:spans({
-      { text = "  " .. string.format("%-4d ", col.index), style = "number" },
-      { text = string.format("%-30s ", col.name), style = "identifier" },
-      { text = string.format("%-10s", col.type), style = "muted" },
+    table.insert(state.sheet_options, {
+      value = sheet.name,
+      label = sheet.name .. " (" .. (sheet.dimension or "empty") .. ")",
     })
   end
 
-  cb:blank()
-
-  -- Data preview
-  if #result.rows > 0 then
-    cb:section("Data Preview (first " .. math.min(5, #result.rows) .. " rows)")
-    cb:separator("─", 70)
-
-    for i = 1, math.min(5, #result.rows) do
-      local row = result.rows[i]
-      local parts = {}
-      for _, col in ipairs(result.columns) do
-        local val = row[col.name]
-        local display = val ~= nil and tostring(val) or "NULL"
-        if #display > 20 then display = display:sub(1, 17) .. "..." end
-        table.insert(parts, display)
-      end
-      cb:styled("  " .. table.concat(parts, " | "), i % 2 == 0 and "muted" or nil)
-    end
+  -- Auto-select first sheet if none selected
+  if not state.sheet_name and #state.sheet_options > 0 then
+    state.sheet_name = state.sheet_options[1].value
   end
+end
 
-  cb:blank()
-  cb:styled("  Press ENTER to continue, q to cancel", "comment")
+---Load preview data for current sheet
+---@param state ImportState
+local function load_preview(state)
+  state.preview_data = nil
+  state.columns = nil
 
-  local Float = require("nvim-float.window")
-  local win = Float.create_styled(cb, {
-    title = " Import Preview ",
-    min_width = 75,
-    max_height = 40,
-    center = true,
-    focusable = true,
-    footer = "Enter: continue | q: cancel",
+  if not state.filepath or not state.sheet_name then return end
+
+  local filepath = vim.fn.expand(state.filepath)
+  if vim.fn.filereadable(filepath) == 0 then return end
+
+  local XlsxReader = require("nvim-ssns.etl.xlsx_reader")
+  local ok, result = pcall(XlsxReader.read, filepath, {
+    sheet = state.sheet_name,
+    headers = state.headers == "yes",
+    max_rows = 20,
   })
 
-  if win then
-    vim.keymap.set("n", "q", function()
-      win:close()
-      notify_info("Import cancelled.")
-    end, { buffer = win.buf, nowait = true })
+  if ok and result then
+    state.preview_data = result
+    state.columns = result.columns
 
-    vim.keymap.set("n", "<Esc>", function()
-      win:close()
-      notify_info("Import cancelled.")
-    end, { buffer = win.buf, nowait = true })
-
-    vim.keymap.set("n", "<CR>", function()
-      win:close()
-      callback(state)
-    end, { buffer = win.buf, nowait = true })
-  end
-end
-
----Step 4: Select target server
----@param state ImportWizardState
----@param callback fun(state: ImportWizardState)
-local function step_select_server(state, callback)
-  local Cache = require("nvim-ssns.cache")
-  local servers = Cache.get_all_servers()
-
-  if not servers or #servers == 0 then
-    notify_error("No servers configured. Add a server connection first.")
-    return
-  end
-
-  local items = {}
-  for _, server in ipairs(servers) do
-    table.insert(items, server.name)
-  end
-
-  if #items == 1 then
-    state.server_name = items[1]
-    callback(state)
-    return
-  end
-
-  vim.ui.select(items, {
-    prompt = "Select target server:",
-  }, function(choice)
-    if not choice then
-      notify_info("Import cancelled.")
-      return
+    -- Suggest table name from sheet name if not set
+    if not state.table_name or state.table_name == "" then
+      local suggested = state.sheet_name:gsub('[%s%p]', '_'):gsub('_+', '_')
+      state.table_name = "dbo." .. suggested
     end
-    state.server_name = choice
-    callback(state)
-  end)
+  end
 end
 
----Step 5: Select target database
----@param state ImportWizardState
----@param callback fun(state: ImportWizardState)
-local function step_select_database(state, callback)
-  local Cache = require("nvim-ssns.cache")
-  local server = Cache.find_server(state.server_name)
+---Load databases for current server
+---@param state ImportState
+local function load_databases(state)
+  state.database_options = build_database_options(state.server_name)
+  if not state.database_name and #state.database_options > 0 then
+    state.database_name = state.database_options[1].value
+  end
+end
 
-  if not server then
-    notify_error("Server not found: " .. state.server_name)
-    return
+-- ============================================================================
+-- Column Preview Builder (result_table)
+-- ============================================================================
+
+---Map xlsx column type to SQL datatype string for result_table coloring
+---@param col_type string
+---@return string
+local function type_to_datatype(col_type)
+  if col_type == "number" then return "int"
+  elseif col_type == "date" then return "date"
+  elseif col_type == "boolean" then return "bit"
+  else return "varchar"
+  end
+end
+
+---Build a ContentBuilder with result_table for column preview
+---@param state ImportState
+---@return ContentBuilder
+local function build_column_preview(state)
+  local preview_cb = ContentBuilder.new()
+
+  if not state.preview_data or #state.preview_data.columns == 0 then
+    preview_cb:styled("  No data loaded. Enter a file path and press Enter.", "muted")
+    return preview_cb
   end
 
-  local databases = server:get_databases()
-  if not databases or #databases == 0 then
-    -- No databases loaded, prompt manually
-    vim.ui.input({
-      prompt = "Database name: ",
-    }, function(input)
-      if not input or input == "" then
-        notify_info("Import cancelled.")
-        return
+  local data = state.preview_data
+
+  -- Calculate column widths from data
+  local col_defs = {}
+  local sample_values = {} -- col_name -> first non-nil value
+
+  for _, col in ipairs(data.columns) do
+    local max_w = math.max(#col.name, #col.type + 2)
+    for i = 1, math.min(10, #data.rows) do
+      local val = data.rows[i] and data.rows[i][col.name]
+      if val ~= nil then
+        max_w = math.max(max_w, math.min(20, #tostring(val)))
+        if not sample_values[col.name] then
+          sample_values[col.name] = tostring(val)
+        end
       end
-      state.database_name = input
-      callback(state)
-    end)
-    return
+    end
+    table.insert(col_defs, { name = col.name, width = max_w })
   end
 
-  local items = {}
-  for _, db in ipairs(databases) do
-    table.insert(items, db.name)
+  -- Build result table
+  local row_num_width = #tostring(math.min(10, #data.rows))
+  row_num_width = math.max(row_num_width, 2)
+
+  preview_cb:begin_result_table()
+  preview_cb:result_top_border_with_rownum(col_defs, "ascii", row_num_width)
+  preview_cb:result_header_row_with_rownum(col_defs, "ascii", row_num_width)
+  preview_cb:result_separator_with_rownum(col_defs, "ascii", row_num_width)
+
+  local rows_to_show = math.min(10, #data.rows)
+  for i = 1, rows_to_show do
+    local row = data.rows[i]
+    local values = {}
+    for _, col in ipairs(data.columns) do
+      local val = row[col.name]
+      table.insert(values, {
+        value = val ~= nil and tostring(val) or "NULL",
+        width = col_defs[#values + 1].width,
+        datatype = type_to_datatype(col.type),
+        is_null = val == nil,
+      })
+    end
+    preview_cb:result_multiline_data_row(
+      vim.tbl_map(function(v)
+        return { lines = { v.value }, width = v.width, datatype = v.datatype, is_null = v.is_null }
+      end, values),
+      "datatype", "ascii", true, i, row_num_width
+    )
   end
 
-  vim.ui.select(items, {
-    prompt = "Select target database:",
-  }, function(choice)
-    if not choice then
-      notify_info("Import cancelled.")
-      return
-    end
-    state.database_name = choice
-    callback(state)
-  end)
+  preview_cb:result_bottom_border_with_rownum(col_defs, "ascii", row_num_width)
+
+  if #data.rows >= 20 then
+    preview_cb:blank()
+    preview_cb:styled("  ... more rows available. Press p for full preview.", "muted")
+  end
+
+  -- Column type summary below the table
+  preview_cb:blank()
+  preview_cb:styled("  Column Types:", "section")
+  for _, col in ipairs(data.columns) do
+    preview_cb:spans({
+      { text = "    " },
+      { text = string.format("%-20s", col.name), style = "identifier" },
+      { text = col.type, style = "muted" },
+    })
+  end
+
+  return preview_cb
 end
 
----Step 6: Enter target table name and import mode
----@param state ImportWizardState
----@param callback fun(state: ImportWizardState)
-local function step_table_and_mode(state, callback)
-  -- Suggest table name based on sheet name
-  local suggested = state.sheet_name:gsub('[%s%p]', '_'):gsub('_+', '_')
-
-  vim.ui.input({
-    prompt = "Target table name (schema.table): ",
-    default = "dbo." .. suggested,
-  }, function(input)
-    if not input or input == "" then
-      notify_info("Import cancelled.")
-      return
-    end
-    state.table_name = input
-
-    -- Select import mode
-    local modes = {
-      { label = "Create table & insert", value = "create_insert" },
-      { label = "Insert into existing table", value = "insert" },
-      { label = "Truncate & insert", value = "truncate_insert" },
-    }
-
-    vim.ui.select(modes, {
-      prompt = "Import mode:",
-      format_item = function(item) return item.label end,
-    }, function(choice)
-      if not choice then
-        notify_info("Import cancelled.")
-        return
-      end
-      state.mode = choice.value
-      callback(state)
-    end)
-  end)
-end
+-- ============================================================================
+-- Script Generation
+-- ============================================================================
 
 ---Map import mode to ETL mode directive value
 ---@param mode string
----@return string etl_mode
+---@return string
 local function mode_to_etl_mode(mode)
-  if mode == "truncate_insert" then
-    return "truncate_insert"
-  end
+  if mode == "truncate_insert" then return "truncate_insert" end
   return "insert"
 end
 
 ---Generate .ssns script content from wizard state
----@param state ImportWizardState
----@return string script_content
+---@param state ImportState
+---@return string
 local function generate_ssns_script(state)
   local lines = {}
-
-  -- Normalize filepath for use in Lua string (escape backslashes)
   local escaped_path = state.filepath:gsub("\\", "/")
+  local use_headers = state.headers == "yes"
 
-  -- Variables
   table.insert(lines, "--@var xlsx_file = " .. escaped_path)
-  table.insert(lines, "--@var xlsx_sheet = " .. state.sheet_name)
+  table.insert(lines, "--@var xlsx_sheet = " .. (state.sheet_name or "Sheet1"))
   table.insert(lines, "")
 
-  -- Lua block to read Excel
   table.insert(lines, "--@lua read_excel")
-  table.insert(lines, "--@description Import from " .. vim.fn.fnamemodify(state.filepath, ":t") .. " (" .. state.sheet_name .. ")")
+  table.insert(lines, "--@description Import from " .. vim.fn.fnamemodify(state.filepath, ":t") .. " (" .. (state.sheet_name or "Sheet1") .. ")")
   table.insert(lines, "local result = read_xlsx(var('xlsx_file'), {")
   table.insert(lines, "  sheet = var('xlsx_sheet'),")
-  table.insert(lines, "  headers = true,")
+  table.insert(lines, "  headers = " .. tostring(use_headers) .. ",")
   table.insert(lines, "})")
-
-  -- Check if column mapping is needed (names differ from originals)
-  local needs_mapping = false
-  if state.columns then
-    for _, col in ipairs(state.columns) do
-      if col.original_name and col.original_name ~= col.name then
-        needs_mapping = true
-        break
-      end
-    end
-  end
-
-  if needs_mapping and state.columns then
-    table.insert(lines, "")
-    table.insert(lines, "-- Column mapping")
-    table.insert(lines, "local mapped = {}")
-    table.insert(lines, "for _, row in ipairs(result.rows) do")
-    table.insert(lines, "  table.insert(mapped, {")
-    for _, col in ipairs(state.columns) do
-      local src = col.original_name or col.name
-      table.insert(lines, string.format('    %s = row["%s"],', col.name, src))
-    end
-    table.insert(lines, "  })")
-    table.insert(lines, "end")
-    table.insert(lines, "return data(mapped)")
-  else
-    table.insert(lines, "return data(result.rows)")
-  end
-
+  table.insert(lines, "return data(result.rows)")
   table.insert(lines, "")
 
-  -- SQL block to insert data
-  if state.mode == "create_insert" then
-    -- For create_insert, generate a CREATE TABLE block first
+  if state.mode == "create_insert" and state.columns then
     table.insert(lines, "--@block create_table")
-    table.insert(lines, "--@server " .. state.server_name)
-    table.insert(lines, "--@database " .. state.database_name)
+    table.insert(lines, "--@server " .. (state.server_name or ""))
+    table.insert(lines, "--@database " .. (state.database_name or ""))
     table.insert(lines, "--@description Create target table")
     table.insert(lines, "--@continue_on_error")
 
-    -- Build CREATE TABLE from inferred types
     local col_defs = {}
-    if state.columns then
-      for _, col in ipairs(state.columns) do
-        local sql_type = "NVARCHAR(255)"
-        if col.type == "number" then
-          sql_type = "FLOAT"
-        elseif col.type == "boolean" then
-          sql_type = "BIT"
-        elseif col.type == "date" then
-          sql_type = "DATETIME"
-        end
-        table.insert(col_defs, string.format("  [%s] %s NULL", col.name, sql_type))
+    for _, col in ipairs(state.columns) do
+      local sql_type = "NVARCHAR(255)"
+      if col.type == "number" then sql_type = "FLOAT"
+      elseif col.type == "boolean" then sql_type = "BIT"
+      elseif col.type == "date" then sql_type = "DATETIME"
       end
+      table.insert(col_defs, string.format("  [%s] %s NULL", col.name, sql_type))
     end
 
-    table.insert(lines, "CREATE TABLE " .. state.table_name .. " (")
+    table.insert(lines, "CREATE TABLE " .. (state.table_name or "dbo.ImportTable") .. " (")
     table.insert(lines, table.concat(col_defs, ",\n"))
     table.insert(lines, ")")
     table.insert(lines, "")
   end
 
-  -- Insert block
   table.insert(lines, "--@block import_data")
-  table.insert(lines, "--@server " .. state.server_name)
-  table.insert(lines, "--@database " .. state.database_name)
+  table.insert(lines, "--@server " .. (state.server_name or ""))
+  table.insert(lines, "--@database " .. (state.database_name or ""))
   table.insert(lines, "--@input read_excel")
-  table.insert(lines, "--@mode " .. mode_to_etl_mode(state.mode))
-  table.insert(lines, "--@target " .. state.table_name)
-  table.insert(lines, "--@description Insert Excel data into " .. state.table_name)
+  table.insert(lines, "--@mode " .. mode_to_etl_mode(state.mode or "insert"))
+  table.insert(lines, "--@target " .. (state.table_name or "dbo.ImportTable"))
+  table.insert(lines, "--@description Insert Excel data into " .. (state.table_name or "dbo.ImportTable"))
   table.insert(lines, "SELECT * FROM @input")
 
   return table.concat(lines, "\n")
 end
 
----Step 7: Generate script and show in buffer or execute
----@param state ImportWizardState
-local function step_generate(state)
-  local script = generate_ssns_script(state)
+-- ============================================================================
+-- Import Wizard (single-window TUI)
+-- ============================================================================
 
-  vim.ui.select({
-    "Open in new buffer (review & edit before running)",
-    "Execute immediately",
-  }, {
-    prompt = "Output:",
-  }, function(_, idx)
-    if not idx then
-      notify_info("Import cancelled.")
+---Show the import wizard window
+---@param state ImportState
+local function show_wizard(state)
+  -- Close existing float
+  if current_float then
+    pcall(function() current_float:close() end)
+    current_float = nil
+  end
+
+  local cb = ContentBuilder.new()
+
+  -- ── FILE section ──
+  cb:blank()
+  cb:styled("  FILE", "section")
+  cb:styled("  " .. string.rep("─", 56), "muted")
+
+  cb:embedded_input("filepath", {
+    label = "  File Path    ",
+    value = state.filepath or "",
+    placeholder = "(path to .xlsx file — Alt+O to browse)",
+    width = 40,
+    on_submit = function(_, value)
+      sync_state(state)
+      state.filepath = value
+      load_sheets(state)
+      if state.sheet_name then
+        load_preview(state)
+      end
+      show_wizard(state)
+    end,
+  })
+
+  cb:embedded_dropdown("sheet", {
+    label = "  Sheet        ",
+    options = #state.sheet_options > 0 and state.sheet_options or {{ value = "", label = "(load file first)" }},
+    selected = state.sheet_name,
+    width = 30,
+    on_change = function(_, value)
+      sync_state(state)
+      state.sheet_name = value
+      load_preview(state)
+      show_wizard(state)
+    end,
+  })
+
+  cb:embedded_dropdown("headers", {
+    label = "  Headers      ",
+    options = {
+      { value = "yes", label = "Yes (row 1 is headers)" },
+      { value = "no", label = "No (generate column names)" },
+    },
+    selected = state.headers,
+    width = 28,
+    on_change = function(_, value)
+      sync_state(state)
+      state.headers = value
+      load_preview(state)
+      show_wizard(state)
+    end,
+  })
+
+  cb:blank()
+
+  -- ── DESTINATION section ──
+  cb:styled("  DESTINATION", "section")
+  cb:styled("  " .. string.rep("─", 56), "muted")
+
+  cb:embedded_dropdown("server", {
+    label = "  Server       ",
+    options = #state.server_options > 0 and state.server_options or {{ value = "", label = "(no servers available)" }},
+    selected = state.server_name,
+    width = 30,
+    on_change = function(_, value)
+      sync_state(state)
+      state.server_name = value
+      load_databases(state)
+      show_wizard(state)
+    end,
+  })
+
+  cb:embedded_dropdown("database", {
+    label = "  Database     ",
+    options = #state.database_options > 0 and state.database_options or {{ value = "", label = "(select server first)" }},
+    selected = state.database_name,
+    width = 30,
+  })
+
+  cb:embedded_input("table_name", {
+    label = "  Table        ",
+    value = state.table_name or "",
+    placeholder = "dbo.TableName",
+    width = 30,
+  })
+
+  cb:embedded_dropdown("mode", {
+    label = "  Mode         ",
+    options = {
+      { value = "create_insert", label = "Create table & insert" },
+      { value = "insert", label = "Insert into existing" },
+      { value = "truncate_insert", label = "Truncate & insert" },
+    },
+    selected = state.mode,
+    width = 26,
+  })
+
+  cb:blank()
+
+  -- ── COLUMN PREVIEW section ──
+  cb:styled("  COLUMN PREVIEW", "section")
+  cb:styled("  " .. string.rep("─", 56), "muted")
+
+  local preview_cb = build_column_preview(state)
+  local preview_line_count = preview_cb:line_count()
+  local container_height = math.max(5, math.min(20, preview_line_count + 1))
+
+  cb:container("column_preview", {
+    height = container_height,
+    content_builder = preview_cb,
+    scrollbar = true,
+    focusable = true,
+    border = "rounded",
+  })
+
+  cb:blank()
+
+  -- ── Controls footer ──
+  cb:styled("  " .. string.rep("─", 56), "muted")
+  cb:spans({
+    { text = "  " },
+    { text = "s", style = "key" },
+    { text = " Execute  ", style = "muted" },
+    { text = "g", style = "key" },
+    { text = " Generate .ssns  ", style = "muted" },
+    { text = "p", style = "key" },
+    { text = " Full Preview  ", style = "muted" },
+    { text = "Alt+O", style = "key" },
+    { text = " Browse", style = "muted" },
+  })
+  cb:spans({
+    { text = "  " },
+    { text = "q/Esc", style = "key" },
+    { text = " Close  ", style = "muted" },
+    { text = "Enter", style = "key" },
+    { text = " Activate field", style = "muted" },
+  })
+  cb:blank()
+
+  -- ── Build keymaps ──
+  local keymaps = {}
+
+  -- Cancel
+  keymaps["q"] = function()
+    if current_float then
+      current_float:close()
+      current_float = nil
+    end
+  end
+  keymaps["<Esc>"] = keymaps["q"]
+
+  -- Submit (execute immediately)
+  keymaps["s"] = function()
+    sync_state(state)
+
+    -- Validate
+    if not state.filepath or state.filepath == "" then
+      notify_error("File path is required.") return
+    end
+    if not state.server_name or state.server_name == "" then
+      notify_error("Server is required.") return
+    end
+    if not state.database_name or state.database_name == "" then
+      notify_error("Database is required.") return
+    end
+    if not state.table_name or state.table_name == "" then
+      notify_error("Table name is required.") return
+    end
+
+    local script = generate_ssns_script(state)
+
+    if current_float then
+      current_float:close()
+      current_float = nil
+    end
+
+    local Etl = require("nvim-ssns.etl")
+    local EtlParser = require("nvim-ssns.etl.parser")
+
+    local parse_ok, parsed = pcall(EtlParser.parse, script, "import")
+    if not parse_ok then
+      notify_error("Failed to parse generated script: " .. tostring(parsed))
       return
     end
 
-    if idx == 1 then
-      -- Open in new buffer
-      vim.cmd("enew")
-      local buf = vim.api.nvim_get_current_buf()
-      vim.bo[buf].filetype = "ssns"
-      vim.bo[buf].buftype = ""
+    notify_info("Executing import...")
+    Etl.execute(parsed)
+  end
 
-      -- Set a suggested filename
-      local suggested_name = vim.fn.fnamemodify(state.filepath, ":t:r") .. "_import.ssns"
-      vim.api.nvim_buf_set_name(buf, suggested_name)
+  -- Generate .ssns script in new buffer
+  keymaps["g"] = function()
+    sync_state(state)
 
-      local lines = vim.split(script, "\n")
-      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-
-      notify_info("Import script generated. Review and run with :SSNSEtl")
-    else
-      -- Execute immediately
-      local Etl = require("nvim-ssns.etl")
-      local EtlParser = require("nvim-ssns.etl.parser")
-
-      local parse_ok, parsed = pcall(EtlParser.parse, script, "import")
-      if not parse_ok then
-        notify_error("Failed to parse generated script: " .. tostring(parsed))
-        return
-      end
-
-      notify_info("Executing import...")
-      Etl.execute(parsed)
+    if not state.filepath or state.filepath == "" then
+      notify_error("File path is required.") return
     end
-  end)
+
+    local script = generate_ssns_script(state)
+
+    if current_float then
+      current_float:close()
+      current_float = nil
+    end
+
+    vim.cmd("enew")
+    local buf = vim.api.nvim_get_current_buf()
+    vim.bo[buf].filetype = "ssns"
+    vim.bo[buf].buftype = ""
+
+    local suggested_name = vim.fn.fnamemodify(state.filepath, ":t:r") .. "_import.ssns"
+    vim.api.nvim_buf_set_name(buf, suggested_name)
+
+    local script_lines = vim.split(script, "\n")
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, script_lines)
+
+    notify_info("Import script generated. Review and run with :SSNSEtl")
+  end
+
+  -- Full preview
+  keymaps["p"] = function()
+    sync_state(state)
+    if state.filepath and state.filepath ~= "" then
+      M.preview_xlsx(state.filepath)
+    else
+      notify_error("Enter a file path first.")
+    end
+  end
+
+  -- OS file picker
+  keymaps["<A-o>"] = function()
+    open_file_picker(function(filepath)
+      if filepath then
+        sync_state(state)
+        state.filepath = filepath
+        load_sheets(state)
+        if state.sheet_name then
+          load_preview(state)
+        end
+        show_wizard(state)
+      end
+    end)
+  end
+
+  -- Create the float
+  current_float = UiFloat.create(nil, {
+    title = " Import Excel ",
+    title_pos = "center",
+    footer = " ? = Help ",
+    border = "rounded",
+    width = 68,
+    centered = true,
+    default_keymaps = false,
+    keymaps = keymaps,
+    content_builder = cb,
+    scrollbar = true,
+  })
 end
 
----Run the full import wizard
+---Run the import wizard
 ---@param filepath string? Optional pre-selected file path
 function M.import_wizard(filepath)
   if not has_xlsx() then
@@ -496,33 +642,38 @@ function M.import_wizard(filepath)
     return
   end
 
-  ---@type ImportWizardState
+  ---@type ImportState
   local state = {
-    filepath = filepath,
+    filepath = filepath and vim.fn.expand(filepath) or nil,
+    sheet_options = {},
+    server_options = build_server_options(),
+    database_options = {},
+    headers = "yes",
+    mode = "create_insert",
   }
 
-  -- Chain wizard steps
-  local function after_table(s) step_generate(s) end
-  local function after_database(s) step_table_and_mode(s, after_table) end
-  local function after_server(s) step_select_database(s, after_database) end
-  local function after_preview(s) step_select_server(s, after_server) end
-  local function after_sheet(s) step_preview(s, after_preview) end
-  local function after_file(s) step_select_sheet(s, after_sheet) end
-
-  if filepath then
-    -- Skip file selection if already provided
-    state.filepath = vim.fn.expand(filepath)
-    if vim.fn.filereadable(state.filepath) == 0 then
-      notify_error("File not found: " .. state.filepath)
-      return
+  -- Pre-populate if filepath provided
+  if state.filepath and vim.fn.filereadable(state.filepath) == 1 then
+    load_sheets(state)
+    if state.sheet_name then
+      load_preview(state)
     end
-    step_select_sheet(state, after_sheet)
-  else
-    step_select_file(state, after_file)
   end
+
+  -- Pre-populate server/database
+  if #state.server_options > 0 then
+    state.server_name = state.server_options[1].value
+    load_databases(state)
+  end
+
+  show_wizard(state)
 end
 
----Preview an Excel file's contents in a floating window
+-- ============================================================================
+-- Excel Preview (standalone, result_table based)
+-- ============================================================================
+
+---Show a standalone data preview for an Excel file
 ---@param filepath string? Optional file path
 function M.preview_xlsx(filepath)
   if not has_xlsx() then
@@ -530,149 +681,196 @@ function M.preview_xlsx(filepath)
     return
   end
 
-  local function show_preview(fpath)
+  ---@param fpath string
+  ---@param sheet_name string?
+  local function show_preview(fpath, sheet_name)
     local XlsxReader = require("nvim-ssns.etl.xlsx_reader")
 
-    -- Get file info
+    -- Get file info for sheet list
     local info_ok, info = pcall(XlsxReader.info, fpath)
-    if not info_ok then
+    if not info_ok or not info then
       notify_error("Failed to read file: " .. tostring(info))
       return
     end
 
-    -- If multiple sheets, let user pick
-    local function preview_sheet(sheet_name)
-      local ok, result = pcall(XlsxReader.read, fpath, {
-        sheet = sheet_name,
-        headers = true,
-        max_rows = 50,
-      })
+    -- Pick sheet
+    local target_sheet = sheet_name or (info.sheets[1] and info.sheets[1].name)
+    if not target_sheet then
+      notify_error("No sheets found in file.")
+      return
+    end
 
-      if not ok then
-        notify_error("Failed to read sheet: " .. tostring(result))
-        return
-      end
+    -- Read data
+    local ok, result = pcall(XlsxReader.read, fpath, {
+      sheet = target_sheet,
+      headers = true,
+      max_rows = 100,
+    })
 
-      local ContentBuilder = require("nvim-float.content")
-      local cb = ContentBuilder.new()
+    if not ok or not result then
+      notify_error("Failed to read sheet: " .. tostring(result))
+      return
+    end
 
-      cb:header("Excel Preview: " .. vim.fn.fnamemodify(fpath, ":t"))
-      cb:separator("═", 80)
-      cb:spans({
-        { text = "  Sheet: ", style = "muted" },
-        { text = sheet_name, style = "string" },
-        { text = "  |  Rows: ", style = "muted" },
-        { text = tostring(result.row_count) .. (result.row_count >= 50 and "+" or ""), style = "number" },
-        { text = "  |  Columns: ", style = "muted" },
-        { text = tostring(#result.columns), style = "number" },
-      })
-      cb:separator("─", 80)
-      cb:blank()
+    -- Build styled content
+    local cb = ContentBuilder.new()
 
-      -- Column headers
-      local col_widths = {}
+    cb:blank()
+    cb:header("  " .. vim.fn.fnamemodify(fpath, ":t"))
+    cb:blank()
+
+    -- File info
+    cb:label_value("  Sheet", target_sheet, { label_style = "muted", value_style = "string" })
+    cb:label_value("  Rows", tostring(result.row_count) .. (result.row_count >= 100 and "+" or ""), { label_style = "muted", value_style = "number" })
+    cb:label_value("  Columns", tostring(#result.columns), { label_style = "muted", value_style = "number" })
+
+    if info.sheet_count > 1 then
+      local sheet_names = {}
+      for _, s in ipairs(info.sheets) do table.insert(sheet_names, s.name) end
+      cb:label_value("  Sheets", table.concat(sheet_names, ", "), { label_style = "muted", value_style = "muted" })
+    end
+
+    cb:blank()
+
+    -- Build result table
+    if #result.columns > 0 and #result.rows > 0 then
+      -- Calculate column widths
+      local col_defs = {}
       for _, col in ipairs(result.columns) do
-        col_widths[col.name] = math.max(#col.name, 8)
-        -- Scan data for width
-        for i = 1, math.min(10, #result.rows) do
+        local max_w = math.max(#col.name, 6)
+        for i = 1, math.min(20, #result.rows) do
           local val = result.rows[i][col.name]
           if val ~= nil then
-            col_widths[col.name] = math.min(25, math.max(col_widths[col.name], #tostring(val)))
+            max_w = math.max(max_w, math.min(25, #tostring(val)))
           end
         end
+        table.insert(col_defs, { name = col.name, width = max_w })
       end
 
-      -- Header row
-      local header_parts = {}
-      for _, col in ipairs(result.columns) do
-        local w = col_widths[col.name]
-        table.insert(header_parts, { text = string.format(" %-" .. w .. "s ", col.name), style = "keyword" })
-        table.insert(header_parts, { text = "│", style = "muted" })
-      end
-      cb:spans(header_parts)
-      cb:separator("─", 80)
+      local row_num_width = math.max(2, #tostring(#result.rows))
 
-      -- Data rows
+      cb:begin_result_table()
+      cb:result_top_border_with_rownum(col_defs, "ascii", row_num_width)
+      cb:result_header_row_with_rownum(col_defs, "ascii", row_num_width)
+      cb:result_separator_with_rownum(col_defs, "ascii", row_num_width)
+
       for i, row in ipairs(result.rows) do
-        local parts = {}
-        for _, col in ipairs(result.columns) do
-          local w = col_widths[col.name]
+        local cell_lines = {}
+        for ci, col in ipairs(result.columns) do
           local val = row[col.name]
-          local display = val ~= nil and tostring(val) or "NULL"
-          if #display > w then display = display:sub(1, w - 3) .. "..." end
-
-          local style = nil
-          if val == nil then
-            style = "comment"
-          elseif col.type == "number" then
-            style = "number"
-          elseif col.type == "date" then
-            style = "string"
-          elseif col.type == "boolean" then
-            style = "keyword"
-          end
-
-          table.insert(parts, { text = string.format(" %-" .. w .. "s ", display), style = style })
-          table.insert(parts, { text = "│", style = "muted" })
+          local is_null = val == nil
+          local display = is_null and "NULL" or tostring(val)
+          table.insert(cell_lines, {
+            lines = { display },
+            width = col_defs[ci].width,
+            datatype = type_to_datatype(col.type),
+            is_null = is_null,
+          })
         end
-        cb:spans(parts)
-
-        if i % 2 == 0 then
-          -- Visual separator every few rows for readability
-        end
+        cb:result_multiline_data_row(cell_lines, "datatype", "ascii", true, i, row_num_width)
       end
 
-      cb:blank()
-      cb:styled("  q: close | s: switch sheet", "comment")
+      cb:result_bottom_border_with_rownum(col_defs, "ascii", row_num_width)
+    else
+      cb:styled("  (no data)", "muted")
+    end
 
-      local Float = require("nvim-float.window")
-      local win = Float.create_styled(cb, {
-        title = " Excel Preview ",
-        min_width = 80,
-        max_height = 50,
-        center = true,
-        focusable = true,
-        footer = "q: close | s: switch sheet",
-      })
+    cb:blank()
 
-      if win then
-        vim.keymap.set("n", "q", function() win:close() end, { buffer = win.buf, nowait = true })
-        vim.keymap.set("n", "<Esc>", function() win:close() end, { buffer = win.buf, nowait = true })
+    -- Controls
+    local controls_parts = {
+      { text = "  " },
+      { text = "q/Esc", style = "key" },
+      { text = " Close", style = "muted" },
+    }
+    if info.sheet_count > 1 then
+      table.insert(controls_parts, { text = "   " })
+      table.insert(controls_parts, { text = "s", style = "key" })
+      table.insert(controls_parts, { text = " Switch sheet", style = "muted" })
+    end
+    cb:spans(controls_parts)
+    cb:blank()
 
-        -- Switch sheet
-        if info.sheet_count > 1 then
-          vim.keymap.set("n", "s", function()
-            win:close()
-            local sheet_items = {}
-            for _, s in ipairs(info.sheets) do
-              table.insert(sheet_items, s.name .. " (" .. (s.dimension or "empty") .. ")")
-            end
-            vim.ui.select(sheet_items, { prompt = "Select sheet:" }, function(_, idx)
-              if idx then
-                preview_sheet(info.sheets[idx].name)
-              end
-            end)
-          end, { buffer = win.buf, nowait = true })
+    -- Create float
+    local preview_keymaps = {}
+
+    preview_keymaps["q"] = function()
+      -- will be set with the window reference below
+    end
+    preview_keymaps["<Esc>"] = preview_keymaps["q"]
+
+    if info.sheet_count > 1 then
+      preview_keymaps["s"] = function()
+        -- Close and show sheet picker
+        local sheet_items = {}
+        for _, s in ipairs(info.sheets) do
+          table.insert(sheet_items, s.name .. " (" .. (s.dimension or "empty") .. ")")
         end
+        vim.ui.select(sheet_items, { prompt = "Select sheet:" }, function(_, idx)
+          if idx then
+            show_preview(fpath, info.sheets[idx].name)
+          end
+        end)
       end
     end
 
-    -- Start with first sheet or let user pick
-    if info.sheet_count == 1 then
-      preview_sheet(info.sheets[1].name)
-    else
-      local items = {}
-      for _, s in ipairs(info.sheets) do
-        table.insert(items, s.name .. " (" .. (s.dimension or "empty") .. ")")
-      end
-      vim.ui.select(items, { prompt = "Select sheet to preview:" }, function(_, idx)
-        if idx then
-          preview_sheet(info.sheets[idx].name)
+    -- Calculate window width from content
+    local total_width = 4 -- borders + padding
+    if #result.columns > 0 then
+      local row_num_width = math.max(2, #tostring(#result.rows))
+      total_width = total_width + row_num_width + 3
+      for _, col in ipairs(result.columns) do
+        local max_w = math.max(#col.name, 6)
+        for i = 1, math.min(20, #result.rows) do
+          local val = result.rows[i][col.name]
+          if val ~= nil then
+            max_w = math.max(max_w, math.min(25, #tostring(val)))
+          end
         end
-      end)
+        total_width = total_width + max_w + 3
+      end
+    end
+    total_width = math.max(50, math.min(total_width, vim.o.columns - 4))
+
+    local win = UiFloat.create(nil, {
+      title = " Excel Preview ",
+      title_pos = "center",
+      border = "rounded",
+      width = total_width,
+      max_height = math.min(50, vim.o.lines - 4),
+      centered = true,
+      default_keymaps = false,
+      content_builder = cb,
+      scrollbar = true,
+      keymaps = preview_keymaps,
+    })
+
+    -- Wire up close keymaps with actual window reference
+    if win then
+      local close_fn = function()
+        if win:is_valid() then win:close() end
+      end
+      vim.keymap.set("n", "q", close_fn, { buffer = win.bufnr, nowait = true })
+      vim.keymap.set("n", "<Esc>", close_fn, { buffer = win.bufnr, nowait = true })
+
+      if info.sheet_count > 1 then
+        vim.keymap.set("n", "s", function()
+          if win:is_valid() then win:close() end
+          local sheet_items = {}
+          for _, s in ipairs(info.sheets) do
+            table.insert(sheet_items, s.name .. " (" .. (s.dimension or "empty") .. ")")
+          end
+          vim.ui.select(sheet_items, { prompt = "Select sheet:" }, function(_, idx)
+            if idx then
+              show_preview(fpath, info.sheets[idx].name)
+            end
+          end)
+        end, { buffer = win.bufnr, nowait = true })
+      end
     end
   end
 
+  -- Entry point: determine filepath
   if filepath then
     local fpath = vim.fn.expand(filepath)
     if vim.fn.filereadable(fpath) == 0 then
@@ -681,20 +879,35 @@ function M.preview_xlsx(filepath)
     end
     show_preview(fpath)
   else
-    vim.ui.input({
-      prompt = "Excel file to preview: ",
-      completion = "file",
-    }, function(input)
-      if not input or input == "" then return end
-      local fpath = vim.fn.expand(input)
-      if vim.fn.filereadable(fpath) == 0 then
-        notify_error("File not found: " .. fpath)
-        return
-      end
-      show_preview(fpath)
-    end)
+    -- Use OS file picker on Windows, fallback to vim.ui.input
+    if vim.fn.has("win32") == 1 then
+      open_file_picker(function(fpath)
+        if fpath and vim.fn.filereadable(fpath) == 1 then
+          show_preview(fpath)
+        elseif fpath then
+          notify_error("File not found: " .. fpath)
+        end
+      end)
+    else
+      vim.ui.input({
+        prompt = "Excel file to preview: ",
+        completion = "file",
+      }, function(input)
+        if not input or input == "" then return end
+        local fpath = vim.fn.expand(input)
+        if vim.fn.filereadable(fpath) == 0 then
+          notify_error("File not found: " .. fpath)
+          return
+        end
+        show_preview(fpath)
+      end)
+    end
   end
 end
+
+-- ============================================================================
+-- Command Registration
+-- ============================================================================
 
 ---Register import commands
 function M.register()
