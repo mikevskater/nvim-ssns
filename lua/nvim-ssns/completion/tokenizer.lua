@@ -894,14 +894,30 @@ function Tokenizer.tokenize(text)
 
     elseif state == STATE.IN_BRACKET_ID then
       current_token = current_token .. char
-      col = col + 1
 
       if char == ']' then
         -- End of bracketed identifier
         emit_token(TOKEN_TYPE.BRACKET_ID)
         state = STATE.NORMAL
+        col = col + 1
+        i = i + 1
+      elseif char == '\n' then
+        line = line + 1
+        col = 1
+        i = i + 1
+      elseif char == '\r' then
+        if next_char == '\n' then
+          current_token = current_token .. '\n'
+          i = i + 2
+        else
+          i = i + 1
+        end
+        line = line + 1
+        col = 1
+      else
+        col = col + 1
+        i = i + 1
       end
-      i = i + 1
 
     elseif state == STATE.IN_BLOCK_COMMENT then
       -- Check for nested comment start /*

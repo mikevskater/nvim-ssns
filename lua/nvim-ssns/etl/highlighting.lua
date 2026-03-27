@@ -3,6 +3,8 @@
 ---Each SQL block uses its own server/database connection for full schema resolution
 local EtlHighlighting = {}
 
+local HighlightUtils = require('nvim-ssns.highlighting.utils')
+
 local NAMESPACE = "ssns_etl_semantic"
 local ns_id = nil
 
@@ -163,26 +165,20 @@ local function highlight_sql_block(bufnr, block, lines, config)
   -- We don't have statement chunks for ETL blocks, pass nil
   local classified = Classifier.classify(tokens, nil, connection, config)
 
-  -- Apply highlights with line offset
-  -- Token positions are relative to block content (1-indexed starting at line 1)
-  -- We need to offset them to buffer coordinates
-  local line_offset = content_start_line - 1  -- Convert to buffer 0-indexed base
+  -- Apply highlights with line offset (handles multi-line tokens correctly)
+  -- Token positions are 1-indexed relative to block content
+  -- content_start_line is 1-indexed buffer line where SQL starts
+  -- Adjusted 1-indexed buffer line = token.line + (content_start_line - 1)
+  local line_offset = content_start_line - 1
 
   for _, item in ipairs(classified) do
     if item.highlight_group and item.token then
-      -- Token line is 1-indexed relative to block content
-      -- Buffer line = token.line - 1 (0-indexed) + content_start_line - 1 (offset)
-      local buf_line = item.token.line - 1 + line_offset
-      local col_start = item.token.col - 1
-      local col_end = col_start + #item.token.text
-
-      -- Bounds check
-      if buf_line >= 0 and buf_line < #lines then
-        local line_len = #lines[buf_line + 1]
-        if col_start >= 0 and col_end <= line_len then
-          vim.api.nvim_buf_add_highlight(bufnr, ns_id, item.highlight_group, buf_line, col_start, col_end)
-        end
-      end
+      HighlightUtils.apply_token_highlight(
+        bufnr, ns_id,
+        item.token.line + line_offset, item.token.col, item.token.text,
+        item.highlight_group, lines,
+        { use_add_highlight = true }
+      )
     end
   end
 end

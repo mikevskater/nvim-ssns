@@ -6,6 +6,7 @@
 local ThreadedHighlighting = {}
 
 local Coordinator = require('nvim-ssns.async.thread.coordinator')
+local HighlightUtils = require('nvim-ssns.highlighting.utils')
 
 ---Active highlighting tasks per buffer
 ---@type table<number, string>
@@ -149,24 +150,20 @@ function ThreadedHighlighting.update(bufnr, on_complete)
         ns_id = vim.api.nvim_create_namespace("ssns_semantic")
       end
 
+      -- Re-fetch buffer lines (original capture may be stale after async work)
+      local fresh_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
       -- Clear existing highlights
       vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
 
-      -- Apply token highlights
+      -- Apply token highlights (handles multi-line tokens correctly)
       for _, item in ipairs(classified) do
         if item.highlight_group then
-          -- Convert 1-indexed (tokenizer) to 0-indexed (nvim API)
-          local line = item.token.line - 1
-          local col_start = item.token.col - 1
-          local col_end = col_start + #item.token.text
-
-          -- Ensure we don't go past buffer bounds
-          if line >= 0 and line < #lines then
-            local line_len = #lines[line + 1]
-            if col_start >= 0 and col_end <= line_len then
-              vim.api.nvim_buf_set_extmark(bufnr, ns_id, line, col_start, { end_col = col_end, hl_group = item.highlight_group, priority = 200 })
-            end
-          end
+          HighlightUtils.apply_token_highlight(
+            bufnr, ns_id,
+            item.token.line, item.token.col, item.token.text,
+            item.highlight_group, fresh_lines
+          )
         end
       end
 

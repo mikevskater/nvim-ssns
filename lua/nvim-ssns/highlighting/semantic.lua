@@ -3,6 +3,8 @@
 ---Highlights SQL identifiers (tables, columns, schemas, databases, keywords) using SSNS colors
 local SemanticHighlighter = {}
 
+local HighlightUtils = require('nvim-ssns.highlighting.utils')
+
 local NAMESPACE = "ssns_semantic"
 local ns_id = nil
 local basic_ns_id = nil
@@ -20,8 +22,11 @@ end
 -- Track which buffers have semantic highlighting enabled
 local enabled_buffers = {}
 
--- Pending highlight timers per buffer (for minimal debounce)
+-- Pending semantic highlight timers per buffer (for debounce)
 local pending_timers = {}
+
+-- Pending basic highlight timers per buffer (short debounce to avoid per-keystroke tokenization)
+local basic_pending_timers = {}
 
 -- Track active threaded highlighting tasks per buffer
 local threaded_tasks = {}
@@ -66,6 +71,27 @@ local function schedule_update(bufnr)
   end)
 end
 
+---Schedule a basic highlight update with short debounce
+---Avoids full-buffer retokenization on every keystroke
+---@param bufnr number Buffer number
+local function schedule_basic_update(bufnr)
+  -- Cancel existing timer
+  if basic_pending_timers[bufnr] then
+    vim.fn.timer_stop(basic_pending_timers[bufnr])
+    basic_pending_timers[bufnr] = nil
+  end
+
+  -- 16ms debounce (~1 frame) - fast enough to feel instant, avoids per-keystroke tokenization
+  basic_pending_timers[bufnr] = vim.fn.timer_start(16, function()
+    basic_pending_timers[bufnr] = nil
+    vim.schedule(function()
+      if vim.api.nvim_buf_is_valid(bufnr) and enabled_buffers[bufnr] then
+        SemanticHighlighter.apply_basic_highlighting(bufnr)
+      end
+    end)
+  end)
+end
+
 ---Update semantic highlights using threaded worker when available
 ---Falls back to sync update if threading unavailable
 ---@param bufnr number Buffer number
@@ -87,32 +113,28 @@ end
 ---Apply highlights from classified tokens (used by threaded worker)
 ---@param bufnr number Buffer number
 ---@param tokens table[] Classified tokens with highlight_group
----@param lines string[] Buffer lines for bounds checking
-function SemanticHighlighter._apply_highlights(bufnr, tokens, lines)
+---@param _lines_unused string[]? Deprecated parameter - fresh lines are fetched internally
+function SemanticHighlighter._apply_highlights(bufnr, tokens, _lines_unused)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
 
   ensure_namespaces()
 
+  -- Fetch fresh lines (caller's lines may be stale after async work)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
   -- Clear semantic highlights (basic namespace untouched)
   vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
 
-  -- Apply token highlights
+  -- Apply token highlights (handles multi-line tokens correctly)
   for _, item in ipairs(tokens) do
     if item.highlight_group then
-      -- Convert 1-indexed (tokenizer) to 0-indexed (nvim API)
-      local line = item.line - 1
-      local col_start = item.col - 1
-      local col_end = col_start + #item.text
-
-      -- Ensure we don't go past buffer bounds
-      if line >= 0 and line < #lines then
-        local line_len = #lines[line + 1]
-        if col_start >= 0 and col_end <= line_len then
-          vim.api.nvim_buf_set_extmark(bufnr, ns_id, line, col_start, { end_col = col_end, hl_group = item.highlight_group, priority = 200 })
-        end
-      end
+      HighlightUtils.apply_token_highlight(
+        bufnr, ns_id,
+        item.line, item.col, item.text,
+        item.highlight_group, lines
+      )
     end
   end
 end
@@ -150,8 +172,8 @@ function SemanticHighlighter.setup_buffer(bufnr)
   vim.api.nvim_buf_attach(bufnr, false, {
     on_lines = function(_, buf, _, _, _, _)
       if enabled_buffers[buf] then
-        -- Immediate basic highlighting (keywords, strings, comments — always in sync)
-        SemanticHighlighter.apply_basic_highlighting(buf)
+        -- Debounced basic highlighting (16ms — avoids per-keystroke full tokenization)
+        schedule_basic_update(buf)
         -- Debounced semantic highlighting (DB-aware: tables, columns, schemas)
         schedule_update(buf)
       end
@@ -162,6 +184,10 @@ function SemanticHighlighter.setup_buffer(bufnr)
       if pending_timers[buf] then
         vim.fn.timer_stop(pending_timers[buf])
         pending_timers[buf] = nil
+      end
+      if basic_pending_timers[buf] then
+        vim.fn.timer_stop(basic_pending_timers[buf])
+        basic_pending_timers[buf] = nil
       end
       -- Cancel any active threaded highlighting
       if threaded_tasks[buf] then
@@ -187,6 +213,10 @@ function SemanticHighlighter.disable_buffer(bufnr)
   if pending_timers[bufnr] then
     vim.fn.timer_stop(pending_timers[bufnr])
     pending_timers[bufnr] = nil
+  end
+  if basic_pending_timers[bufnr] then
+    vim.fn.timer_stop(basic_pending_timers[bufnr])
+    basic_pending_timers[bufnr] = nil
   end
   SemanticHighlighter.clear(bufnr)
 end
@@ -247,25 +277,23 @@ function SemanticHighlighter.update(bufnr, cache)
     local Classifier = require('nvim-ssns.highlighting.classifier')
     local classified = Classifier.classify(tokens, cache.chunks, connection, config)
 
-    -- Apply token highlights first
+    -- Apply token highlights (handles multi-line tokens correctly)
     for _, item in ipairs(classified) do
       if item.highlight_group then
-        -- Convert 1-indexed (tokenizer) to 0-indexed (nvim API)
-        local line = item.token.line - 1
-        local col_start = item.token.col - 1
-        local col_end = col_start + #item.token.text
-
-        -- Ensure we don't go past buffer bounds
-        if line >= 0 and line < #lines then
-          local line_len = #lines[line + 1]
-          if col_start >= 0 and col_end <= line_len then
-            vim.api.nvim_buf_set_extmark(bufnr, ns_id, line, col_start, { end_col = col_end, hl_group = item.highlight_group, priority = 200 })
-          end
-        end
+        HighlightUtils.apply_token_highlight(
+          bufnr, ns_id,
+          item.token.line, item.token.col, item.token.text,
+          item.highlight_group, lines
+        )
       end
     end
   end
-  -- Comments are now handled via tokenizer → classifier → highlight flow (no manual detection)
+
+  -- Clear basic highlights — semantic covers all the same tokens plus more
+  -- This avoids redundant double-extmarks for every keyword
+  if basic_ns_id then
+    vim.api.nvim_buf_clear_namespace(bufnr, basic_ns_id, 0, -1)
+  end
 end
 
 ---Clear semantic highlights for a buffer
@@ -467,18 +495,12 @@ function SemanticHighlighter.apply_basic_highlighting(bufnr)
     end
 
     if highlight_group then
-      -- Convert 1-indexed (tokenizer) to 0-indexed (nvim API)
-      local line = token.line - 1
-      local col_start = token.col - 1
-      local col_end = col_start + #token.text
-
-      -- Ensure we don't go past buffer bounds
-      if line >= 0 and line < #lines then
-        local line_len = #lines[line + 1]
-        if col_start >= 0 and col_end <= line_len then
-          vim.api.nvim_buf_add_highlight(bufnr, basic_ns_id, highlight_group, line, col_start, col_end)
-        end
-      end
+      HighlightUtils.apply_token_highlight(
+        bufnr, basic_ns_id,
+        token.line, token.col, token.text,
+        highlight_group, lines,
+        { use_add_highlight = true }
+      )
     end
   end
 end

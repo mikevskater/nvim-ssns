@@ -740,6 +740,12 @@ function TreeRender.render(UiTree, opts)
     end
   end
 
+  -- Guard: buffer may have been wiped (bufhidden=wipe) after a dialog closed.
+  -- Re-open to ensure buffer + window exist before rendering.
+  if not Buffer.bufnr or not vim.api.nvim_buf_is_valid(Buffer.bufnr) then
+    Buffer.open()
+  end
+
   -- Render to buffer using CB's diff-based pipeline
   local lines = cb:render_to_buffer(Buffer.bufnr, Buffer.tree_ns_id)
 
