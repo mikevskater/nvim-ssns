@@ -454,6 +454,15 @@ function EtlExecutor:_create_environment(block)
     -- Global macro library
     macros = Macros.get_all(),
 
+    -- Excel import helper
+    read_xlsx = function(filepath, opts)
+      local reader_ok, XlsxReader = pcall(require, "nvim-ssns.etl.xlsx_reader")
+      if not reader_ok then
+        error("read_xlsx() failed to load: " .. tostring(XlsxReader), 2)
+      end
+      return XlsxReader.read(filepath, opts)
+    end,
+
     -- Redirect print to log
     print = function(...)
       local args = { ... }

@@ -15,6 +15,7 @@ function M.register()
   local testing = require('nvim-ssns.commands.testing')
   local features = require('nvim-ssns.commands.features')
   local cast = require('nvim-ssns.commands.cast')
+  local import = require('nvim-ssns.commands.import')
 
   -- Register each module's commands
   tree.register()
@@ -25,6 +26,7 @@ function M.register()
   testing.register()
   features.register()
   cast.register()
+  import.register()
 
   -- Note: ETL commands are lazy-loaded via ftplugin/ssns.lua
   -- when .ssns files are opened (see M.setup_etl below)

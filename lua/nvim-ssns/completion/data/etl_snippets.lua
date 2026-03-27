@@ -142,6 +142,32 @@ EtlSnippets.samples = {
       "${0:SELECT * FROM @input}",
     },
   },
+  {
+    label = "--newimportxlsx",
+    detail = "Import Excel file into database",
+    description = "Two-block pipeline: Lua block reads an Excel file via read_xlsx(), SQL block inserts data into a target table.",
+    body = {
+      "--@var xlsx_file = ${1:C:/path/to/file.xlsx}",
+      "--@var xlsx_sheet = ${2:Sheet1}",
+      "",
+      "--@lua read_excel",
+      "--@description Read data from Excel file",
+      "local result = read_xlsx(var('xlsx_file'), {",
+      "\tsheet = var('xlsx_sheet'),",
+      "\theaders = true,",
+      "})",
+      "return data(result.rows)",
+      "",
+      "--@block import_data",
+      "--@server ${3:server}",
+      "--@database ${4:database}",
+      "--@input read_excel",
+      "--@mode ${5:insert}",
+      "--@target ${6:dbo.target_table}",
+      "--@description Import Excel data into ${6:dbo.target_table}",
+      "${0:SELECT * FROM @input}",
+    },
+  },
 }
 
 -- ============================================================================
