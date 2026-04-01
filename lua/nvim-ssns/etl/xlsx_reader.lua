@@ -11,6 +11,7 @@ local XlsxReader = {}
 ---@field columns table<string, string>? Column rename map: {["Excel Col"] = "sql_col"}
 ---@field sanitize_names boolean? Sanitize column names for SQL (default: true)
 ---@field date_columns string[]|integer[]? Column names or indices to force-treat as dates
+---@field empty_row_limit integer? Stop after N consecutive empty rows (default: 50)
 
 ---@class XlsxReadResult
 ---@field rows table[] Array of keyed row objects
@@ -222,7 +223,18 @@ function XlsxReader.read(filepath, opts)
     col_types[col] = { string = 0, number = 0, boolean = 0, date = 0, ["nil"] = 0 }
   end
 
+  -- Build ordered column list (preserves Excel column order)
+  local ordered_col_indices = {}
+  for col = min_col, max_col do
+    table.insert(ordered_col_indices, col)
+  end
+
   -- Read data rows
+  -- Stop after N consecutive empty rows to handle Excel files with formatting
+  -- extending far beyond actual data (e.g., formatting to row 1M)
+  local empty_row_limit = opts.empty_row_limit or 50
+  local consecutive_empty = 0
+
   local rows = {}
   local row_count = 0
   for row = data_start_row, max_row do
@@ -231,11 +243,25 @@ function XlsxReader.read(filepath, opts)
     local row_obj = {}
     local has_value = false
 
-    for col = min_col, max_col do
+    for _, col in ipairs(ordered_col_indices) do
       local col_name = col_names[col]
       local cell = reader.get_cell_data(sheet, row, col)
 
+      -- Check for actual non-empty value (not just whitespace)
+      local cell_has_value = false
       if cell and cell.value ~= nil then
+        local value = cell.value
+        -- Treat whitespace-only strings as empty
+        if type(value) == "string" then
+          if value:match("%S") then
+            cell_has_value = true
+          end
+        else
+          cell_has_value = true
+        end
+      end
+
+      if cell_has_value then
         has_value = true
         local value = cell.value
         local value_type = cell.value_type
@@ -261,23 +287,32 @@ function XlsxReader.read(filepath, opts)
 
         row_obj[col_name] = value
       else
+        -- Explicitly set nil columns so they appear in pairs() and preserve column presence
+        row_obj[col_name] = vim.NIL
         col_types[col]["nil"] = col_types[col]["nil"] + 1
       end
     end
 
     if has_value then
+      consecutive_empty = 0
       table.insert(rows, row_obj)
       row_count = row_count + 1
+    else
+      consecutive_empty = consecutive_empty + 1
+      if consecutive_empty >= empty_row_limit then
+        break -- Data region ended; remaining rows are empty formatting
+      end
     end
   end
 
-  -- Build column metadata
+  -- Build column metadata (ordered array matching Excel column order)
   local columns = {}
+  local column_order = {} -- ordered list of column names for downstream consumers
   local col_index = 0
-  for col = min_col, max_col do
+  for _, col in ipairs(ordered_col_indices) do
     col_index = col_index + 1
     local counts = col_types[col]
-    -- Determine dominant type
+    -- Determine dominant type (exclude nil counts from comparison)
     local inferred_type = "string"
     local max_count = counts.string
     if counts.number > max_count then
@@ -292,16 +327,19 @@ function XlsxReader.read(filepath, opts)
       inferred_type = "boolean"
     end
 
+    local col_name = col_names[col]
     table.insert(columns, {
-      name = col_names[col],
+      name = col_name,
       type = inferred_type,
       index = col_index,
     })
+    table.insert(column_order, col_name)
   end
 
   return {
     rows = rows,
     columns = columns,
+    column_order = column_order,
     row_count = row_count,
     sheet_name = sheet_name,
   }

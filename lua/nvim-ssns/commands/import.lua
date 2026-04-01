@@ -260,11 +260,12 @@ local function build_column_preview(state)
     local values = {}
     for _, col in ipairs(data.columns) do
       local val = row[col.name]
+      local is_null = val == nil or val == vim.NIL
       table.insert(values, {
-        value = val ~= nil and tostring(val) or "NULL",
+        value = is_null and "NULL" or tostring(val),
         width = col_defs[#values + 1].width,
         datatype = type_to_datatype(col.type),
-        is_null = val == nil,
+        is_null = is_null,
       })
     end
     preview_cb:result_multiline_data_row(
@@ -300,14 +301,6 @@ end
 -- Script Generation
 -- ============================================================================
 
----Map import mode to ETL mode directive value
----@param mode string
----@return string
-local function mode_to_etl_mode(mode)
-  if mode == "truncate_insert" then return "truncate_insert" end
-  return "insert"
-end
-
 ---Generate .ssns script content from wizard state
 ---@param state ImportState
 ---@return string
@@ -315,27 +308,35 @@ local function generate_ssns_script(state)
   local lines = {}
   local escaped_path = state.filepath:gsub("\\", "/")
   local use_headers = state.headers == "yes"
+  local table_name = state.table_name or "dbo.ImportTable"
 
   table.insert(lines, "--@var xlsx_file = " .. escaped_path)
   table.insert(lines, "--@var xlsx_sheet = " .. (state.sheet_name or "Sheet1"))
   table.insert(lines, "")
 
+  -- Lua block: read Excel file and return data with column order preserved
   table.insert(lines, "--@lua read_excel")
   table.insert(lines, "--@description Import from " .. vim.fn.fnamemodify(state.filepath, ":t") .. " (" .. (state.sheet_name or "Sheet1") .. ")")
   table.insert(lines, "local result = read_xlsx(var('xlsx_file'), {")
   table.insert(lines, "  sheet = var('xlsx_sheet'),")
   table.insert(lines, "  headers = " .. tostring(use_headers) .. ",")
   table.insert(lines, "})")
-  table.insert(lines, "return data(result.rows)")
+  table.insert(lines, "return data(result.rows, result.column_order)")
   table.insert(lines, "")
 
+  -- Drop + Create table block (if create_insert mode)
   if state.mode == "create_insert" and state.columns then
     table.insert(lines, "--@block create_table")
     table.insert(lines, "--@server " .. (state.server_name or ""))
     table.insert(lines, "--@database " .. (state.database_name or ""))
-    table.insert(lines, "--@description Create target table")
-    table.insert(lines, "--@continue_on_error")
+    table.insert(lines, "--@description Drop and recreate target table")
 
+    -- DROP IF EXISTS first
+    table.insert(lines, "IF OBJECT_ID('" .. table_name .. "', 'U') IS NOT NULL")
+    table.insert(lines, "  DROP TABLE " .. table_name)
+    table.insert(lines, "GO")
+
+    -- CREATE TABLE with columns in xlsx order
     local col_defs = {}
     for _, col in ipairs(state.columns) do
       local sql_type = "NVARCHAR(255)"
@@ -346,19 +347,29 @@ local function generate_ssns_script(state)
       table.insert(col_defs, string.format("  [%s] %s NULL", col.name, sql_type))
     end
 
-    table.insert(lines, "CREATE TABLE " .. (state.table_name or "dbo.ImportTable") .. " (")
+    table.insert(lines, "CREATE TABLE " .. table_name .. " (")
     table.insert(lines, table.concat(col_defs, ",\n"))
     table.insert(lines, ")")
     table.insert(lines, "")
   end
 
+  -- Truncate block (if truncate_insert mode)
+  if state.mode == "truncate_insert" then
+    table.insert(lines, "--@block truncate_table")
+    table.insert(lines, "--@server " .. (state.server_name or ""))
+    table.insert(lines, "--@database " .. (state.database_name or ""))
+    table.insert(lines, "--@description Truncate target table before import")
+    table.insert(lines, "TRUNCATE TABLE " .. table_name)
+    table.insert(lines, "")
+  end
+
+  -- Insert block: explicit INSERT INTO ... SELECT FROM @input
   table.insert(lines, "--@block import_data")
   table.insert(lines, "--@server " .. (state.server_name or ""))
   table.insert(lines, "--@database " .. (state.database_name or ""))
   table.insert(lines, "--@input read_excel")
-  table.insert(lines, "--@mode " .. mode_to_etl_mode(state.mode or "insert"))
-  table.insert(lines, "--@target " .. (state.table_name or "dbo.ImportTable"))
-  table.insert(lines, "--@description Insert Excel data into " .. (state.table_name or "dbo.ImportTable"))
+  table.insert(lines, "--@description Insert Excel data into " .. table_name)
+  table.insert(lines, "INSERT INTO " .. table_name)
   table.insert(lines, "SELECT * FROM @input")
 
   return table.concat(lines, "\n")
@@ -758,7 +769,7 @@ function M.preview_xlsx(filepath)
         local cell_lines = {}
         for ci, col in ipairs(result.columns) do
           local val = row[col.name]
-          local is_null = val == nil
+          local is_null = val == nil or val == vim.NIL
           local display = is_null and "NULL" or tostring(val)
           table.insert(cell_lines, {
             lines = { display },

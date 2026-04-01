@@ -73,8 +73,8 @@ function Transfer.prepare_input(context, source_block_name, target_connection_co
   -- Generate temp table name
   local temp_table_name = adapter.get_temp_table_name(source_block_name)
 
-  -- Infer column types from data
-  local columns = TypeMapper.infer_columns(rows, source_result.columns)
+  -- Infer column types from data (pass column_order to preserve source ordering)
+  local columns = TypeMapper.infer_columns(rows, source_result.columns, source_result.column_order)
   columns = TypeMapper.apply_mapping(columns, target_db_type)
 
   -- Create temp table

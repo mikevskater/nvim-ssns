@@ -145,7 +145,7 @@ function EtlExecutor:_substitute_input(sql, block, target_server, target_connect
 
   -- For small same-server datasets, use inline VALUES (faster)
   if not needs_transfer and #rows <= 100 then
-    local values_sql = EtlExecutor._create_values_clause(rows, input_result.columns)
+    local values_sql = EtlExecutor._create_values_clause(rows, input_result.columns, input_result.column_order)
     if values_sql then
       return sql:gsub("@input", "(" .. values_sql .. ") AS _input"), nil
     end
@@ -177,18 +177,40 @@ end
 ---Create a VALUES clause from rows (for small datasets)
 ---@param rows table[]
 ---@param columns table<string, ColumnMeta>
+---@param column_order string[]? Ordered column names (preserves source order)
 ---@return string? values_sql
-function EtlExecutor._create_values_clause(rows, columns)
+function EtlExecutor._create_values_clause(rows, columns, column_order)
   if #rows == 0 then
     return nil
   end
 
-  -- Get column order from first row
+  -- Use provided column order, or extract from columns metadata, or fallback to sorted pairs
   local col_names = {}
-  for col_name, _ in pairs(rows[1]) do
-    table.insert(col_names, col_name)
+  if column_order and #column_order > 0 then
+    for _, name in ipairs(column_order) do
+      table.insert(col_names, name)
+    end
+  elseif columns then
+    -- Try to use index-ordered columns from metadata
+    local indexed = {}
+    for name, meta in pairs(columns) do
+      if meta.index then
+        indexed[meta.index] = name
+      end
+    end
+    if #indexed > 0 then
+      for i = 1, #indexed do
+        if indexed[i] then table.insert(col_names, indexed[i]) end
+      end
+    end
   end
-  table.sort(col_names) -- Consistent order
+  -- Fallback: extract from first row and sort for consistency
+  if #col_names == 0 then
+    for col_name, _ in pairs(rows[1]) do
+      table.insert(col_names, col_name)
+    end
+    table.sort(col_names)
+  end
 
   -- Build SELECT ... UNION ALL ... pattern (more compatible than VALUES)
   local selects = {}
@@ -374,6 +396,10 @@ function EtlExecutor:_execute_lua_block(block)
   -- Check if it's a data() return
   if type(return_value) == "table" and return_value._etl_type == "data" then
     local etl_result = EtlContext.result_from_data(return_value.data, block.name, execution_time_ms)
+    -- Preserve column order from data() call or read_xlsx() result
+    if return_value.column_order then
+      etl_result.column_order = return_value.column_order
+    end
     if #env._log > 0 then
       etl_result.log_output = env._log
     end
@@ -430,11 +456,11 @@ function EtlExecutor:_create_environment(block)
       return { _etl_type = "sql", sql = query_str }
     end,
 
-    data = function(tbl)
+    data = function(tbl, column_order)
       if type(tbl) ~= "table" then
         error("data() requires a table argument", 2)
       end
-      return { _etl_type = "data", data = tbl }
+      return { _etl_type = "data", data = tbl, column_order = column_order }
     end,
 
     ref = function(block_name)

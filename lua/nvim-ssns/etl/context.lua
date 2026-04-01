@@ -415,6 +415,7 @@ function EtlContext.result_from_data(data, block_name, execution_time_ms)
 
   -- Infer columns from first row
   local columns = {}
+  local column_order = {}
   if data[1] then
     local idx = 1
     for col_name, _ in pairs(data[1]) do
@@ -423,6 +424,7 @@ function EtlContext.result_from_data(data, block_name, execution_time_ms)
         type = nil, -- Unknown type from Lua data
         index = idx,
       }
+      table.insert(column_order, col_name)
       idx = idx + 1
     end
   end
@@ -430,6 +432,7 @@ function EtlContext.result_from_data(data, block_name, execution_time_ms)
   return {
     rows = data,
     columns = columns,
+    column_order = column_order,
     row_count = #data,
     rows_affected = nil,
     execution_time_ms = execution_time_ms,

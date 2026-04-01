@@ -40,8 +40,9 @@ end
 ---Infer column types from result data
 ---@param rows table[] Array of row objects
 ---@param existing_columns table<string, ColumnMeta>? Existing column metadata (if available)
+---@param source_column_order string[]? Ordered column names from source (preserves original order)
 ---@return InferredColumn[] columns
-function TypeMapper.infer_columns(rows, existing_columns)
+function TypeMapper.infer_columns(rows, existing_columns, source_column_order)
   if #rows == 0 then
     -- No data - use existing columns or return empty
     if existing_columns then
@@ -69,6 +70,23 @@ function TypeMapper.infer_columns(rows, existing_columns)
   local column_info = {} ---@type table<string, {types: table<string, number>, max_len: number, has_decimal: boolean, has_null: boolean, index: number}>
   local column_order = {}
   local seen_columns = {}
+
+  -- If source column order is provided, use it as the initial order
+  if source_column_order and #source_column_order > 0 then
+    for _, col_name in ipairs(source_column_order) do
+      if not seen_columns[col_name] then
+        seen_columns[col_name] = true
+        table.insert(column_order, col_name)
+        column_info[col_name] = {
+          types = {},
+          max_len = 0,
+          has_decimal = false,
+          has_null = false,
+          index = #column_order,
+        }
+      end
+    end
+  end
 
   for _, row in ipairs(rows) do
     for col_name, value in pairs(row) do
