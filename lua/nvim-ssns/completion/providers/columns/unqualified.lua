@@ -16,6 +16,22 @@ local function format_columns_as_items(sorted_columns, connection, context)
   local Utils = require('nvim-ssns.completion.utils')
   local items = {}
 
+  -- Build inverse alias map: "schema.table" (lowercased) -> alias.
+  -- context.aliases is {alias_lower -> "schema.table"} from build_aliases_map.
+  -- First alias wins on collisions (rare; same table aliased twice is unusual).
+  ---@type table<string, string>
+  local alias_for_table = {}
+  if context and context.aliases then
+    for alias, table_name in pairs(context.aliases) do
+      if type(alias) == "string" and type(table_name) == "string" and table_name ~= "" then
+        local key = table_name:lower()
+        if not alias_for_table[key] then
+          alias_for_table[key] = alias
+        end
+      end
+    end
+  end
+
   for _, col in ipairs(sorted_columns) do
     local item = Utils.format_column({
       name = col.name,
@@ -33,6 +49,15 @@ local function format_columns_as_items(sorted_columns, connection, context)
     if col.table_name then
       local original_detail = item.detail or ""
       item.detail = string.format("%s (%s)", original_detail, col.table_name)
+    end
+
+    -- Qualify the inserted text. If the column's source table has an alias in
+    -- the FROM list, use the alias; otherwise fall back to the schema-qualified
+    -- table path. filterText stays as the bare column name so typing "Cust"
+    -- still narrows to "CustomerID" in the dropdown.
+    if col.table_path and col.table_path ~= "" then
+      local prefix = alias_for_table[col.table_path:lower()] or col.table_path
+      item.insertText = prefix .. "." .. (item.insertText or col.name)
     end
 
     -- Use sortText
@@ -176,12 +201,23 @@ function M.get_all_columns_from_query_async(connection, context, opts)
               weight = BaseProvider.get_usage_weight(connection, "column", column_path)
             end
 
-            -- Extract serializable column data for worker
+            -- Extract serializable column data for worker.
+            -- NOTE: is_primary_key is a METHOD on ColumnClass, not a field — must
+            -- be invoked. A bare `col.is_primary_key` would push a function into
+            -- the worker payload and trip vim.mpack.encode (silently dropping the
+            -- entire columns array via the Serializer.encode fallback path).
+            local is_pk = false
+            if type(col.is_primary_key) == "function" then
+              local ok, result = pcall(col.is_primary_key, col)
+              is_pk = ok and result == true
+            elseif col.is_primary_key == true then
+              is_pk = true
+            end
             table.insert(worker_columns, {
               name = col_name,
               data_type = col.data_type,
               is_nullable = col.is_nullable,
-              is_primary_key = col.is_primary_key,
+              is_primary_key = is_pk,
               ordinal_position = col.ordinal_position,
               weight = weight,
               table_path = table_path,

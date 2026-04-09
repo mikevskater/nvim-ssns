@@ -28,14 +28,23 @@ send({
   message = string.format("Deduplicating %d columns...", total),
 })
 
--- Deduplicate by name, tracking max weight per column
+-- Deduplicate by (table_path, name) so columns with the same name from
+-- different FROM tables (e.g. Orders.CustomerID + Customers.CustomerID in a
+-- JOIN) are both surfaced. Falls back to bare name when table_path is missing
+-- so single-source callers retain the prior behavior.
 local seen = {}
 local unique = {}
-local max_weights = {}  -- Track max weight for each column name
+local max_weights = {}  -- Track max weight per dedupe key
 
 for i, col in ipairs(columns) do
   local name = col.name or ""
-  local key = name:lower()
+  local table_path = col.table_path or ""
+  local key
+  if table_path ~= "" then
+    key = table_path:lower() .. "." .. name:lower()
+  else
+    key = name:lower()
+  end
   local weight = col.weight or 0
 
   if not seen[key] then
@@ -65,10 +74,16 @@ send({
   message = string.format("Computing priorities for %d columns...", #unique),
 })
 
--- Compute priority for each column
+-- Compute priority for each column (use the same composite key as dedupe)
 for i, col in ipairs(unique) do
   local name = col.name or ""
-  local key = name:lower()
+  local table_path = col.table_path or ""
+  local key
+  if table_path ~= "" then
+    key = table_path:lower() .. "." .. name:lower()
+  else
+    key = name:lower()
+  end
   local weight = max_weights[key] or 0
   local is_pk = col.is_primary_key
   local ordinal = 999  -- Default ordinal for deduplicated columns
@@ -95,14 +110,20 @@ send({
   message = string.format("Sorting %d unique columns...", #unique),
 })
 
--- Sort by priority, then by name for stable ordering
+-- Sort by priority, then name, then table_path so same-named columns from
+-- different tables (e.g. JOIN keys) get a deterministic adjacent ordering.
 table.sort(unique, function(a, b)
   if a.priority ~= b.priority then
     return a.priority < b.priority
   end
   local a_name = (a.name or ""):lower()
   local b_name = (b.name or ""):lower()
-  return a_name < b_name
+  if a_name ~= b_name then
+    return a_name < b_name
+  end
+  local a_path = (a.table_path or ""):lower()
+  local b_path = (b.table_path or ""):lower()
+  return a_path < b_path
 end)
 
 send({

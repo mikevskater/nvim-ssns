@@ -5,6 +5,11 @@
 local Serializer = {}
 
 ---Serialize a value to mpack
+---Falls back to an empty table on encode failure so workers always receive valid
+---input, but the fallback is logged loudly because it silently drops the entire
+---payload — every caller is expected to encode round-trippable data, and any hit
+---here is a bug at the call site (e.g., a function reference, userdata, or
+---metatable-bearing object slipped into the worker input).
 ---@param value any Value to serialize
 ---@return string mpack
 function Serializer.encode(value)
@@ -12,7 +17,11 @@ function Serializer.encode(value)
   if ok then
     return encoded
   end
-  -- Fallback for problematic values
+  local Debug = require('nvim-ssns.debug')
+  Debug.log(string.format(
+    "[SERIALIZER] encode FALLBACK — worker will receive empty input. error=%s value_type=%s",
+    tostring(encoded), type(value)
+  ))
   return vim.mpack.encode({})
 end
 
