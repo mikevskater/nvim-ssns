@@ -170,10 +170,13 @@ function SynonymClass:resolve()
         server:load()
       end
 
-      -- Find target database using accessor
+      -- Find target database using accessor (case-insensitive — SQL Server
+      -- catalog names are typically case-insensitive even when the synonym
+      -- definition uses different casing)
+      local target_db_lower = parts.database:lower()
       local databases = server:get_databases()
       for _, db in ipairs(databases) do
-        if db.db_name == parts.database then
+        if db.db_name and db.db_name:lower() == target_db_lower then
           database = db
           break
         end
@@ -202,17 +205,27 @@ function SynonymClass:resolve()
       end
     end
 
-    -- Get objects using database accessor methods
-    local tables = database:get_tables()
-    local views = database:get_views()
-    local procedures = database:get_procedures()
-    local functions = database:get_functions()
-    local synonyms = database:get_synonyms()
+    -- Pass schema_filter to get_X() so the target schema is lazy-loaded.
+    -- Without this, calling get_tables() with no filter only loads the
+    -- default schema (dbo) and synonyms targeting non-default schemas
+    -- across DBs would never be found.
+    local tables = database:get_tables(parts.schema)
+    local views = database:get_views(parts.schema)
+    local procedures = database:get_procedures(parts.schema)
+    local functions = database:get_functions(parts.schema)
+    local synonyms = database:get_synonyms(parts.schema)
+
+    -- Case-insensitive matching: SQL Server catalog names are usually
+    -- case-insensitive even when the synonym definition uses other casing.
+    local target_schema = parts.schema and parts.schema:lower() or nil
+    local target_object = parts.object:lower()
 
     -- Try to find base object matching both schema and name
     -- Check tables first
     for _, table in ipairs(tables) do
-      if table.schema_name == parts.schema and table.table_name == parts.object then
+      local s = table.schema_name and table.schema_name:lower() or nil
+      local n = table.table_name and table.table_name:lower() or nil
+      if s == target_schema and n == target_object then
         self.resolved_object = table
         self.base_object_type = "TABLE"
         self.resolution_loaded = true
@@ -222,7 +235,9 @@ function SynonymClass:resolve()
 
     -- Check views
     for _, view in ipairs(views) do
-      if view.schema_name == parts.schema and view.view_name == parts.object then
+      local s = view.schema_name and view.schema_name:lower() or nil
+      local n = view.view_name and view.view_name:lower() or nil
+      if s == target_schema and n == target_object then
         self.resolved_object = view
         self.base_object_type = "VIEW"
         self.resolution_loaded = true
@@ -232,7 +247,9 @@ function SynonymClass:resolve()
 
     -- Check procedures
     for _, proc in ipairs(procedures) do
-      if proc.schema_name == parts.schema and proc.procedure_name == parts.object then
+      local s = proc.schema_name and proc.schema_name:lower() or nil
+      local n = proc.procedure_name and proc.procedure_name:lower() or nil
+      if s == target_schema and n == target_object then
         self.resolved_object = proc
         self.base_object_type = "PROCEDURE"
         self.resolution_loaded = true
@@ -242,7 +259,9 @@ function SynonymClass:resolve()
 
     -- Check functions
     for _, func in ipairs(functions) do
-      if func.schema_name == parts.schema and func.function_name == parts.object then
+      local s = func.schema_name and func.schema_name:lower() or nil
+      local n = func.function_name and func.function_name:lower() or nil
+      if s == target_schema and n == target_object then
         self.resolved_object = func
         self.base_object_type = "FUNCTION"
         self.resolution_loaded = true
@@ -252,7 +271,9 @@ function SynonymClass:resolve()
 
     -- Check other synonyms (for chaining)
     for _, syn in ipairs(synonyms) do
-      if syn.schema_name == parts.schema and syn.synonym_name == parts.object and syn ~= current then
+      local s = syn.schema_name and syn.schema_name:lower() or nil
+      local n = syn.synonym_name and syn.synonym_name:lower() or nil
+      if s == target_schema and n == target_object and syn ~= current then
         -- Found another synonym - continue chain
         current = syn
         goto continue
@@ -445,7 +466,16 @@ end
 function SynonymClass:get_metadata_info()
   local sections = {}
 
-  -- Synonym target info section
+  -- Resolve the synonym FIRST so base_object_type is populated. Otherwise,
+  -- when the synonym hasn't been expanded in the tree (e.g. opened from a
+  -- SQL buffer via "m"), self.base_object_type is nil and the panel shows
+  -- "(unknown)" even though resolve() would set it correctly.
+  local base_object, error_msg
+  if self.resolve then
+    base_object, error_msg = self:resolve()
+  end
+
+  -- Synonym target info section (use freshly populated base_object_type)
   table.insert(sections, {
     title = "SYNONYM TARGET",
     headers = {"Property", "Value"},
@@ -455,9 +485,8 @@ function SynonymClass:get_metadata_info()
     },
   })
 
-  -- Try to resolve to base object and get its metadata
+  -- Append base object metadata sections (or surface a resolution error)
   if self.resolve then
-    local base_object, error_msg = self:resolve()
     if base_object and base_object.get_metadata_info then
       local base_metadata = base_object:get_metadata_info()
       if base_metadata and base_metadata.sections then

@@ -87,9 +87,10 @@ function ProcedureClass:load_parameters()
   -- Get parameters query from adapter
   local query = adapter:get_parameters_query(db.db_name, self.schema_name, self.procedure_name, "PROCEDURE")
 
-  -- Execute query
-  -- TODO: Implement actual execution via vim-dadbod
-  local results = adapter:execute(self:get_server().connection_config, query)
+  -- Execute against the procedure's own database (cross-DB safe)
+  local conn_cfg = (db and db._get_db_connection_config and db:_get_db_connection_config())
+                   or self:get_server().connection_config
+  local results = adapter:execute(conn_cfg, query)
 
   -- Parse results
   local parameters = adapter:parse_parameters(results)
@@ -145,8 +146,10 @@ function ProcedureClass:load_definition()
   -- Get definition query from adapter
   local query = adapter:get_definition_query(db.db_name, self.schema_name, self.procedure_name, "PROCEDURE")
 
-  -- Execute query
-  local results = adapter:execute(self:get_server().connection_config, query, { use_delimiter = false })
+  -- Execute against the procedure's own database (cross-DB safe)
+  local conn_cfg = (db and db._get_db_connection_config and db:_get_db_connection_config())
+                   or self:get_server().connection_config
+  local results = adapter:execute(conn_cfg, query, { use_delimiter = false })
 
   -- Use adapter's parse method for consistent result handling
   self.definition = adapter:parse_definition(results)

@@ -14,8 +14,22 @@ local QualifiedNames = require('nvim-ssns.completion.context.common.qualified_na
 ---@return string? ctx_type Context type ("column" or nil if not column context)
 ---@return string? mode Sub-mode for provider routing (select, where, on, set, etc.)
 ---@return table extra Extra context info (table_ref, left_side, etc.)
+-- Expression-internal keywords that may appear inside a SELECT-list expression
+-- (e.g. CASE...END, BETWEEN, IS NULL). When we're starting a new list element
+-- (i.e. cursor sits after a comma at depth 0), these keywords don't tell us
+-- which clause we're in — we must walk past them to find the enclosing clause
+-- keyword (SELECT, WHERE, ORDER BY, ...).
+local EXPRESSION_KEYWORDS = {
+  AS = true, ["END"] = true, CASE = true, WHEN = true, THEN = true, ELSE = true,
+  NOT = true, BETWEEN = true, LIKE = true, IS = true, ["NULL"] = true,
+  DISTINCT = true, ASC = true, DESC = true, COLLATE = true, OVER = true,
+  PARTITION = true, IN = true,
+}
+
 function ColumnContext.detect(tokens, line, col)
-  local prev_tokens = Tokens.get_tokens_before_cursor(tokens, line, col, 15)
+  -- Use a generous lookback so multi-line CASE expressions don't push the
+  -- enclosing SELECT keyword out of view.
+  local prev_tokens = Tokens.get_tokens_before_cursor(tokens, line, col, 200)
   if #prev_tokens == 0 then
     return nil, nil, {}
   end
@@ -38,26 +52,37 @@ function ColumnContext.detect(tokens, line, col)
   end
 
   -- Find the most recent keywords in the token stream (paren-depth aware)
-  -- Only consider keywords at the same paren depth as cursor (depth 0)
+  -- Only consider keywords at the same paren depth as cursor (depth 0).
+  -- If we cross a depth-0 comma before finding any keyword, we are starting
+  -- a new list element — skip expression-internal keywords like AS/END/CASE
+  -- belonging to the previous element so we find the enclosing clause keyword.
   local keyword_token = nil
   local keyword_idx = nil
   local second_keyword_token = nil
 
   local paren_depth = 0
+  local saw_comma = false
   for i, t in ipairs(prev_tokens) do
     if t.type == "paren_close" then
       paren_depth = paren_depth + 1
     elseif t.type == "paren_open" then
       paren_depth = paren_depth - 1
+    elseif t.type == "comma" and paren_depth == 0 then
+      saw_comma = true
     end
     -- Only consider keywords at same paren depth as cursor
     if t.type == "keyword" and paren_depth == 0 then
-      if not keyword_token then
-        keyword_token = t
-        keyword_idx = i
-      elseif not second_keyword_token then
-        second_keyword_token = t
-        break
+      local upper = t.text:upper()
+      if saw_comma and EXPRESSION_KEYWORDS[upper] then
+        -- Skip: this keyword belongs to the previous list element's expression
+      else
+        if not keyword_token then
+          keyword_token = t
+          keyword_idx = i
+        elseif not second_keyword_token then
+          second_keyword_token = t
+          break
+        end
       end
     end
   end

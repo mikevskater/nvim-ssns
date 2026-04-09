@@ -137,8 +137,13 @@ function TableClass:load_columns()
   -- Get columns query from adapter
   local query = adapter:get_columns_query(db.db_name, self.schema_name, self.table_name)
 
-  -- Execute query
-  local results = adapter:execute(self:get_server().connection_config, query)
+  -- Execute query against the table's OWN database, not the server's default.
+  -- For cross-DB references (synonym → table in another database), the table's
+  -- parent database differs from connection.database; using the server's
+  -- connection_config would target the wrong DB and return empty results.
+  local conn_cfg = (db._get_db_connection_config and db:_get_db_connection_config())
+                   or self:get_server().connection_config
+  local results = adapter:execute(conn_cfg, query)
 
   -- Check for errors
   if results.error then
@@ -192,9 +197,10 @@ function TableClass:load_indexes()
   -- Get indexes query from adapter
   local query = adapter:get_indexes_query(db.db_name, self.schema_name, self.table_name)
 
-  -- Execute query
-  -- TODO: Implement actual execution via vim-dadbod
-  local results = adapter:execute(self:get_server().connection_config, query)
+  -- Execute against the table's own database (cross-DB safe)
+  local conn_cfg = (db._get_db_connection_config and db:_get_db_connection_config())
+                   or self:get_server().connection_config
+  local results = adapter:execute(conn_cfg, query)
 
   -- Parse results
   local indexes = adapter:parse_indexes(results)
@@ -251,9 +257,10 @@ function TableClass:load_constraints()
   -- Get constraints query from adapter
   local query = adapter:get_constraints_query(db.db_name, self.schema_name, self.table_name)
 
-  -- Execute query
-  -- TODO: Implement actual execution via vim-dadbod
-  local results = adapter:execute(self:get_server().connection_config, query)
+  -- Execute against the table's own database (cross-DB safe)
+  local conn_cfg = (db._get_db_connection_config and db:_get_db_connection_config())
+                   or self:get_server().connection_config
+  local results = adapter:execute(conn_cfg, query)
 
   -- Parse results
   local constraints = adapter:parse_constraints(results)

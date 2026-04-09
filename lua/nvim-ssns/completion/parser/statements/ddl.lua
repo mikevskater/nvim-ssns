@@ -195,22 +195,45 @@ function DdlStatement.parse_drop(state, scope, temp_tables)
       end
     end
 
-    -- Parse the table name
-    local drop_line = state:current() and state:current().line or start_token.line
-    local name_start = state:current()
-    local qualified = QualifiedName.parse(state)
-    local name_end = state.pos > 1 and state.tokens[state.pos - 1] or name_start
+    -- DROP TABLE accepts a comma-separated list of table names, possibly
+    -- spread across multiple lines. Parse each name and track every dropped
+    -- temp table.
+    local last_name_end = nil
+    while state:current() do
+      local name_token = state:current()
+      -- Stop on statement end / new statement
+      if name_token.type == "semicolon" or name_token.type == "go" then
+        break
+      end
+      if name_token.type == "keyword" and Keywords.is_statement_starter(name_token.text) then
+        break
+      end
 
-    -- Track drop_table clause position
-    if qualified then
-      BaseStatement.add_clause_position(chunk, "drop_table", start_token, name_end)
-    end
+      local drop_line = name_token.line
+      local name_start = name_token
+      local qualified = QualifiedName.parse(state)
+      if not qualified then
+        break  -- couldn't parse a name; bail to avoid an infinite loop
+      end
+      local name_end = state.pos > 1 and state.tokens[state.pos - 1] or name_start
+      last_name_end = name_end
 
-    if qualified and Helpers.is_temp_table(qualified.name) then
       -- Mark this temp table as dropped
-      if temp_tables[qualified.name] then
+      if Helpers.is_temp_table(qualified.name) and temp_tables[qualified.name] then
         temp_tables[qualified.name].dropped_at_line = drop_line
       end
+
+      -- Continue on comma; otherwise stop the list
+      if state:is_type("comma") then
+        state:advance()
+      else
+        break
+      end
+    end
+
+    -- Track drop_table clause position covering all dropped names
+    if last_name_end then
+      BaseStatement.add_clause_position(chunk, "drop_table", start_token, last_name_end)
     end
   end
 
@@ -242,47 +265,94 @@ function DdlStatement.parse_declare(state, scope, temp_tables)
   -- Track declare clause position
   BaseStatement.add_clause_position(chunk, "declare", start_token, start_token)
 
-  -- Check for table variable declaration: DECLARE @var TABLE (col1 type, ...)
-  -- Handle both unified "variable" token (@var as single token) and legacy "at" + "identifier"
-  local token = state:current()
-  local var_name = nil
+  -- DECLARE may declare multiple comma-separated variables, e.g.:
+  --   DECLARE @a INT, @b VARCHAR(50), @c DATETIME
+  --   DECLARE @t1 TABLE (id INT), @t2 TABLE (name NVARCHAR(50))
+  -- Walk each declaration so every table variable's column definitions are
+  -- captured (post-parse parameter extraction handles plain @vars regardless).
+  while state:current() do
+    local token = state:current()
 
-  -- New unified variable token type
-  if token and token.type == "variable" then
-    var_name = token.text  -- Already includes @
-    state:advance()
-  -- Legacy handling: @ (type=at) followed by identifier
-  elseif token and token.type == "at" then
-    state:advance()  -- consume @
-    local name_token = state:current()
-    if name_token and name_token.type == "identifier" then
-      var_name = "@" .. name_token.text
-      state:advance()  -- consume variable name
+    -- Stop at semicolon / GO / new statement
+    if token.type == "semicolon" or token.type == "go" then
+      break
     end
-  end
+    if token.type == "keyword" and Keywords.is_statement_starter(token.text) then
+      break
+    end
 
-  -- Check for TABLE keyword (only if we found a valid variable name)
-  if var_name and state:is_keyword("TABLE") then
-    state:advance()  -- consume TABLE
-
-    -- Parse column definitions
-    if state:is_type("paren_open") then
-      local col_start = state:current()
-      local columns = ColumnDefsParser.parse(state)
-      local col_end = state.pos > 1 and state.tokens[state.pos - 1] or col_start
-
-      -- Track column_definitions clause position
-      BaseStatement.add_clause_position(chunk, "column_definitions", col_start, col_end)
-
-      -- Store table variable info
-      if #columns > 0 then
-        temp_tables[var_name] = {
-          name = var_name,
-          columns = columns,
-          created_in_batch = state.go_batch_index,
-          is_table_variable = true,
-        }
+    -- Read variable name (handle both unified "variable" and legacy "at"+"identifier")
+    local var_name = nil
+    if token.type == "variable" then
+      var_name = token.text  -- already includes @
+      state:advance()
+    elseif token.type == "at" then
+      state:advance()  -- consume @
+      local name_token = state:current()
+      if name_token and name_token.type == "identifier" then
+        var_name = "@" .. name_token.text
+        state:advance()
       end
+    else
+      -- Not a variable token where we expected one — bail to avoid an
+      -- infinite loop; consume_until_statement_end below will mop up.
+      break
+    end
+
+    if not var_name then
+      break
+    end
+
+    -- Check for TABLE keyword for table variable declarations
+    if state:is_keyword("TABLE") then
+      state:advance()  -- consume TABLE
+
+      if state:is_type("paren_open") then
+        local col_start = state:current()
+        local columns = ColumnDefsParser.parse(state)
+        local col_end = state.pos > 1 and state.tokens[state.pos - 1] or col_start
+
+        -- Track column_definitions clause position (last one wins; covers
+        -- the most-recent table variable in a multi-declaration statement)
+        BaseStatement.add_clause_position(chunk, "column_definitions", col_start, col_end)
+
+        if #columns > 0 then
+          temp_tables[var_name] = {
+            name = var_name,
+            columns = columns,
+            created_in_batch = state.go_batch_index,
+            is_table_variable = true,
+          }
+        end
+      end
+    else
+      -- Plain variable declaration: skip type and any "= expression" until
+      -- the next comma at depth 0 or the end of the statement.
+      local pdepth = 0
+      while state:current() do
+        local t = state:current()
+        if t.type == "semicolon" or t.type == "go" then break end
+        if pdepth == 0 then
+          if t.type == "comma" then break end
+          if t.type == "keyword" and Keywords.is_statement_starter(t.text) then
+            break
+          end
+        end
+        if t.type == "paren_open" then
+          pdepth = pdepth + 1
+        elseif t.type == "paren_close" then
+          pdepth = pdepth - 1
+          if pdepth < 0 then break end
+        end
+        state:advance()
+      end
+    end
+
+    -- Continue on comma; otherwise the declaration list is finished
+    if state:is_type("comma") then
+      state:advance()
+    else
+      break
     end
   end
 

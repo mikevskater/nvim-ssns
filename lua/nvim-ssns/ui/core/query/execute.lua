@@ -287,6 +287,13 @@ function QueryExecute.execute_query(bufnr, visual)
   -- Make results buffer modifiable for spinner
   vim.api.nvim_buf_set_option(results_bufnr, 'modifiable', true)
   vim.api.nvim_buf_set_lines(results_bufnr, 0, -1, false, {""})
+  -- Invalidate ContentBuilder's diff cache: we just wiped the buffer behind its
+  -- back, so any cached "previous render" state is now a lie. Without this, the
+  -- next display_results() diffs against stale state and produces a partial
+  -- render (missing table rows, stale highlights for prior column layouts).
+  pcall(function()
+    require('nvim-float.content').clear_render_cache(results_bufnr)
+  end)
 
   -- Capture start time for tracking
   local start_time = vim.loop.hrtime()
