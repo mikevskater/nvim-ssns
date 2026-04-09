@@ -357,6 +357,43 @@ function Resolver.resolve_all_tables_in_query(connection, context)
         table.insert(resolved_tables, sq_table)
         seen_tables[table_name_lower] = true
         debug_log(string.format("[RESOLVER] Added subquery '%s' with %d columns (expanded from %d)", table_name, #expanded_sq_columns, #sq_columns))
+      elseif table_info.is_tvf then
+        -- Handle table-valued functions: build a pseudo-table whose get_columns
+        -- calls Resolver.resolve_tvf_columns. Result is cached after first call
+        -- so the dedupe worker / qualification logic see a stable column set.
+        local tvf_function_name = table_info.function_name or table_info.name
+        local tvf_schema = table_info.schema or "dbo"
+        ---@type table[]?
+        local cached_tvf_cols = nil
+        local tvf_table = {
+          name = table_info.name,
+          schema_name = tvf_schema,
+          is_tvf = true,
+          get_columns = function()
+            if cached_tvf_cols then
+              return cached_tvf_cols
+            end
+            local cols = Resolver.resolve_tvf_columns(tvf_function_name, tvf_schema, connection) or {}
+            -- Normalize to the shape format_column expects.
+            local out = {}
+            for _, c in ipairs(cols) do
+              local cname = c.name or c.column_name
+              if cname then
+                table.insert(out, {
+                  name = cname,
+                  column_name = cname,
+                  data_type = c.data_type or c.type or "unknown",
+                  ordinal_position = c.ordinal_position,
+                })
+              end
+            end
+            cached_tvf_cols = out
+            return out
+          end,
+        }
+        table.insert(resolved_tables, tvf_table)
+        seen_tables[table_name_lower] = true
+        debug_log(string.format("[RESOLVER] Added TVF '%s.%s'", tvf_schema, tvf_function_name))
       elseif table_info.is_temp_table then
         -- Handle temp tables (#TempName, ##GlobalTemp) - use pre-stored columns instead of database lookup
         local temp_columns = table_info.columns or {}
